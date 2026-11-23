@@ -1,0 +1,14 @@
+# agent-kit: Larastan (PHPStan for Laravel). Start at level 6, raise over time; never lower it.
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 6
+    paths:
+        - app
+        - config
+        - database
+        - routes
+    tmpDir: storage/framework/cache/phpstan
+    checkModelProperties: true
+    reportUnmatchedIgnoredErrors: true

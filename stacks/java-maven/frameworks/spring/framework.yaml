@@ -1,0 +1,2 @@
+title: Spring Boot — layered/modulith rules, ArchUnit, Flyway
+detect: pom.xml~spring-boot build.gradle~spring-boot build.gradle.kts~spring-boot

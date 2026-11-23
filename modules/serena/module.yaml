@@ -1,0 +1,5 @@
+title: Serena — LSP-based semantic code navigation/refactoring MCP server (rename, find references) via uvx
+default: false
+tools_optional: uvx
+setup_desc: add the "serena" MCP server to .mcp.json
+install_hint: brew install uv   (provides uvx)

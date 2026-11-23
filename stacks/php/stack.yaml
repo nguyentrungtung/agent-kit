@@ -1,0 +1,18 @@
+# Stack profile — flat "key: value". Read by ../../kit. cmd_* end up in .agent/project.yaml.
+title: PHP — PSR-1, PSR-4, PER Coding Style 2.0 (successor of PSR-12), PHPStan, deptrac
+detect: composer.json
+globs: **/*.php
+app_port: 8080
+frameworks: laravel symfony
+tools: php composer
+dev_deps: composer require --dev --no-interaction friendsofphp/php-cs-fixer phpstan/phpstan phpstan/phpstan-strict-rules deptrac/deptrac phpunit/phpunit
+cmd_install: composer install --no-interaction --prefer-dist
+cmd_format: vendor/bin/php-cs-fixer fix
+cmd_format_check: vendor/bin/php-cs-fixer fix --dry-run --diff
+cmd_lint: composer validate --strict --no-check-publish
+cmd_typecheck: vendor/bin/phpstan analyse --no-progress
+cmd_arch: vendor/bin/deptrac analyse --no-progress
+cmd_test: vendor/bin/phpunit
+cmd_build:
+cmd_audit: composer audit
+post_note: check composer.json "autoload.psr-4" maps your root namespace to src/ (PSR-4), then run kit-run format to normalise the codebase in ONE separate commit.

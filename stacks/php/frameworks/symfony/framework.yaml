@@ -1,0 +1,5 @@
+title: Symfony — @Symfony CS ruleset, PHPStan + phpstan-symfony, deptrac
+detect: symfony.lock composer.json~symfony/framework-bundle
+dev_deps: composer require --dev --no-interaction friendsofphp/php-cs-fixer phpstan/phpstan phpstan/phpstan-strict-rules phpstan/phpstan-symfony deptrac/deptrac symfony/test-pack
+cmd_lint: composer validate --strict --no-check-publish && php bin/console lint:container && php bin/console lint:yaml config --parse-tags && php bin/console lint:twig templates
+cmd_test: php bin/phpunit

@@ -1,0 +1,5 @@
+title: React (+ Vite/Next) — hooks rules, a11y
+detect: package.json~"react"
+dev_deps_add: npm install -D eslint-plugin-react-hooks eslint-plugin-jsx-a11y
+app_port: 8080
+no_backing_services: true

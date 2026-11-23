@@ -1,0 +1,16 @@
+title: Rust — rustfmt, clippy (-D warnings, pedantic as warn), Rust API Guidelines, cargo-deny
+detect: Cargo.toml
+globs: **/*.rs
+app_port: 8080
+tools: cargo cargo-deny
+dev_deps:
+cmd_install: cargo fetch
+cmd_format: cargo fmt --all
+cmd_format_check: cargo fmt --all --check
+cmd_lint: cargo clippy --all-targets --all-features -- -D warnings
+cmd_typecheck: cargo check --all-targets
+cmd_arch:
+cmd_test: cargo test --all-features
+cmd_build: cargo build --release
+cmd_audit: cargo deny check
+post_note: merge .agent/stack/rust/snippets/Cargo-lints.toml into Cargo.toml; install cargo-deny: cargo install cargo-deny --locked

@@ -1,0 +1,17 @@
+title: Java (Maven) — Google Java Style (google-java-format via Spotless), Checkstyle, Error Prone-ready, ArchUnit
+detect: pom.xml
+globs: **/*.java
+app_port: 8080
+frameworks: spring
+tools: java
+dev_deps:
+cmd_install: ./mvnw -B -q -DskipTests dependency:resolve
+cmd_format: ./mvnw -B -q spotless:apply
+cmd_format_check: ./mvnw -B -q spotless:check
+cmd_lint: ./mvnw -B -q checkstyle:check
+cmd_typecheck: ./mvnw -B -q -DskipTests compile
+cmd_arch: ./mvnw -B -q test -Dtest='*ArchitectureTest' -Dsurefire.failIfNoSpecifiedTests=false
+cmd_test: ./mvnw -B test
+cmd_build: ./mvnw -B -DskipTests package
+cmd_audit: ./mvnw -B -q org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7
+post_note: merge .agent/stack/java-maven/snippets/pom-plugins.xml into pom.xml and copy ArchitectureTest.java into src/test/java/<base package>/ (the kit-onboard playbook does this).

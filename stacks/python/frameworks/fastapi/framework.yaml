@@ -1,0 +1,2 @@
+title: FastAPI — Pydantic v2 at the edges, dependency injection, async-safe I/O
+detect: pyproject.toml~fastapi requirements.txt~fastapi

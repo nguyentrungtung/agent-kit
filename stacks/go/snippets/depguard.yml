@@ -1,0 +1,10 @@
+# agent-kit: add under linters.enable (depguard) and linters.settings in .golangci.yml to enforce layers
+depguard:
+  rules:
+    domain:
+      files: ["**/internal/domain/**"]
+      deny:
+        - pkg: "net/http"
+          desc: domain must not depend on transport
+        - pkg: "database/sql"
+          desc: domain must not depend on persistence

@@ -1,0 +1,33 @@
+---
+name: kit-onboard
+description: Onboard an EXISTING codebase into agent-kit — analyze the repo, fill PROJECT/ARCHITECTURE/CONVENTIONS/GLOSSARY, verify project commands, record a baseline. Use when .agent/context/PROJECT.md still has TODOs or the user says "onboard this project".
+---
+# kit-onboard — make an existing project agent-ready
+
+Goal: after this, any fresh session can work correctly by reading `.agent/` only. Do NOT change product code here.
+
+## Steps
+1. **Branch:** `kit-task new "Onboard project into agent-kit" --type docs` → `kit-task start <id>`.
+2. **Survey cheaply** (delegate to the `explorer` sub-agent if available; ask it for a ≤ 80-line summary):
+   - README, build files, CI config, Dockerfiles, `.env.example`/config loaders, folder tree (depth 3), entry points, test layout.
+   - Prefer codegraph / LSP / `git ls-files | head` / grep over opening whole files. Never open `.env`.
+3. **Fill context files** (in `docs_language`, concise, link to paths):
+   - `.agent/context/PROJECT.md` — description, goals, users, constraints, current stage. Unknown business facts → write them under "Open questions", do not invent.
+   - `.agent/context/ARCHITECTURE.md` — modules table with paths and allowed dependencies, data stores, integrations, mermaid diagram.
+   - `.agent/context/CONVENTIONS.md` — fill "Observed in code": where the code differs from `.agent/rules/stack/*.md` (naming, layering, error/logging, tests).
+   - `.agent/rules/project/` — module boundaries and domain rules found in code (one file per topic, each rule + enforcing tool).
+   - `.agent/context/GLOSSARY.md` — domain terms found in code.
+4. **Wire the quality tools**: run `.agent/scripts/kit-doctor`. Merge every snippet in `.agent/stack/<stack>/snippets/`
+   (e.g. Maven/Gradle plugins, ArchitectureTest with the real base package, tsconfig strict flags, Cargo lints) and adapt
+   tool configs to the real folder layout (paths in phpstan/deptrac/dependency-cruiser…). Never relax a rule to get green — record debt instead.
+   Format-only changes (`kit-run format`) go in ONE separate commit `style: apply <formatter>`.
+   Verify commands in `.agent/project.yaml`: run each `kit-run <step>` (install, format_check, lint, typecheck, arch, test, build, audit).
+   - Fix wrong commands (the user will be asked to approve edits to project.yaml). Missing tool → leave empty + note.
+   - Record what fails today as **baseline debt** (don't fix it now).
+5. **Baseline report** → `docs/daily/<YYYY-MM>/<today>.md` via `kit-daily`, plus a "Baseline" section: test count/result, lint warnings count, audit findings, secrets scan result, top 5 risks/tech-debt items.
+6. **Seed the backlog:** create tasks for the top risks (`kit-task new … --type chore|fix`), add them to `docs/plan/ROADMAP.md`.
+7. **Project rules:** add ≤ 15 project-specific lines to AGENTS.md §7 (e.g. "all DB access through repository layer").
+8. **Update `STATE.md`**, checkpoint, `kit-task finish`. Ask the human the open questions in one list.
+
+## Done when
+No `TODO` left in `.agent/context/*` (except explicit open questions), every `kit-run` step either passes or is documented as baseline debt.

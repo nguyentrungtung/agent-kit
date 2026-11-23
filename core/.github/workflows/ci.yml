@@ -1,0 +1,80 @@
+# agent-kit CI — quality + security gate for every PR. Make these checks REQUIRED in branch protection.
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: guard (secrets, branch, commits)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Install gitleaks
+        run: |
+          v=8.21.2
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${v}/gitleaks_${v}_linux_x64.tar.gz" | tar -xz -C /usr/local/bin gitleaks
+      - name: Secrets + forbidden files (whole repo)
+        run: .agent/scripts/kit-secrets-scan --all
+      - name: Secrets in PR history
+        if: github.event_name == 'pull_request'
+        run: gitleaks detect --no-banner --redact --log-opts="origin/${{ github.base_ref }}..HEAD"
+      - name: Branch naming
+        if: github.event_name == 'pull_request'
+        run: |
+          b="${{ github.head_ref }}"
+          echo "$b" | grep -Eq '^(feature|fix|hotfix|refactor|chore|docs|test|release|revert)/' \
+            || { echo "::error::branch '$b' must be <type>/TASK-NNN-slug"; exit 1; }
+      - name: Conventional commits
+        if: github.event_name == 'pull_request'
+        run: |
+          types="$(sed -n 's/^commit_types:[[:space:]]*//p' .agent/project.yaml)"
+          bad=0
+          while IFS= read -r s; do
+            case "$s" in Merge\ *|Revert\ *) continue ;; esac
+            echo "$s" | grep -Eq "^(${types})(\([A-Za-z0-9._/-]+\))?!?: .{3,}" || { echo "::error::bad commit subject: $s"; bad=1; }
+          done < <(git log --format=%s "origin/${{ github.base_ref }}..HEAD")
+          exit $bad
+
+  quality:
+    name: quality (format, lint, types, tests, build)
+    runs-on: ubuntu-latest
+    needs: guard
+    steps:
+      - uses: actions/checkout@v4
+# @@SETUP@@
+      - run: .agent/scripts/kit-run install
+      - run: .agent/scripts/kit-run format_check lint typecheck
+      - run: .agent/scripts/kit-run arch
+      - run: .agent/scripts/kit-run test
+      - run: .agent/scripts/kit-run build
+      - name: Diagrams render (docs)
+        run: .agent/scripts/kit-run docs
+
+  security:
+    name: security (SAST + dependencies)
+    runs-on: ubuntu-latest
+    needs: guard
+    steps:
+      - uses: actions/checkout@v4
+      - name: SAST (semgrep)
+        run: |
+          pip install --quiet semgrep
+          semgrep scan --config p/default --config p/secrets --severity ERROR --error --metrics=off
+      - name: Dependency & IaC scan (trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'

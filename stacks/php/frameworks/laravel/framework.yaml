@@ -1,0 +1,7 @@
+title: Laravel — Pint (laravel preset), Larastan, deptrac
+detect: artisan composer.json~laravel/framework
+dev_deps: composer require --dev --no-interaction laravel/pint larastan/larastan deptrac/deptrac
+cmd_format: vendor/bin/pint
+cmd_format_check: vendor/bin/pint --test
+cmd_test: php artisan test
+exclude_files: .php-cs-fixer.dist.php

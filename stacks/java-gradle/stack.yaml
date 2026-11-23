@@ -1,0 +1,18 @@
+title: Java (Gradle) — same rules as java-maven; Spotless + Checkstyle + ArchUnit via Gradle
+inherit: java-maven
+detect: build.gradle build.gradle.kts
+globs: **/*.java **/*.kt
+app_port: 8080
+frameworks: spring
+tools: java
+dev_deps:
+cmd_install: ./gradlew --no-daemon -q dependencies
+cmd_format: ./gradlew --no-daemon spotlessApply
+cmd_format_check: ./gradlew --no-daemon spotlessCheck
+cmd_lint: ./gradlew --no-daemon checkstyleMain checkstyleTest
+cmd_typecheck: ./gradlew --no-daemon compileJava compileTestJava
+cmd_arch: ./gradlew --no-daemon test --tests '*ArchitectureTest'
+cmd_test: ./gradlew --no-daemon test
+cmd_build: ./gradlew --no-daemon build -x test
+cmd_audit: ./gradlew --no-daemon dependencyCheckAnalyze
+post_note: merge .agent/stack/java-gradle/snippets/build.gradle.kts into your build script and copy ArchitectureTest.java into src/test/java/<base package>/.

@@ -1,0 +1,14 @@
+# agent-kit: PHPStan level 8 + strict + Symfony extension (container-aware).
+includes:
+    - vendor/phpstan/phpstan-strict-rules/rules.neon
+    - vendor/phpstan/phpstan-symfony/extension.neon
+
+parameters:
+    level: 8
+    paths:
+        - src
+        - tests
+    tmpDir: var/cache/phpstan
+    symfony:
+        containerXmlPath: var/cache/dev/App_KernelDevDebugContainer.xml
+    reportUnmatchedIgnoredErrors: true

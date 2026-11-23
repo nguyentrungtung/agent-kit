@@ -1,0 +1,362 @@
+#!/usr/bin/env bash
+# kit-task — task lifecycle with gitflow branches, checkpoints and safe rollback
+#
+#   kit-task new "<title>" [--type feature|fix|hotfix|refactor|chore|docs|test] [--priority P1|P2|P3]
+#   kit-task start <TASK-ID> [--worktree]  create <type>/<TASK-ID>-<slug> from develop (hotfix: from main), tag base
+#                                     --worktree: in a separate git worktree ../<repo>-<TASK-ID> (parallel agents)
+#   kit-task worktrees                list task worktrees
+#   kit-task cleanup <TASK-ID>        remove the task's worktree (refuses if it has uncommitted work)
+#   kit-task sync-gh [TASK-ID|--all]  create/update GitHub issues from task files (labels, close when done)
+#   kit-task pull-gh <issue#>         create a task file from a GitHub issue
+#   kit-task checkpoint "<msg>"       commit all work + tag kit/<id>/cp-N  (a restore point)
+#   kit-task rollback [--to base|cp-N] reset current task branch to a restore point (backup branch kept)
+#   kit-task points                   list restore points of the current task
+#   kit-task finish                   run checks, push, open PR to develop (or main for hotfix)
+#   kit-task merged <TASK-ID>         after the PR is merged: tag the merge commit (enables revert)
+#   kit-task revert <TASK-ID>         undo a merged task: create revert branch + PR
+#   kit-task abandon                  drop the current task branch (backup branch kept)
+#   kit-task status | list
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+mkdir -p "$KIT_TASKS"
+
+has_remote() { git remote | grep -qx "${KIT_REMOTE:-origin}"; }
+remote() { printf '%s' "${KIT_REMOTE:-origin}"; }
+require_clean() {
+  git diff --quiet && git diff --cached --quiet || die "working tree has uncommitted changes — run: kit-task checkpoint \"<msg>\" (or stash) first"
+}
+require_task_branch() {
+  local id; id="$(task_from_branch)"
+  [ -n "$id" ] || die "not on a task branch (expected <type>/TASK-NNN-slug). Current: $(current_branch)"
+  is_protected "$(current_branch)" && die "refusing to operate on protected branch $(current_branch)"
+  printf '%s' "$id"
+}
+slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-40 | sed -E 's/-+$//'; }
+log_progress() { # log_progress <file> <text>
+  local f="$1"; shift
+  if grep -q '^## Progress log' "$f"; then
+    awk -v line="- $(now) — $*" '{print} /^## Progress log/{print line}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  else printf '\n## Progress log\n- %s — %s\n' "$(now)" "$*" >> "$f"; fi
+}
+base_for_type() { [ "$1" = hotfix ] && main_branch || develop_branch; }
+next_cp() { local n; n="$(git tag -l "kit/$1/cp-*" | sed 's/.*cp-//' | sort -n | tail -n1 || true)"; echo $(( ${n:-0} + 1 )); }
+
+# is_merged <task-file> — true if the task's branch tip is contained in develop or main
+is_merged() {
+  local br tip; br="$(fm_get "$1" branch)"; [ -n "$br" ] || return 1
+  tip="$(git rev-parse -q --verify "refs/heads/$br" || git rev-parse -q --verify "refs/remotes/$(remote)/$br" || true)"
+  [ -n "$tip" ] || return 1
+  git merge-base --is-ancestor "$tip" "$(develop_branch)" 2>/dev/null || git merge-base --is-ancestor "$tip" "$(main_branch)" 2>/dev/null
+}
+
+# Mark review tasks that are merged as done. Writes files → only called right before a commit (kit-task start).
+sync_done() {
+  local f
+  for f in "$KIT_TASKS"/TASK-*.md; do
+    [ -f "$f" ] || continue
+    [ "$(fm_get "$f" status)" = review ] && is_merged "$f" || continue
+    fm_set "$f" status "done"; fm_set "$f" "done" "$(today)"; info "$(basename "$f" .md) → done (merged)"
+  done
+}
+
+cmd_new() {
+  local title="" type=feature prio=P2
+  while [ $# -gt 0 ]; do case "$1" in
+    --type) type="$2"; shift 2 ;; --priority) prio="$2"; shift 2 ;; *) title="${title:+$title }$1"; shift ;;
+  esac; done
+  [ -n "$title" ] || die 'usage: kit-task new "<title>" [--type feature] [--priority P2]'
+  local last n id f
+  last="$( (ls "$KIT_TASKS" 2>/dev/null | grep -oE '^TASK-[0-9]+' || true) | sed 's/TASK-//' | sort -n | tail -n1)"
+  n=$(( 10#${last:-0} + 1 )); id="$(printf 'TASK-%03d' "$n")"
+  f="$KIT_TASKS/$id-$(slugify "$title").md"
+  local t_esc; t_esc="$(printf '%s' "$title" | sed 's/[\/&|]/\\&/g')"
+  sed -e "s/{{ID}}/$id/g" -e "s/{{TITLE}}/$t_esc/g" -e "s/{{TYPE}}/$type/g" -e "s/{{PRIORITY}}/$prio/g" -e "s/{{DATE}}/$(today)/g" \
+    "$KIT_TASKS/_TEMPLATE.md" > "$f"
+  info "created $f"
+  echo "$id"
+}
+
+cmd_start() {
+  local id="" wt=0
+  while [ $# -gt 0 ]; do case "$1" in --worktree|-w) wt=1; shift ;; *) id="$1"; shift ;; esac; done
+  [ -n "$id" ] || die "usage: kit-task start TASK-NNN [--worktree]"
+  local f; f="$(task_file "$id")"; [ -f "$f" ] || die "task file for $id not found in .agent/tasks"
+  local type base br
+  type="$(fm_get "$f" type)"; type="${type:-feature}"
+  base="$(base_for_type "$type")"
+  git show-ref --verify -q "refs/heads/$base" || die "base branch '$base' missing (run install or: git branch $base $(main_branch))"
+  if [ $wt -eq 1 ]; then start_worktree "$id" "$f" "$type" "$base"; return; fi
+  require_clean
+  br="$(fm_get "$f" branch)"
+  if [ -n "$br" ] && git show-ref --verify -q "refs/heads/$br"; then
+    git checkout -q "$br"; info "resumed $br"; return
+  fi
+  git checkout -q "$base"
+  if has_remote; then git pull -q --ff-only "$(remote)" "$base" 2>/dev/null || warn "could not fast-forward $base from remote (offline?)"; fi
+  sync_done
+  br="$type/$id-$(slugify "$(fm_get "$f" title)")"
+  git checkout -q -b "$br"
+  git tag -f "kit/$id/base" >/dev/null
+  fm_set "$f" status in-progress; fm_set "$f" branch "$br"; fm_set "$f" started "$(today)"
+  log_progress "$f" "started on $br (base: $base @ $(git rev-parse --short HEAD))"
+  git add -A "$KIT_TASKS"
+  git commit -q -m "chore($id): start task" || true
+  info "on $br — restore point kit/$id/base created"
+}
+
+wt_path_for() { # existing worktree path whose branch contains <id>
+  git worktree list --porcelain | awk -v id="$1" '/^worktree /{p=substr($0,10)} /^branch /{ if (index($0, "/" id "-")) print p }' | head -n1
+}
+
+start_worktree() { # start_worktree <id> <task-file> <type> <base>
+  local id="$1" f="$2" type="$3" base="$4" br path rel from
+  path="$(wt_path_for "$id")"
+  if [ -n "$path" ]; then info "worktree already exists: $path"; echo "$path"; return; fi
+  br="$(task_branch "$id")"; case "$br" in */*/*) br="${br#*/}" ;; esac   # remote name → local
+  [ -n "$br" ] || br="$type/$id-$(slugify "$(fm_get "$f" title)")"
+  path="$(dirname "$KIT_ROOT")/$(basename "$KIT_ROOT")-$id"
+  [ -e "$path" ] && die "$path already exists — move it away or remove it first"
+  from="$base"
+  if has_remote; then
+    git fetch -q "$(remote)" "$base" 2>/dev/null || warn "could not fetch $base (offline?)"
+    git rev-parse -q --verify "refs/remotes/$(remote)/$base" >/dev/null && from="$(remote)/$base"
+  fi
+  if git show-ref --verify -q "refs/heads/$br"; then git worktree add -q "$path" "$br"
+  else git worktree add -q -b "$br" "$path" "$from"; git -C "$path" tag -f "kit/$id/base" >/dev/null; fi
+  rel="${f#"$KIT_ROOT"/}"
+  [ -f "$path/$rel" ] || { mkdir -p "$(dirname "$path/$rel")"; cp "$f" "$path/$rel"; }
+  fm_set "$path/$rel" status in-progress; fm_set "$path/$rel" branch "$br"
+  fm_set "$path/$rel" worktree "../$(basename "$path")"; fm_set "$path/$rel" started "$(today)"
+  log_progress "$path/$rel" "started in worktree ../$(basename "$path") on $br (base: $from)"
+  ( cd "$path" && git add -A .agent/tasks && git commit -q -m "chore($id): start task (worktree)" ) || true
+  info "worktree ready: $path  (branch $br, restore point kit/$id/base)"
+  info "next: cd $path && .agent/scripts/kit-run install   — then open a NEW agent session in that folder"
+  echo "$path"
+}
+
+cmd_worktrees() {
+  git worktree list | while IFS= read -r l; do
+    id="$(printf '%s' "$l" | grep -oE 'TASK-[0-9]+' | head -n1 || true)"
+    if [ -n "$id" ]; then printf '%s  [%s]\n' "$l" "$(git -C "$(printf '%s' "$l" | awk '{print $1}')" status --porcelain | wc -l | tr -d ' ') dirty"; else printf '%s  (main)\n' "$l"; fi
+  done
+}
+
+cmd_cleanup() {
+  local id="${1:-}"; [ -n "$id" ] || die "usage: kit-task cleanup TASK-NNN"
+  local path br; path="$(wt_path_for "$id")"; [ -n "$path" ] || die "no worktree for $id (kit-task worktrees)"
+  [ "$path" = "$KIT_ROOT" ] && die "you are inside that worktree — run cleanup from the main checkout"
+  [ -z "$(git -C "$path" status --porcelain)" ] || die "$path has uncommitted work — checkpoint or abandon it first"
+  br="$(git -C "$path" rev-parse --abbrev-ref HEAD)"
+  git worktree remove "$path" && info "removed worktree $path (branch $br kept$(branch_merged "$br" && echo ', merged'))"
+}
+
+cmd_checkpoint() {
+  local id msg="${1:-wip}"; id="$(require_task_branch)"
+  if git diff --quiet && git diff --cached --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+    info "nothing to checkpoint"; return
+  fi
+  local n; n="$(next_cp "$id")"
+  log_progress "$(task_file "$id")" "checkpoint cp-$n: $msg"
+  git add -A
+  git commit -q -m "chore($id): checkpoint $n - $msg" || die "commit blocked (see hook output above)"
+  git tag -f "kit/$id/cp-$n" >/dev/null
+  if [ "$(cfg push_checkpoints true)" = true ] && has_remote; then
+    if git push -q -u "$(remote)" "$(current_branch)" 2>/dev/null; then info "pushed backup to $(remote)"; else warn "push failed (offline?) — checkpoint is local only"; fi
+  fi
+  info "restore point kit/$id/cp-$n"
+}
+
+cmd_points() {
+  local id; id="$(require_task_branch)"
+  git for-each-ref --sort=creatordate --format='%(refname:short)  %(creatordate:short)  %(subject)' "refs/tags/kit/$id/"
+}
+
+cmd_rollback() {
+  local id to=""; id="$(require_task_branch)"
+  [ "${1:-}" = --to ] && to="${2:-}"
+  local tag
+  if [ -z "$to" ]; then
+    # default: latest checkpoint; if HEAD already sits on it (nothing after it), go one further back
+    local cps; cps="$(git tag -l "kit/$id/cp-*" | sort -t- -k3 -n)"
+    tag="$(printf '%s\n' "$cps" | tail -n1)"
+    if [ -n "$tag" ] && [ "$(git rev-parse "$tag^{commit}")" = "$(git rev-parse HEAD)" ] && git diff --quiet && git diff --cached --quiet; then
+      tag="$(printf '%s\n' "$cps" | tail -n2 | sed -n '1p')"
+      [ "$(printf '%s\n' "$cps" | grep -c .)" -ge 2 ] || tag=""
+    fi
+    [ -n "$tag" ] || tag="kit/$id/base"
+  else
+    tag="kit/$id/$to"
+  fi
+  git rev-parse -q --verify "refs/tags/$tag" >/dev/null || die "restore point $tag not found (see: kit-task points)"
+  local backup; backup="backup/$id-$(date +%Y%m%d-%H%M%S)"
+  if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+    git stash push -u -q -m "kit-rollback $id $(now)" && warn "uncommitted work stashed (git stash list)"
+  fi
+  git branch "$backup" HEAD
+  git reset -q --hard "$tag"
+  local f; f="$(task_file "$id")"
+  [ -f "$f" ] && log_progress "$f" "ROLLBACK to $tag (previous HEAD saved as $backup)"
+  info "rolled back to $tag. Previous state kept in branch $backup"
+}
+
+cmd_finish() {
+  local id; id="$(require_task_branch)"
+  require_clean
+  info "running quality gate: kit-run check"
+  "$KIT_DIR/scripts/kit-run" check || die "checks failed — fix before finishing"
+  local f type base br title
+  f="$(task_file "$id")"; type="$(fm_get "$f" type)"; base="$(base_for_type "${type:-feature}")"
+  br="$(current_branch)"; title="$(fm_get "$f" title)"
+  fm_set "$f" status review
+  log_progress "$f" "finished, PR to $base"
+  git add -A "$KIT_TASKS"; git commit -q -m "chore($id): ready for review" || true
+  if ! has_remote; then warn "no remote: merge manually → git checkout $base && git merge --no-ff $br"; return; fi
+  git push -q -u "$(remote)" "$br"
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    local body; body="$(mktemp)"
+    local issue; issue="$(issue_of "$id" "$(cat "$f")")"
+    { echo "Task: \`$id\` — $title"; echo; [ -n "$issue" ] && { echo "Closes #$issue"; echo; }; echo "Task file: \`${f#"$KIT_ROOT"/}\`"; echo
+      sed -n '/^## Acceptance criteria/,/^## /p' "$f" | sed '$d'; echo
+      cat "$KIT_ROOT/.github/PULL_REQUEST_TEMPLATE.md" 2>/dev/null; } > "$body"
+    gh pr create --base "$base" --head "$br" --title "${type:-feature}($id): $title" --body-file "$body" || warn "gh pr create failed — open the PR manually"
+    rm -f "$body"
+  else
+    warn "gh not available/authenticated — open a PR: $br → $base"
+  fi
+}
+
+find_merge_commit() { # find_merge_commit <id>
+  local id="$1" c
+  c="$(git rev-parse -q --verify "refs/tags/kit/$id/merged" 2>/dev/null || true)"
+  [ -n "$c" ] && { echo "$c"; return; }
+  for b in "$(develop_branch)" "$(main_branch)"; do
+    c="$(git log "$b" --first-parent --format=%H --grep="$id" -n1 2>/dev/null || true)"
+    [ -n "$c" ] && { echo "$c"; return; }
+  done
+}
+
+cmd_merged() {
+  local id="${1:-}"; [ -n "$id" ] || die "usage: kit-task merged TASK-NNN"
+  has_remote && git fetch -q "$(remote)" 2>/dev/null || true
+  local c; c="$(find_merge_commit "$id")"
+  [ -n "$c" ] || die "no commit mentioning $id on $(develop_branch)/$(main_branch) first-parent history — is the PR merged and pulled?"
+  git tag -f "kit/$id/merged" "$c" >/dev/null
+  info "tagged kit/$id/merged → $(git log -1 --format='%h %s' "$c")"
+}
+
+cmd_revert() {
+  local id="${1:-}"; [ -n "$id" ] || die "usage: kit-task revert TASK-NNN"
+  require_clean
+  local c; c="$(find_merge_commit "$id")"; [ -n "$c" ] || die "cannot find merge commit for $id (run: kit-task merged $id)"
+  local base; base="$(develop_branch)"
+  git checkout -q "$base"; has_remote && git pull -q --ff-only "$(remote)" "$base" 2>/dev/null || true
+  local br="revert/$id-$(date +%Y%m%d%H%M)"
+  git checkout -q -b "$br"
+  if [ "$(git rev-list --parents -n1 "$c" | wc -w)" -gt 2 ]; then git revert --no-edit -m 1 "$c"; else git revert --no-edit "$c"; fi
+  info "revert commit created on $br. Run checks, then push + PR to $base (kit-task finish is for TASK branches; use: git push -u origin $br)"
+}
+
+cmd_abandon() {
+  local id; id="$(require_task_branch)"
+  local br backup; br="$(current_branch)"; backup="backup/$id-abandoned-$(date +%Y%m%d-%H%M%S)"
+  git add -A && git commit -q -m "chore($id): wip before abandon" 2>/dev/null || true
+  git branch -m "$br" "$backup"
+  git checkout -q "$(base_for_type "$(fm_get "$(task_file "$id")" type)")"
+  info "abandoned. Work kept in $backup; task file on this branch is untouched (status unchanged)"
+}
+
+gh_ready() {
+  command -v gh >/dev/null 2>&1 || die "GitHub CLI (gh) not installed"
+  gh auth status >/dev/null 2>&1 || die "gh not authenticated — run: gh auth login"
+}
+issue_body() { # issue_body <task-content> <file-name>
+  printf '%s\n' "$1" | awk '/^## Goal/{p=1} /^## (Context|Out of scope|Plan|Test cases|Risks|Progress log|Handoff)/{p=0} /^## Acceptance criteria/{p=1} p'
+  printf '\n---\nTask file: `.agent/tasks/%s` · synced by agent-kit (edit the task file, not this issue body)\n' "$2"
+}
+ensure_labels() {
+  local l
+  for l in "status:todo:ededed" "status:in-progress:fbca04" "status:review:1d76db" "status:done:0e8a16" "status:abandoned:b60205" \
+           "type:feature:a2eeef" "type:fix:d73a4a" "type:hotfix:b60205" "type:refactor:c5def5" "type:chore:ededed" "type:docs:0075ca" "type:test:bfd4f2" \
+           "priority:P1:b60205" "priority:P2:fbca04" "priority:P3:c2e0c6"; do
+    gh label create "${l%:*}" --color "${l##*:}" --force >/dev/null 2>&1 || true
+  done
+}
+
+cmd_sync_gh() {
+  gh_ready
+  local sel="${1:---all}" name c id title st type prio issue body n url changed=0 proj
+  proj="$(cfg gh_project)"
+  ensure_labels
+  for name in $(task_names_all); do
+    id="$(printf '%s' "$name" | grep -oE '^TASK-[0-9]+')"
+    [ "$sel" = --all ] || [ "$sel" = "$id" ] || continue
+    c="$(task_view "$name")"; [ -n "$c" ] || continue
+    title="$(fmv "$c" title)"; st="$(task_effective_status "$c")"; type="$(fmv "$c" type)"; prio="$(fmv "$c" priority)"; issue="$(issue_of "$id" "$c")"
+    body="$(mktemp)"; issue_body "$c" "$name" > "$body"
+    if [ -z "$issue" ]; then
+      url="$(gh issue create --title "[$id] $title" --body-file "$body" --label "status:$st" --label "type:${type:-feature}" --label "priority:${prio:-P2}")" || { warn "$id: issue create failed"; rm -f "$body"; continue; }
+      n="${url##*/}"
+      issue_set "$id" "$n"; changed=1
+      info "$id → created #$n"
+      [ -n "$proj" ] && { gh project item-add "${proj#*/}" --owner "${proj%/*}" --url "$url" >/dev/null 2>&1 || warn "$id: could not add to project $proj"; }
+    else
+      n="$issue"
+      gh issue edit "$n" --title "[$id] $title" --body-file "$body" --add-label "status:$st,type:${type:-feature},priority:${prio:-P2}" \
+         --remove-label "$(printf 'status:%s,' todo in-progress review done abandoned | sed "s/status:$st,//; s/,$//")" >/dev/null 2>&1 || warn "$id: issue edit #$n failed"
+      case "$st" in
+        done|abandoned) gh issue close "$n" --reason "$( [ "$st" = done ] && echo completed || echo 'not planned')" >/dev/null 2>&1 || true ;;
+        *) [ "$(gh issue view "$n" --json state -q .state 2>/dev/null)" = CLOSED ] && gh issue reopen "$n" >/dev/null 2>&1 || true ;;
+      esac
+      info "$id → #$n [$st]"
+    fi
+    rm -f "$body"
+  done
+  [ $changed -eq 0 ] || warn "new issue links saved in .agent/tasks/.issues — commit that file (it is never edited on task branches, so no merge conflicts)"
+}
+
+cmd_pull_gh() {
+  gh_ready
+  local n="${1:-}"; n="${n#\#}"; [ -n "$n" ] || die "usage: kit-task pull-gh <issue-number>"
+  local existing; existing="$(sed -n "s/=$n\$//p" "$ISSUE_MAP" 2>/dev/null | head -n1)"
+  [ -n "$existing" ] || existing="$(grep -l "^issue: $n\$" "$KIT_TASKS"/TASK-*.md 2>/dev/null | head -n1 || true)"
+  [ -z "$existing" ] || die "issue #$n is already linked to $(basename "$existing")"
+  local title body labels type=feature prio=P2 id f
+  title="$(gh issue view "$n" --json title -q .title)" || die "cannot read issue #$n"
+  body="$(gh issue view "$n" --json body -q .body)"
+  labels="$(gh issue view "$n" --json labels -q '.labels[].name' | tr '\n' ' ')"
+  case " $labels " in *" bug "*|*"type:fix"*) type=fix ;; *"type:hotfix"*) type=hotfix ;; *"type:chore"*) type=chore ;; *"type:docs"*) type=docs ;; *"type:refactor"*) type=refactor ;; esac
+  case " $labels " in *"priority:P1"*) prio=P1 ;; *"priority:P3"*) prio=P3 ;; esac
+  id="$(cmd_new "$title" --type "$type" --priority "$prio" | tail -n1)"
+  f="$(task_file "$id")"; fm_set "$f" issue "$n"; issue_set "$id" "$n"
+  awk -v b="$body" -v n="$n" '{print} /^## Context/{print "From GitHub issue #" n ":"; print ""; print b}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  info "$id created from #$n — refine Goal/Acceptance criteria (kit-plan) before starting"
+}
+
+cmd_status() {
+  local id br; br="$(current_branch)"; id="$(task_from_branch)"
+  echo "branch : $br$(is_protected "$br" && echo '  (protected — do not commit here)')"
+  if [ -n "$id" ]; then
+    local f; f="$(task_file "$id")"
+    echo "task   : $id — $(fm_get "$f" title) [$(fm_get "$f" status)]"
+    echo "points : $(git tag -l "kit/$id/*" | tr '\n' ' ')"
+    echo "ahead  : $(git rev-list --count "kit/$id/base..HEAD" 2>/dev/null || echo '?') commit(s) since base"
+  fi
+  echo "dirty  : $(git status --porcelain | wc -l | tr -d ' ') file(s)"
+}
+
+cmd_list() {
+  printf '%-9s %-12s %-4s %-6s %s\n' ID STATUS PRIO ISSUE TITLE
+  local name c
+  for name in $(task_names_all); do
+    c="$(task_view "$name")"; [ -n "$c" ] || continue
+    printf '%-9s %-12s %-4s %-6s %s\n' "$(fmv "$c" id)" "$(task_effective_status "$c")" "$(fmv "$c" priority)" "$(issue_of "$(fmv "$c" id)" "$c" | sed 's/^./#&/')" "$(fmv "$c" title)"
+  done
+}
+
+sub="${1:-status}"; shift || true
+case "$sub" in
+  new|start|checkpoint|points|rollback|finish|merged|revert|abandon|status|list|worktrees|cleanup) "cmd_$sub" "$@" ;;
+  sync-gh) cmd_sync_gh "$@" ;;
+  pull-gh) cmd_pull_gh "$@" ;;
+  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

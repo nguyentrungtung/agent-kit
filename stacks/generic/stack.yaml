@@ -1,0 +1,15 @@
+title: Generic — no language tooling yet; fill cmd_* in .agent/project.yaml during kit-onboard
+detect:
+globs:
+app_port: 8080
+tools:
+dev_deps:
+cmd_install:
+cmd_format:
+cmd_format_check:
+cmd_lint:
+cmd_typecheck:
+cmd_arch:
+cmd_test:
+cmd_build:
+cmd_audit:

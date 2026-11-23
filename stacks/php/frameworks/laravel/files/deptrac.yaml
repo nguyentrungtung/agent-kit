@@ -1,0 +1,22 @@
+# agent-kit: Laravel layering. Http -> Actions/Services -> Models; Models never depend on Http.
+deptrac:
+  paths:
+    - ./app
+  layers:
+    - name: Http
+      collectors:
+        - { type: directory, value: app/Http/.* }
+    - name: Application
+      collectors:
+        - { type: directory, value: app/(Actions|Services|Jobs|Listeners)/.* }
+    - name: Domain
+      collectors:
+        - { type: directory, value: app/(Models|Enums|Events|ValueObjects|Data)/.* }
+    - name: Infrastructure
+      collectors:
+        - { type: directory, value: app/(Repositories|Integrations|Providers)/.* }
+  ruleset:
+    Http: [Application, Domain]
+    Application: [Domain, Infrastructure]
+    Infrastructure: [Domain]
+    Domain: ~

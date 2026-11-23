@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# agent-kit pre-commit: protected-branch guard, secrets/forbidden files, large files, quick lint
+source "$(git rev-parse --show-toplevel)/.agent/scripts/lib.sh"
+cd "$KIT_ROOT"
+
+branch="$(current_branch)"
+if git rev-parse -q --verify HEAD >/dev/null && is_protected "$branch"; then
+  die "direct commits to protected branch '$branch' are not allowed. Use: .agent/scripts/kit-task start TASK-NNN"
+fi
+
+"$KIT_DIR/scripts/kit-secrets-scan" --staged
+
+max_kb="$(cfg max_file_kb 2048)"
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  kb=$(( $(wc -c < "$f") / 1024 ))
+  [ "$kb" -le "$max_kb" ] || die "$f is ${kb}KB (> max_file_kb=$max_kb). Use Git LFS or keep it out of the repo."
+done < <(git diff --cached --name-only --diff-filter=ACM)
+
+quick="$(cfg cmd_lint_staged)"
+if [ -n "$quick" ]; then
+  info "quick lint: $quick"
+  bash -c "$quick" || die "quick lint failed (cmd_lint_staged)"
+fi

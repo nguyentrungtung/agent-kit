@@ -1,0 +1,679 @@
+#!/usr/bin/env bash
+# kit — agent-kit CLI. Packs every stack/module; `init` installs ONLY what you pick into a project.
+#
+#   kit init [dir] [options]      interactive picker (gum if installed, plain prompts otherwise)
+#       --stack <spec>            stack[:path[:framework]][,…]   e.g. php::laravel  or  java-maven:backend:spring,node:frontend:react
+#       --modules <list|default|all|none>   e.g. ba,sa,docker,codegraph
+#       --services <list>         docker catalog services, e.g. postgres,redis   (needs module docker)
+#       --name <n> --lang vi|en   --yes (accept defaults, install dev deps, run module setup)
+#       --no-deps --no-setup --force (overwrite) --no-git
+#   kit add <module…> [--dir <project>] [--services …] [--yes]   add modules to an installed project
+#   kit doctor [dir] [--run]      check tools/configs of an installed project
+#   kit list                      stacks, frameworks, modules, docker services
+set -euo pipefail
+
+KIT_SRC="$(cd "$(dirname "$0")" && pwd)"
+CORE="$KIT_SRC/core"; STACKS="$KIT_SRC/stacks"; MODULES="$KIT_SRC/modules"
+VERSION="$(cat "$KIT_SRC/VERSION" 2>/dev/null || echo dev)"
+STEPS="install format format_check lint typecheck arch test build audit"
+DETECT_ORDER="java-maven java-gradle php python go rust dotnet node"
+
+if [ -t 2 ]; then G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; B=$'\033[1m'; D=$'\033[2m'; N=$'\033[0m'; else G=; Y=; R=; B=; D=; N=; fi
+say()  { printf '%s[kit]%s %s\n' "$G" "$N" "$*" >&2; }
+note() { printf '%s[kit]%s %s\n' "$Y" "$N" "$*" >&2; }
+die()  { printf '%s[kit] ERROR:%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
+usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+# ---------------------------------------------------------------- yaml-ish helpers
+yget() { # yget <file> <key> — flat "key: value" (inline " # comment" stripped)
+  [ -f "$1" ] || return 0
+  sed -n "s/^$2:[[:space:]]*//p" "$1" | head -n1 | sed -E 's/[[:space:]]+#[[:space:]].*$//; s/[[:space:]]+$//'
+}
+yhas() { [ -f "$1" ] && grep -q "^$2:" "$1"; }
+stack_yaml() { printf '%s/%s/stack.yaml' "$STACKS" "$1"; }
+stack_parent() { yget "$(stack_yaml "$1")" inherit; }
+stack_asset() { # stack_asset <stack> <relpath> — own asset, else inherited one
+  local s="$1" rel="$2" p
+  [ -e "$STACKS/$s/$rel" ] && { printf '%s' "$STACKS/$s/$rel"; return; }
+  p="$(stack_parent "$s")"; [ -n "$p" ] && [ -e "$STACKS/$p/$rel" ] && printf '%s' "$STACKS/$p/$rel"
+  return 0
+}
+fw_dir() { local d; d="$(stack_asset "$1" "frameworks/$2")"; printf '%s' "$d"; }
+fw_list() { yget "$(stack_yaml "$1")" frameworks; }
+all_stacks() { local d; for d in "$STACKS"/*/; do basename "$d"; done; }
+all_modules() { local d; for d in "$MODULES"/*/; do basename "$d"; done; }
+default_modules() { local m o=""; for m in $(all_modules); do [ "$(yget "$MODULES/$m/module.yaml" default)" = true ] && o="$o $m"; done; echo $o; }
+all_services() { local f; for f in "$MODULES"/docker/catalog/*.yml; do basename "$f" .yml; done; }
+svc_meta() { sed -n "s/^# $2:[[:space:]]*//p" "$MODULES/docker/catalog/$1.yml" | head -n1; }
+
+matches() { # matches <dir> "<spec spec…>"  spec = glob  |  file~regex
+  local dir="$1" spec f re
+  for spec in $2; do
+    if [ "${spec#*~}" != "$spec" ]; then
+      f="${spec%%~*}"; re="${spec#*~}"
+      [ -f "$dir/$f" ] && grep -Eq "$re" "$dir/$f" && return 0
+    else
+      compgen -G "$dir/$spec" >/dev/null 2>&1 && return 0
+    fi
+  done
+  return 1
+}
+detect_stack() { local s; for s in $DETECT_ORDER; do matches "$1" "$(yget "$(stack_yaml "$s")" detect)" && { echo "$s"; return; }; done; echo generic; }
+detect_framework() { local fw d; for fw in $(fw_list "$2"); do d="$(fw_dir "$2" "$fw")"; matches "$1" "$(yget "$d/framework.yaml" detect)" && { echo "$fw"; return; }; done; echo ""; }
+detect_components() { # prints "path=stack+fw …"
+  local t="$1" root sub s out="" d
+  root="$(detect_stack "$t")"
+  if [ "$root" != generic ]; then out=".=$root+$(detect_framework "$t" "$root")"; fi
+  for d in "$t"/*/; do
+    [ -d "$d" ] || continue
+    sub="$(basename "$d")"
+    case "$sub" in node_modules|vendor|docs|target|build|dist|.*) continue ;; esac
+    s="$(detect_stack "$d")"
+    [ "$s" = generic ] && continue
+    [ "$s" = "$root" ] && continue
+    out="$out $sub=$s+$(detect_framework "$d" "$s")"
+  done
+  out="$(echo $out)"
+  echo "${out:-.=generic+}"
+}
+
+# ---------------------------------------------------------------- interactive UI (prompts on /dev/tty)
+INTERACTIVE=0
+in_list() { case " $2 " in *" $1 "*) return 0 ;; esac; return 1; }
+has_gum() { command -v gum >/dev/null 2>&1; }
+ui_input() { # ui_input <prompt> <default>
+  local a
+  if has_gum; then gum input --prompt "$1: " --value "$2" </dev/tty; return; fi
+  printf '%s?%s %s %s[%s]%s: ' "$B" "$N" "$1" "$D" "$2" "$N" >/dev/tty; IFS= read -r a </dev/tty || true
+  echo "${a:-$2}"
+}
+ui_confirm() { # ui_confirm <prompt> <y|n>
+  local a d="$2"
+  if has_gum; then if [ "$d" = y ]; then gum confirm "$1" </dev/tty; else gum confirm --default=false "$1" </dev/tty; fi; return; fi
+  printf '%s?%s %s %s[%s]%s: ' "$B" "$N" "$1" "$D" "$( [ "$d" = y ] && echo Y/n || echo y/N )" "$N" >/dev/tty
+  IFS= read -r a </dev/tty || true; a="${a:-$d}"
+  case "$a" in y|Y|yes) return 0 ;; *) return 1 ;; esac
+}
+ui_one() { # ui_one <prompt> <default> <opt…>   (opt may be "value — label")
+  local p="$1" def="$2" i=1 o a; shift 2
+  if has_gum; then
+    local pre=""; for o in "$@"; do [ "${o%% — *}" = "$def" ] && { pre="$o"; break; }; done
+    gum choose --header "$p" --selected "$pre" "$@" </dev/tty | sed 's/ — .*//'; return
+  fi
+  printf '%s?%s %s\n' "$B" "$N" "$p" >/dev/tty
+  local mark
+  for o in "$@"; do mark=""; [ "${o%% — *}" = "$def" ] && mark=" (default)"; printf '  %2d) %s%s\n' $i "$o" "$mark" >/dev/tty; i=$((i+1)); done
+  printf '  choose [number, Enter = default]: ' >/dev/tty; IFS= read -r a </dev/tty || true
+  if [ -z "$a" ]; then echo "$def"; return; fi
+  i=1; for o in "$@"; do [ "$i" = "$a" ] && { echo "${o%% — *}"; return; }; i=$((i+1)); done
+  echo "$def"
+}
+ui_many() { # ui_many <prompt> "<default values>" <opt…>  → space-separated values
+  local p="$1" defs="$2" i=1 o a v sel="" n; shift 2
+  if has_gum; then
+    for o in "$@"; do v="${o%% — *}"; in_list "$v" "$defs" && sel="$sel$o,"; done
+    gum choose --no-limit --header "$p (space = toggle, enter = ok)" --selected "${sel%,}" "$@" </dev/tty | sed 's/ — .*//' | tr '\n' ' '; echo; return
+  fi
+  printf '%s?%s %s\n' "$B" "$N" "$p" >/dev/tty
+  local mark
+  for o in "$@"; do v="${o%% — *}"; mark=" "; in_list "$v" "$defs" && mark=x; printf '  %2d) [%s] %s\n' $i "$mark" "$o" >/dev/tty; i=$((i+1)); done
+  printf '  numbers separated by space, "-" for none, Enter = marked ones: ' >/dev/tty; IFS= read -r a </dev/tty || true
+  [ -z "$a" ] && { echo "$defs"; return; }
+  [ "$a" = "-" ] && { echo ""; return; }
+  for n in $a; do i=1; for o in "$@"; do [ "$i" = "$n" ] && sel="$sel ${o%% — *}"; i=$((i+1)); done; done
+  echo $sel
+}
+
+# ---------------------------------------------------------------- copying (never clobber unless --force)
+FORCE=0; CREATED=0; CONFLICTS=""
+copy_file() { # copy_file <src> <dest>
+  local s="$1" d="$2"
+  mkdir -p "$(dirname "$d")"
+  if [ -e "$d" ] && [ $FORCE -eq 0 ]; then
+    if ! cmp -s "$s" "$d"; then cp "$s" "$d.kit-new"; CONFLICTS="$CONFLICTS ${d#"$TARGET"/}"; fi
+  else
+    cp "$s" "$d"; CREATED=$((CREATED+1))
+  fi
+  case "$s" in */scripts/*|*/hooks/*|*/.githooks/*|*.sh) chmod +x "$d" 2>/dev/null || true ;; esac
+}
+write_file() { # write_file <dest> <content-file>  (generated content, same no-clobber rule)
+  copy_file "$2" "$1"
+}
+copy_tree() { # copy_tree <srcdir> <destdir>
+  local src="$1" dst="$2" f
+  [ -d "$src" ] || return 0
+  while IFS= read -r -d '' f; do copy_file "$f" "$dst/${f#"$src"/}"; done < <(find "$src" -type f -print0)
+}
+append_block() { # append_block <src> <dest>  (once, marker ">>> agent-kit")
+  local s="$1" d="$2"
+  if [ -f "$d" ] && grep -q '>>> agent-kit' "$d"; then return; fi
+  [ -f "$d" ] && [ -n "$(tail -c1 "$d")" ] && echo >> "$d"
+  cat "$s" >> "$d"
+}
+append_lines_missing() { # append_lines_missing <src> <dest>  — each line once
+  local l
+  while IFS= read -r l; do [ -z "$l" ] && continue; grep -qxF "$l" "$2" 2>/dev/null || echo "$l" >> "$2"; done < "$1"
+}
+
+merge_settings() {
+  local ours="$CORE/.claude/settings.json" theirs="$TARGET/.claude/settings.json"
+  if [ -f "$theirs" ] && [ $FORCE -eq 0 ] && command -v jq >/dev/null 2>&1; then
+    cmp -s "$ours" "$theirs" && return 0
+    cp "$theirs" "$theirs.bak-kit"
+    jq -s '
+      def uniq_cat(a;b): ((a // []) + (b // [])) | unique;
+      .[0] as $t | .[1] as $o |
+      $t * {
+        permissions: { allow: uniq_cat($t.permissions.allow; $o.permissions.allow),
+                       ask:   uniq_cat($t.permissions.ask;   $o.permissions.ask),
+                       deny:  uniq_cat($t.permissions.deny;  $o.permissions.deny) },
+        hooks: ( ($t.hooks // {}) as $th | ($o.hooks // {}) as $oh
+                 | reduce (($th + $oh) | keys[]) as $k ({}; .[$k] = (($th[$k] // []) + ($oh[$k] // []) | unique)) )
+      }' "$theirs" "$ours" > "$theirs.tmp" && mv "$theirs.tmp" "$theirs"
+    say "merged hooks/permissions into existing .claude/settings.json (backup: settings.json.bak-kit)"
+  else
+    copy_file "$ours" "$theirs"
+  fi
+}
+
+# ---------------------------------------------------------------- components
+C_PATH=(); C_STACK=(); C_FW=()
+add_component() { # add_component <path> <stack> <fw>
+  local p="${1:-.}" s="$2" f="${3:-}"
+  p="${p%/}"; [ -z "$p" ] && p="."
+  [ -f "$(stack_yaml "$s")" ] || die "unknown stack '$s' (kit list)"
+  if [ -n "$f" ] && [ -z "$(fw_dir "$s" "$f")" ]; then die "unknown framework '$f' for stack '$s' (available: $(fw_list "$s"))"; fi
+  C_PATH+=("$p"); C_STACK+=("$s"); C_FW+=("$f")
+}
+parse_components_str() { # "path=stack+fw …"
+  local tok p rest
+  for tok in $1; do p="${tok%%=*}"; rest="${tok#*=}"; add_component "$p" "${rest%%+*}" "$(printf '%s' "$rest" | sed -n 's/^[^+]*+//p')"; done
+}
+parse_stack_flag() { # "stack[:path[:fw]],…"
+  local IFS=, tok s p f
+  for tok in $1; do
+    s="$(printf '%s' "$tok" | cut -d: -f1)"; p="$(printf '%s' "$tok" | cut -s -d: -f2)"; f="$(printf '%s' "$tok" | cut -s -d: -f3)"
+    [ "$s" = auto ] && { parse_components_str "$(detect_components "$TARGET")"; continue; }
+    add_component "${p:-.}" "$s" "$f"
+  done
+}
+components_str() { local i o=""; for i in "${!C_PATH[@]}"; do o="$o ${C_PATH[$i]}=${C_STACK[$i]}+${C_FW[$i]}"; done; echo $o; }
+describe_components() { local i; for i in "${!C_PATH[@]}"; do printf '   - %-12s %s%s\n' "${C_PATH[$i]}" "${C_STACK[$i]}" "$( [ -n "${C_FW[$i]}" ] && echo " + ${C_FW[$i]}")" >&2; done; }
+slug() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//'; }
+
+# value of a step for one component: framework override > stack; then tool-specific adjustments
+comp_value() { # comp_value <idx> <key>
+  local i="$1" k="$2" s="${C_STACK[$1]}" f="${C_FW[$1]}" d v sy
+  sy="$(stack_yaml "$s")"; v="$(yget "$sy" "$k")"
+  if [ -n "$f" ]; then d="$(fw_dir "$s" "$f")"; yhas "$d/framework.yaml" "$k" && v="$(yget "$d/framework.yaml" "$k")"; fi
+  [ -n "$v" ] || { echo ""; return; }
+  local dir="$TARGET/${C_PATH[$i]}"
+  case "$s" in
+    java-maven)  [ -x "$dir/mvnw" ] || v="$(printf '%s' "$v" | sed 's#\./mvnw#mvn#g')" ;;
+    java-gradle) [ -x "$dir/gradlew" ] || v="$(printf '%s' "$v" | sed 's#\./gradlew#gradle#g')" ;;
+    node)
+      if [ -f "$dir/pnpm-lock.yaml" ]; then
+        v="$(printf '%s' "$v" | sed -e 's#npm ci#pnpm install --frozen-lockfile#' -e 's#npx --no-install#pnpm exec#g' -e 's#npm test --if-present#pnpm test#' \
+             -e 's#npm run --if-present#pnpm run --if-present#g' -e 's#npm audit --audit-level=high --omit=dev#pnpm audit --audit-level high --prod#' -e 's#npm install -D#pnpm add -D#')"
+      elif [ -f "$dir/yarn.lock" ]; then
+        v="$(printf '%s' "$v" | sed -e 's#npm ci#yarn install --frozen-lockfile#' -e 's#npx --no-install#yarn#g' -e 's#npm test --if-present#yarn test#' \
+             -e 's#npm run --if-present#yarn run#g' -e 's#npm audit --audit-level=high --omit=dev#yarn npm audit --severity high#' -e 's#npm install -D#yarn add -D#')"
+      elif [ ! -f "$dir/package-lock.json" ]; then v="$(printf '%s' "$v" | sed 's#npm ci#npm install#')"; fi ;;
+    python)
+      if [ -f "$dir/uv.lock" ]; then
+        v="$(printf '%s' "$v" | sed -E -e 's#^pip install -r requirements.txt$#uv sync#' -e 's#^pip install #uv add --dev #' -e 's#^(ruff|mypy|pytest|pip-audit|lint-imports)#uv run \1#')"
+      elif [ -f "$dir/pyproject.toml" ] && [ ! -f "$dir/requirements.txt" ]; then
+        v="$(printf '%s' "$v" | sed 's#^pip install -r requirements.txt$#pip install -e ".[dev]"#')"
+      fi ;;
+  esac
+  printf '%s' "$v"
+}
+build_commands() { # sets CMD_<step> (joined across components)
+  local step i v p cur name
+  for step in $STEPS; do
+    printf -v "CMD_$step" '%s' ""
+    for i in "${!C_PATH[@]}"; do
+      v="$(comp_value "$i" "cmd_$step")"; [ -n "$v" ] || continue
+      p="${C_PATH[$i]}"; [ "$p" != "." ] && v="(cd $p && $v)"
+      name="CMD_$step"; cur="${!name}"
+      if [ -n "$cur" ]; then printf -v "$name" '%s && %s' "$cur" "$v"; else printf -v "$name" '%s' "$v"; fi
+    done
+  done
+}
+
+comp_dockerfile() { # framework Dockerfile > stack Dockerfile
+  local d=""; [ -n "${C_FW[$1]}" ] && d="$(fw_dir "${C_STACK[$1]}" "${C_FW[$1]}")"
+  if [ -n "$d" ] && [ -f "$d/docker/Dockerfile" ]; then printf '%s' "$d/docker/Dockerfile"; else stack_asset "${C_STACK[$1]}" docker/Dockerfile; fi
+}
+
+# ---------------------------------------------------------------- install pieces
+install_core() {
+  local f rel
+  while IFS= read -r -d '' f; do
+    rel="${f#"$CORE"/}"
+    case "$rel" in *.kit|.agent/project.yaml.tpl|.claude/settings.json) continue ;; esac
+    copy_file "$f" "$TARGET/$rel"
+  done < <(find "$CORE" -type f -print0)
+  merge_settings
+  append_block "$CORE/gitignore.kit" "$TARGET/.gitignore"
+  append_block "$CORE/gitattributes.kit" "$TARGET/.gitattributes"
+  [ -f "$TARGET/.env.example" ] || cp "$CORE/env.example.kit" "$TARGET/.env.example"
+}
+
+install_component() { # install_component <idx>
+  local i="$1" p="${C_PATH[$1]}" s="${C_STACK[$1]}" f="${C_FW[$1]}" fd="" src rel files dest tmp globs g paths="" note
+  dest="$TARGET"; [ "$p" != "." ] && dest="$TARGET/$p"
+  mkdir -p "$dest"
+  [ -n "$f" ] && fd="$(fw_dir "$s" "$f")"
+  # 1. tool configs: stack files, framework files win on the same path
+  files="$(stack_asset "$s" files)"
+  if [ -n "$files" ]; then
+    while IFS= read -r -d '' src; do
+      rel="${src#"$files"/}"
+      [ -n "$fd" ] && in_list "$rel" "$(yget "$fd/framework.yaml" exclude_files)" && continue
+      if [ -n "$fd" ] && [ -f "$fd/files/$rel" ]; then copy_file "$fd/files/$rel" "$dest/$rel"; else copy_file "$src" "$dest/$rel"; fi
+    done < <(find "$files" -type f -print0)
+  fi
+  if [ -n "$fd" ] && [ -d "$fd/files" ]; then
+    while IFS= read -r -d '' src; do
+      rel="${src#"$fd/files"/}"; [ -n "$files" ] && [ -f "$files/$rel" ] && continue
+      copy_file "$src" "$dest/$rel"
+    done < <(find "$fd/files" -type f -print0)
+  fi
+  # 1b. ignore build/dependency output of this stack (patterns match at any depth)
+  src="$(stack_asset "$s" gitignore.add)"; [ -n "$src" ] && append_lines_missing "$src" "$TARGET/.gitignore"
+  [ -n "$fd" ] && [ -f "$fd/gitignore.add" ] && append_lines_missing "$fd/gitignore.add" "$TARGET/.gitignore"
+  # 2. rules + snippets
+  src="$(stack_asset "$s" rules.md)"; [ -n "$src" ] && copy_file "$src" "$TARGET/.agent/rules/stack/$s.md"
+  [ -n "$fd" ] && [ -f "$fd/rules.md" ] && copy_file "$fd/rules.md" "$TARGET/.agent/rules/stack/$f.md"
+  src="$(stack_asset "$s" snippets)"; [ -n "$src" ] && copy_tree "$src" "$TARGET/.agent/stack/$s/snippets"
+  # 3. Claude Code path-scoped rule pointer
+  globs="$(yget "$(stack_yaml "$s")" globs)"
+  if [ -n "$globs" ]; then
+    tmp="$(mktemp)"
+    set -f
+    { echo "---"; echo "paths:"
+      for g in $globs; do if [ "$p" = "." ]; then echo "  - \"$g\""; else echo "  - \"$p/$g\""; fi; done
+      echo "---"
+      if [ "$p" = "." ]; then echo "# ${s}${f:+ + $f} code"; else echo "# ${s}${f:+ + $f} code in \`$p/\`"; fi
+      echo "Before editing these files read and follow \`.agent/rules/stack/$s.md\`${f:+ and \`.agent/rules/stack/$f.md\`}."
+      echo "Tool configs in $( [ "$p" = . ] && echo "the repo root" || echo "\`$p/\`") are law (never relax them). Before a checkpoint run \`.agent/scripts/kit-run format_check lint typecheck arch\`."
+    } > "$tmp"
+    set +f
+    rel="stack-$s"; [ "$p" != "." ] && rel="$rel-$(slug "$p")"
+    write_file "$TARGET/.claude/rules/$rel.md" "$tmp"; rm -f "$tmp"
+  fi
+  # 4. Dockerfile
+  if has_module docker; then
+    src="$(comp_dockerfile "$i")"
+    [ -n "$src" ] && copy_file "$src" "$dest/Dockerfile"
+  fi
+  note="$(yget "$(stack_yaml "$s")" post_note)"; [ -n "$note" ] && NOTES="$NOTES
+   - [$p · $s] $note"
+  return 0
+}
+
+MODS=""; SERVICES=""; NOTES=""
+has_module() { case " $MODS " in *" $1 "*) return 0 ;; esac; return 1; }
+
+install_module_files() { # install_module_files <module>
+  local m="$1" md="$MODULES/$1"
+  [ -d "$md" ] || die "unknown module '$m' (kit list)"
+  copy_tree "$md/files" "$TARGET"
+  [ -f "$md/gitignore.add" ] && append_lines_missing "$md/gitignore.add" "$TARGET/.gitignore"
+  if [ "$m" = docker ]; then copy_tree "$md/catalog" "$TARGET/.agent/docker/catalog"; fi
+  return 0
+}
+apply_project_add() { # put module cmd_* lines into project.yaml (fill empty keys, insert missing ones after cmd_audit, in order)
+  local m l k cfg="$TARGET/.agent/project.yaml" add
+  [ -f "$cfg" ] || return 0
+  add="$(mktemp)"
+  for m in $MODS; do
+    [ -f "$MODULES/$m/project.add" ] || continue
+    while IFS= read -r l; do
+      k="${l%%:*}"; [ -z "$k" ] && continue
+      if grep -q "^$k:[[:space:]]*$" "$cfg"; then sed -i.bak "s#^$k:[[:space:]]*\$#$l#" "$cfg" && rm -f "$cfg.bak"
+      elif ! grep -q "^$k:" "$cfg"; then echo "$l" >> "$add"; fi
+    done < "$MODULES/$m/project.add"
+  done
+  if [ -s "$add" ]; then
+    if grep -q '^cmd_audit:' "$cfg"; then
+      awk -v af="$add" '{print} /^cmd_audit:/ && !done {while((getline x < af)>0) print x; done=1}' "$cfg" > "$cfg.tmp" && mv "$cfg.tmp" "$cfg"
+    else cat "$add" >> "$cfg"; fi
+  fi
+  rm -f "$add"
+}
+
+generate_compose() {
+  local out="$TARGET/compose.yaml" tmp i p s port host svc used="" deps="" sv vols="" v envtmp e
+  [ -f "$out" ] && [ $FORCE -eq 0 ] && { note "compose.yaml exists — kept (add services with the kit-docker playbook; catalog in .agent/docker/catalog)"; return 0; }
+  for sv in $SERVICES; do
+    [ -f "$MODULES/docker/catalog/$sv.yml" ] || die "unknown docker service '$sv' (kit list)"
+    if grep -q 'healthcheck:' "$MODULES/docker/catalog/$sv.yml" && ! grep -q 'profiles:' "$MODULES/docker/catalog/$sv.yml"; then deps="$deps $sv"; fi
+    v="$(svc_meta "$sv" volumes)"; [ -n "$v" ] && vols="$vols $v"
+  done
+  tmp="$(mktemp)"
+  {
+    echo "# Local development environment — generated by agent-kit. Maintain with the kit-docker playbook."
+    echo "# Start: .agent/scripts/kit-run up · Stop: kit-run down · Logs: kit-run logs · Observability: docker compose --profile obs up -d"
+    echo "name: $(slug "$PROJECT_NAME")"
+    echo "services:"
+    for i in "${!C_PATH[@]}"; do
+      p="${C_PATH[$i]}"; s="${C_STACK[$i]}"
+      [ -n "$(comp_dockerfile "$i")" ] || continue
+      if [ "$p" = "." ]; then svc=app; else svc="$(slug "$(basename "$p")")"; fi
+      port="$(comp_value "$i" app_port)"; port="${port:-8080}"; host="$port"
+      while in_list "$host" "$used"; do host=$((host+1)); done; used="$used $host"
+      echo "  $svc:"
+      echo "    build: ./${p#./}" | sed 's#\./\.$#.#; s#build: \./\.#build: .#'
+      echo "    env_file:"
+      echo "      - path: .env"
+      echo "        required: false"
+      echo "    ports: [\"\${$(printf '%s' "$svc" | tr '[:lower:]-' '[:upper:]_')_PORT:-$host}:$port\"]"
+      if [ -n "$deps" ] && [ "$(comp_value "$i" no_backing_services)" != true ]; then
+        echo "    depends_on:"
+        for sv in $deps; do echo "      $sv: { condition: service_healthy }"; done
+      fi
+    done
+    for sv in $SERVICES; do grep -v '^#' "$MODULES/docker/catalog/$sv.yml"; done
+    if [ -n "$vols" ]; then echo "volumes:"; for v in $vols; do echo "  $v:"; done; fi
+  } > "$tmp"
+  if grep -q '^  [a-z]' "$tmp"; then copy_file "$tmp" "$out"; fi
+  rm -f "$tmp"
+  # env names → .env.example
+  envtmp="$(mktemp)"
+  for sv in $SERVICES; do for e in $(svc_meta "$sv" env); do printf '# %s\n' "$e" >> "$envtmp"; done; done
+  if [ -s "$envtmp" ]; then
+    grep -q '>>> agent-kit services' "$TARGET/.env.example" 2>/dev/null || {
+      { echo; echo "# >>> agent-kit services (local docker defaults; real values only in .env)"; cat "$envtmp"; echo "# <<< agent-kit services"; } >> "$TARGET/.env.example"; }
+  fi
+  rm -f "$envtmp"
+}
+
+render_playbooks() { # fill AGENTS.md §6 from installed skills
+  local list f n d af
+  list="$(mktemp)"
+  for f in "$TARGET"/.claude/skills/*/SKILL.md; do
+    [ -f "$f" ] || continue
+    n="$(sed -n 's/^name:[[:space:]]*//p' "$f" | head -n1)"
+    d="$(sed -n 's/^description:[[:space:]]*//p' "$f" | head -n1 | sed -E 's/\. .*//' | cut -c1-120)"
+    echo "- \`$n\` — $d" >> "$list"
+  done
+  for af in "$TARGET/AGENTS.md" "$TARGET/AGENTS.md.kit-new"; do
+    [ -f "$af" ] && grep -q 'kit:playbooks:start' "$af" || continue
+    awk -v lf="$list" '
+      /kit:playbooks:start/ {print; while((getline l < lf)>0) print l; skip=1; next}
+      /kit:playbooks:end/ {skip=0}
+      !skip {print}' "$af" > "$af.tmp" && mv "$af.tmp" "$af"
+  done
+  rm -f "$list"
+}
+
+write_project_yaml() {
+  local cfg="$TARGET/.agent/project.yaml" tmp step name
+  if [ -f "$cfg" ] && [ $FORCE -eq 0 ]; then
+    note ".agent/project.yaml exists — kept. Commands for the selection were written to .agent/project.yaml.kit-new"
+    cfg="$cfg.kit-new"
+  fi
+  tmp="$(mktemp)"
+  for step in $STEPS; do name="CMD_$step"; printf 'cmd_%s: %s\n' "$step" "${!name}" >> "$tmp"; done
+  awk -v cf="$tmp" '/\{\{COMMANDS\}\}/{while((getline l < cf)>0) print l; next} {print}' "$CORE/.agent/project.yaml.tpl" \
+    | sed -e "s|{{NAME}}|$PROJECT_NAME|" -e "s|{{DESCRIPTION}}|TODO|" -e "s|{{KIT_VERSION}}|$VERSION|" \
+          -e "s|{{STACK}}|${C_STACK[0]}|" -e "s|{{COMPONENTS}}|$(components_str)|" -e "s|{{MODULES}}|$MODS|" \
+          -e "s|^docs_language: vi|docs_language: $LANG_DOCS|" > "$cfg"
+  rm -f "$tmp"; CREATED=$((CREATED+1))
+  [ "${cfg%.kit-new}" = "$cfg" ] || return 0
+  # keep a lock with the selection (for kit add / upgrades)
+  { echo "kit_version: $VERSION"; echo "installed: $(date +%Y-%m-%d)"; echo "components: $(components_str)"
+    echo "modules: $MODS"; echo "services: $SERVICES"; } > "$TARGET/.agent/kit.lock"
+}
+
+insert_ci_setup() {
+  local ci f s seen="" tmp
+  tmp="$(mktemp)"
+  for s in "${C_STACK[@]}"; do
+    case " $seen " in *" $s "*) continue ;; esac; seen="$seen $s"
+    f="$STACKS/$s/ci.yml"; [ -f "$f" ] && cat "$f" >> "$tmp"
+  done
+  for ci in "$TARGET/.github/workflows/ci.yml" "$TARGET/.github/workflows/ci.yml.kit-new"; do
+    [ -f "$ci" ] && grep -q '@@SETUP@@' "$ci" || continue
+    awk -v sf="$tmp" '/# @@SETUP@@/{while((getline l < sf)>0) print l; next} {print}' "$ci" > "$ci.tmp" && mv "$ci.tmp" "$ci"
+  done
+  rm -f "$tmp"
+}
+
+run_dev_deps() {
+  local i p s cmd add dir tool
+  for i in "${!C_PATH[@]}"; do
+    p="${C_PATH[$i]}"; s="${C_STACK[$i]}"; dir="$TARGET/$p"
+    cmd="$(comp_value "$i" dev_deps)"; add="$(comp_value "$i" dev_deps_add)"
+    [ -n "$add" ] && cmd="${cmd:+$cmd && }$add"
+    [ -n "$cmd" ] || continue
+    tool="${cmd%% *}"
+    if ! command -v "$tool" >/dev/null 2>&1; then note "[$p] '$tool' not installed — run later: (cd $p && $cmd)"; continue; fi
+    if [ "$s" = python ] && [ "$tool" = pip ] && [ -z "${VIRTUAL_ENV:-}" ]; then note "[$p] no virtualenv active — run inside your venv: $cmd"; continue; fi
+    if [ "$DEPS" = ask ]; then ui_confirm "[$p] install dev tools: $cmd" y || { NOTES="$NOTES
+   - [$p] dev tools skipped: $cmd"; continue; }; fi
+    say "[$p] $cmd"
+    (cd "$dir" && bash -c "$cmd") || note "[$p] dev dependency install failed — rerun: (cd $p && $cmd)"
+  done
+}
+
+run_module_setup() {
+  local m desc
+  for m in $MODS; do
+    [ -x "$MODULES/$m/setup.sh" ] || continue
+    desc="$(yget "$MODULES/$m/module.yaml" setup_desc)"
+    if [ "$SETUP" = ask ]; then ui_confirm "module $m: $desc — run now?" y || { NOTES="$NOTES
+   - module $m setup skipped: $desc"; continue; }; fi
+    say "module $m: $desc"
+    (cd "$TARGET" && "$MODULES/$m/setup.sh") || note "module $m setup failed — rerun later"
+  done
+}
+
+git_setup() {
+  local cfg="$TARGET/.agent/project.yaml" mb
+  cd "$TARGET"
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then git init -q -b main; say "git init (main)"; fi
+  git config core.hooksPath .githooks
+  if git rev-parse -q --verify HEAD >/dev/null; then
+    if ! git show-ref -q --verify refs/heads/main && git show-ref -q --verify refs/heads/master; then
+      sed -i.bak 's/^main_branch: main/main_branch: master/' "$cfg" && rm -f "$cfg.bak"; note "main branch is 'master' — project.yaml updated"
+    fi
+    mb="$(sed -n 's/^main_branch:[[:space:]]*\([^ ]*\).*/\1/p' "$cfg")"
+    git show-ref -q --verify refs/heads/develop || { git branch develop "$mb" 2>/dev/null && say "created branch develop from $mb"; } || true
+  fi
+  cd - >/dev/null
+}
+
+# ---------------------------------------------------------------- interactive selection
+lbl() { printf '%s — %s' "$1" "$(printf '%s' "$2" | tr ',' ';' | cut -c1-100)"; }
+pick_interactive() {
+  local det ans s p f opts=() o more=y
+  PROJECT_NAME="$(ui_input "Project name" "$PROJECT_NAME")"
+  if [ ${#C_PATH[@]} -eq 0 ]; then
+    det="$(detect_components "$TARGET")"
+    if [ "$det" != ".=generic+" ]; then
+      parse_components_str "$det"
+      say "detected:"; describe_components
+      ui_confirm "Use the detected components?" y || { C_PATH=(); C_STACK=(); C_FW=(); }
+    fi
+    while [ ${#C_PATH[@]} -eq 0 ] || [ "$more" = y ]; do
+      [ ${#C_PATH[@]} -gt 0 ] && { ui_confirm "Add another component (e.g. frontend/ in a monorepo)?" n || break; }
+      opts=(); for s in $(all_stacks); do opts+=("$(lbl "$s" "$(yget "$(stack_yaml "$s")" title)")"); done
+      s="$(ui_one "Stack" "$(detect_stack "$TARGET")" "${opts[@]}")"
+      p="$(ui_input "Path of this component (. = repo root)" "$( [ ${#C_PATH[@]} -eq 0 ] && echo . || echo frontend)")"
+      f=""
+      if [ -n "$(fw_list "$s")" ]; then
+        opts=("none — plain $s"); for o in $(fw_list "$s"); do opts+=("$(lbl "$o" "$(yget "$(fw_dir "$s" "$o")/framework.yaml" title)")"); done
+        f="$(ui_one "Framework" "$(detect_framework "$TARGET/$p" "$s")" "${opts[@]}")"; [ "$f" = none ] && f=""
+      fi
+      add_component "$p" "$s" "$f"
+    done
+  fi
+  if [ -z "$MODS_FLAG" ]; then
+    opts=(); for o in $(all_modules); do opts+=("$(lbl "$o" "$(yget "$MODULES/$o/module.yaml" title)")"); done
+    MODS="$(ui_many "Modules" "$(default_modules)" "${opts[@]}")"
+  fi
+  if has_module docker && [ -z "$SERVICES_FLAG" ]; then
+    opts=(); for o in $(all_services); do opts+=("$(lbl "$o" "$(svc_meta "$o" title)")"); done
+    SERVICES="$(ui_many "Docker services for local dev" "postgres" "${opts[@]}")"
+  fi
+  LANG_DOCS="$(ui_one "Docs language" "$LANG_DOCS" "vi — Tiếng Việt" "en — English")"
+}
+
+# ---------------------------------------------------------------- commands
+cmd_init() {
+  TARGET=""; PROJECT_NAME=""; LANG_DOCS=vi; YES=0; DEPS=ask; SETUP=ask; GITSETUP=1
+  local stack_flag="" fw_flag=""; MODS_FLAG=""; SERVICES_FLAG=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --stack) stack_flag="$2"; shift 2 ;;
+      --framework) fw_flag="$2"; shift 2 ;;
+      --modules) MODS_FLAG="$2"; shift 2 ;;
+      --services) SERVICES_FLAG="$2"; shift 2 ;;
+      --name) PROJECT_NAME="$2"; shift 2 ;;
+      --lang) LANG_DOCS="$2"; shift 2 ;;
+      --yes|-y) YES=1; shift ;;
+      --deps) DEPS=yes; shift ;;
+      --no-deps) DEPS=no; shift ;;
+      --no-setup) SETUP=no; shift ;;
+      --force) FORCE=1; shift ;;
+      --no-git) GITSETUP=0; shift ;;
+      -h|--help) usage ;;
+      -*) die "unknown option $1" ;;
+      *) TARGET="$1"; shift ;;
+    esac
+  done
+  [ -t 0 ] && [ -e /dev/tty ] && [ $YES -eq 0 ] && INTERACTIVE=1
+  if [ -z "$TARGET" ]; then [ $INTERACTIVE -eq 1 ] && TARGET="$(ui_input "Project directory" "$PWD")" || usage 1; fi
+  mkdir -p "$TARGET"; TARGET="$(cd "$TARGET" && pwd)"
+  [ "$TARGET" = "$KIT_SRC" ] && die "target is the kit itself"
+  PROJECT_NAME="${PROJECT_NAME:-$(basename "$TARGET")}"
+
+  [ -n "$stack_flag" ] && parse_stack_flag "$stack_flag"
+  [ -n "$fw_flag" ] && [ ${#C_PATH[@]} -eq 1 ] && { C_FW[0]="$fw_flag"; [ -n "$(fw_dir "${C_STACK[0]}" "$fw_flag")" ] || die "unknown framework $fw_flag"; }
+  case "$MODS_FLAG" in "") MODS="$(default_modules)" ;; default) MODS="$(default_modules)" ;; all) MODS="$(all_modules)" ;; none) MODS="" ;; *) MODS="$(echo "$MODS_FLAG" | tr ',' ' ')" ;; esac
+  [ "$MODS_FLAG" = "" ] || MODS_FLAG=set
+  SERVICES="$(echo "${SERVICES_FLAG:-postgres}" | tr ',' ' ')"; [ "$SERVICES_FLAG" = none ] && SERVICES=""
+
+  if [ $INTERACTIVE -eq 1 ]; then
+    printf '\n%sagent-kit %s%s — set up %s\n\n' "$B" "$VERSION" "$N" "$TARGET" >&2
+    pick_interactive
+  elif [ ${#C_PATH[@]} -eq 0 ]; then
+    parse_components_str "$(detect_components "$TARGET")"
+  fi
+  [ $YES -eq 1 ] && { [ "$DEPS" = ask ] && DEPS=yes; [ "$SETUP" = ask ] && SETUP=yes; }
+  [ $INTERACTIVE -eq 0 ] && { [ "$DEPS" = ask ] && DEPS=no; [ "$SETUP" = ask ] && SETUP=no; }
+  for m in $MODS; do [ -d "$MODULES/$m" ] || die "unknown module '$m' (kit list)"; done
+
+  printf '\n' >&2; say "target:     $TARGET"; say "components:"; describe_components
+  say "modules:    ${MODS:-none}"; has_module docker && say "services:   ${SERVICES:-none}"; say "docs:       $LANG_DOCS"
+  if [ $INTERACTIVE -eq 1 ]; then ui_confirm "Install with this selection?" y || die "aborted"; fi
+
+  install_core
+  local i; for i in "${!C_PATH[@]}"; do install_component "$i"; done
+  for m in $MODS; do install_module_files "$m"; done
+  build_commands
+  write_project_yaml
+  apply_project_add
+  has_module docker && generate_compose
+  render_playbooks
+  insert_ci_setup
+  chmod +x "$TARGET"/.agent/scripts/* "$TARGET"/.agent/hooks/*.sh "$TARGET"/.githooks/* 2>/dev/null || true
+  [ $GITSETUP -eq 1 ] && git_setup
+  [ "$DEPS" != no ] && run_dev_deps
+  [ "$SETUP" != no ] && run_module_setup
+  report
+}
+
+report() {
+  say "installed agent-kit $VERSION — $CREATED file(s) created"
+  if [ -n "$CONFLICTS" ]; then
+    note "existing files kept; kit versions written next to them as *.kit-new — merge by hand or ask the agent:"
+    for c in $CONFLICTS; do printf '   - %s\n' "$c" >&2; done
+  fi
+  [ -n "$NOTES" ] && { note "to do:"; printf '%s\n' "$NOTES" | sed '/^$/d' >&2; }
+  if [ -x "$TARGET/.agent/scripts/kit-doctor" ]; then printf '\n' >&2; (cd "$TARGET" && .agent/scripts/kit-doctor >&2) || true; fi
+  cat >&2 <<EOF
+
+Next steps
+  1. cd $TARGET   — review *.kit-new files (if any)
+  2. Commit:  git add -A && git commit -m "chore: add agent-kit"   (existing repo: on branch chore/agent-kit-setup → PR into develop)
+  3. Open your agent and say:
+       existing code → "run the kit-onboard playbook"   (wires snippets, fixes commands, records baseline)
+       new idea      → "run kit-ba, then kit-sa, then kit-plan"
+  4. GitHub: protect main + develop (require PR + the 'ci' checks).
+EOF
+}
+
+cmd_add() {
+  TARGET="."; YES=0; SETUP=ask; DEPS=no; local add="" SERVICES_ADD=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) TARGET="$2"; shift 2 ;;
+      --services) SERVICES_ADD="$(echo "$2" | tr ',' ' ')"; shift 2 ;;
+      --yes|-y) YES=1; shift ;;
+      -h|--help) usage ;;
+      *) add="$add $1"; shift ;;
+    esac
+  done
+  TARGET="$(cd "$TARGET" && pwd)"; local cfg="$TARGET/.agent/project.yaml"
+  [ -f "$cfg" ] || die "$TARGET has no .agent/project.yaml — run kit init first"
+  [ -n "$add" ] || die "usage: kit add <module…>   (kit list)"
+  [ -t 0 ] && [ $YES -eq 0 ] && INTERACTIVE=1
+  [ $YES -eq 1 ] && SETUP=yes; [ $INTERACTIVE -eq 0 ] && [ "$SETUP" = ask ] && SETUP=no
+  PROJECT_NAME="$(yget "$cfg" name)"
+  parse_components_str "$(yget "$cfg" components)"; [ ${#C_PATH[@]} -gt 0 ] || add_component . "$(yget "$cfg" stack)" ""
+  local old m new=""; old="$(yget "$cfg" modules)"
+  for m in $add; do [ -d "$MODULES/$m" ] || die "unknown module '$m'"; case " $old " in *" $m "*) note "module $m already installed — refreshing files";; esac; new="$new $m"; done
+  MODS="$(echo $old $new | tr ' ' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ' ' | sed 's/ $//')"
+  SERVICES="${SERVICES_ADD:-$(yget "$TARGET/.agent/kit.lock" services)}"
+  case " $new " in *" docker "*) [ -z "$SERVICES" ] && [ $INTERACTIVE -eq 1 ] && {
+      local opts=() o; for o in $(all_services); do opts+=("$(lbl "$o" "$(svc_meta "$o" title)")"); done
+      SERVICES="$(ui_many "Docker services for local dev" "postgres" "${opts[@]}")"; } ;; esac
+  for m in $new; do install_module_files "$m"; done
+  case " $new " in *" docker "*)
+    local i; for i in "${!C_PATH[@]}"; do src="$(comp_dockerfile "$i")"; [ -n "$src" ] && copy_file "$src" "$TARGET/${C_PATH[$i]}/Dockerfile"; done
+    generate_compose ;; esac
+  sed -i.bak "s#^modules:.*#modules: $MODS#" "$cfg" && rm -f "$cfg.bak"
+  grep -q '^modules:' "$cfg" || echo "modules: $MODS" >> "$cfg"
+  apply_project_add
+  render_playbooks
+  [ -f "$TARGET/.agent/kit.lock" ] && { sed -i.bak "s#^modules:.*#modules: $MODS#; s#^services:.*#services: $SERVICES#" "$TARGET/.agent/kit.lock"; rm -f "$TARGET/.agent/kit.lock.bak"; }
+  local keep="$MODS"; MODS="$new"; [ "$SETUP" != no ] && run_module_setup; MODS="$keep"
+  say "added:$new — $CREATED file(s) created"
+  [ -n "$CONFLICTS" ] && { note "kept existing files, wrote *.kit-new:"; for c in $CONFLICTS; do printf '   - %s\n' "$c" >&2; done; }
+  [ -n "$NOTES" ] && printf '%s\n' "$NOTES" | sed '/^$/d' >&2
+  return 0
+}
+
+cmd_list() {
+  local s f m sv
+  printf '%sStacks%s (kit init --stack stack[:path[:framework]])\n' "$B" "$N"
+  for s in $(all_stacks); do
+    printf '  %-12s %s\n' "$s" "$(yget "$(stack_yaml "$s")" title)"
+    for f in $(fw_list "$s"); do printf '  %-12s   + %-8s %s\n' "" "$f" "$(yget "$(fw_dir "$s" "$f")/framework.yaml" title)"; done
+  done
+  printf '\n%sModules%s (--modules; * = default)\n' "$B" "$N"
+  for m in $(all_modules); do printf '  %-10s %s %s\n' "$m" "$( [ "$(yget "$MODULES/$m/module.yaml" default)" = true ] && echo '*' || echo ' ')" "$(yget "$MODULES/$m/module.yaml" title)"; done
+  printf '\n%sDocker services%s (--services, module docker)\n' "$B" "$N"
+  for sv in $(all_services); do printf '  %-14s %s\n' "$sv" "$(svc_meta "$sv" title)"; done
+}
+
+cmd_doctor() {
+  local dir="." args=()
+  while [ $# -gt 0 ]; do case "$1" in --*) args+=("$1") ;; *) dir="$1" ;; esac; shift; done
+  [ -x "$dir/.agent/scripts/kit-doctor" ] || die "$dir is not an agent-kit project"
+  cd "$dir" && exec .agent/scripts/kit-doctor ${args[@]+"${args[@]}"}
+}
+
+case "${1:-}" in
+  init)   shift; cmd_init "$@" ;;
+  add)    shift; cmd_add "$@" ;;
+  doctor) shift; cmd_doctor "$@" ;;
+  list)   cmd_list ;;
+  version|--version) echo "$VERSION" ;;
+  ""|-h|--help|help) usage ;;
+  *) die "unknown command '$1' — see: kit --help" ;;
+esac

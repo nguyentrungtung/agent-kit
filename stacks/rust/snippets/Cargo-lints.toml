@@ -1,0 +1,14 @@
+# agent-kit: merge into Cargo.toml (or [workspace.lints] for workspaces)
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "deny"
+todo = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+module_name_repetitions = "allow"

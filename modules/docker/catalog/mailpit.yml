@@ -1,0 +1,11 @@
+# title: Mailpit (catch-all SMTP :1025, web UI :8025)
+# env: SMTP_HOST=mailpit SMTP_PORT=1025
+# volumes:
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports: ["1025:1025", "8025:8025"]
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10

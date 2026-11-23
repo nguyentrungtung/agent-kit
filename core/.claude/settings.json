@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(.agent/scripts/kit-run:*)",
+      "Bash(.agent/scripts/kit-task status)",
+      "Bash(.agent/scripts/kit-task list)",
+      "Bash(.agent/scripts/kit-diagrams:*)",
+      "Bash(.agent/scripts/kit-task worktrees)",
+      "Bash(.agent/scripts/kit-board:*)",
+      "Bash(.agent/scripts/kit-doctor:*)",
+      "Bash(.agent/scripts/kit-task points)",
+      "Bash(.agent/scripts/kit-task checkpoint:*)",
+      "Bash(.agent/scripts/kit-context:*)",
+      "Bash(.agent/scripts/kit-daily:*)",
+      "Bash(.agent/scripts/kit-secrets-scan:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch --show-current)"
+    ],
+    "ask": [
+      "Bash(.agent/scripts/kit-task rollback:*)",
+      "Bash(.agent/scripts/kit-task revert:*)",
+      "Bash(.agent/scripts/kit-task abandon)",
+      "Bash(.agent/scripts/kit-task finish)",
+      "Bash(git push:*)",
+      "Bash(.agent/scripts/kit-task sync-gh:*)",
+      "Bash(.agent/scripts/kit-task pull-gh:*)",
+      "Bash(.agent/scripts/kit-task cleanup:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.local)",
+      "Read(./.env.*.local)",
+      "Read(./.env.production)",
+      "Read(./secrets/**)",
+      "Edit(./.agent/hooks/**)",
+      "Edit(./.githooks/**)",
+      "Edit(./.claude/settings.json)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.agent/hooks/session-start.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.agent/hooks/guard-bash.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.agent/hooks/guard-files.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.agent/hooks/stop-gate.sh",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}

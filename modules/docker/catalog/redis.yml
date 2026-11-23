@@ -1,0 +1,12 @@
+# title: Redis 7 (cache, sessions, rate limits)
+# env: REDIS_URL=redis://redis:6379/0
+# volumes:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports: ["${REDIS_PORT:-6379}:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20

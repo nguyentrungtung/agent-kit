@@ -1,0 +1,4 @@
+title: Django — apps per domain, ORM discipline, django-stubs
+detect: manage.py
+dev_deps: pip install ruff mypy django-stubs pytest pytest-django pip-audit
+cmd_test: pytest -q

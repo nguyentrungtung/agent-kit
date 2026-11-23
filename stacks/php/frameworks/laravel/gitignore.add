@@ -1,0 +1,3 @@
+storage/*.key
+public/hot
+public/storage

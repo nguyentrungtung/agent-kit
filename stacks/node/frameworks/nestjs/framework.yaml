@@ -1,0 +1,2 @@
+title: NestJS — modules, DTO validation, layered services
+detect: package.json~"@nestjs/core"

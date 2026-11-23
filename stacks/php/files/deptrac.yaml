@@ -1,0 +1,25 @@
+# agent-kit: architecture boundaries (clean / hexagonal layering). Adjust paths to your tree,
+# keep the direction of the arrows: Presentation -> Application -> Domain <- Infrastructure.
+deptrac:
+  paths:
+    - ./src
+  exclude_files:
+    - '#.*Test\.php$#'
+  layers:
+    - name: Domain
+      collectors:
+        - { type: directory, value: src/Domain/.* }
+    - name: Application
+      collectors:
+        - { type: directory, value: src/Application/.* }
+    - name: Infrastructure
+      collectors:
+        - { type: directory, value: src/Infrastructure/.* }
+    - name: Presentation
+      collectors:
+        - { type: directory, value: src/(Presentation|Http|Controller|Cli)/.* }
+  ruleset:
+    Domain: ~
+    Application: [Domain]
+    Infrastructure: [Domain, Application]
+    Presentation: [Application, Domain]

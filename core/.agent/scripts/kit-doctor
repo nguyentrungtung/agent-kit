@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# kit-doctor [--run] — health check of the agent-kit setup in this project.
+#   - git hooks active, project.yaml filled, rules present
+#   - every cmd_* in project.yaml: is its executable available? (per component)
+#   - optional tools of installed modules (codegraph, docker, mmdc…)
+#   --run : additionally run `kit-run format_check lint typecheck arch` and report
+# Exit 1 when something blocks the quality gates (missing executable for a configured step).
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+
+ok()   { printf '  %s✓%s %s\n' "$c_grn" "$c_off" "$*"; }
+bad()  { printf '  %s✗%s %s\n' "$c_red" "$c_off" "$*"; problems=$((problems+1)); }
+meh()  { printf '  %s!%s %s\n' "$c_yel" "$c_off" "$*"; }
+problems=0
+
+echo "agent-kit doctor — $(cfg name "$(basename "$KIT_ROOT")") · components: $(cfg components "$(cfg stack)")"
+
+echo "Setup"
+if [ "$(git config --get core.hooksPath 2>/dev/null)" = ".githooks" ]; then ok "git hooks active (.githooks)"; else bad "git hooks NOT active — run: git config core.hooksPath .githooks"; fi
+if grep -q 'TODO' .agent/context/PROJECT.md 2>/dev/null; then meh "PROJECT.md still has TODOs — run the kit-onboard (existing code) or kit-ba (new project) playbook"; else ok "context filled"; fi
+n_rules=$(find .agent/rules -name '*.md' 2>/dev/null | grep -vc README || true)
+if [ "${n_rules:-0}" -gt 0 ]; then ok "$n_rules rule file(s) in .agent/rules"; else bad "no rules in .agent/rules"; fi
+for f in .agent/stack/*/snippets; do
+  [ -d "$f" ] && meh "snippets to merge by kit-onboard: $f/ ($(ls "$f" | tr '\n' ' '))"
+done
+
+# exe_of "<command>" -> prints "<dir>|<executable>" for the first real program of each (cd dir && cmd) segment
+check_cmd() { # check_cmd <step> <command>
+  local step="$1" cmd="$2" seg dir inner exe
+  # split on " && (" boundaries produced by kit init for multi-component repos
+  printf '%s\n' "$cmd" | perl -pe 's/\) && \(cd /)\n(cd /g' | while IFS= read -r seg; do
+    dir="."; inner="$seg"
+    if [[ "$seg" =~ ^\(cd\ ([^ ]+)\ \&\&\ (.*)\)$ ]]; then dir="${BASH_REMATCH[1]}"; inner="${BASH_REMATCH[2]}"; fi
+    set -- $inner
+    case "${1:-}" in
+      npx) shift; [ "${1:-}" = "--no-install" ] && shift ;;
+      pnpm|yarn) [ "${2:-}" = exec ] && shift 2 || { exe="$1"; } ;;
+      uv) [ "${2:-}" = run ] && shift 2 ;;
+      test|bash|sh) echo "ok|$dir|$1"; continue ;;
+      .agent/*|./.agent/*) echo "ok|$dir|$1"; continue ;;
+    esac
+    exe="${1:-}"
+    [ -z "$exe" ] && continue
+    if [ -x "$dir/$exe" ] || [ -x "$dir/node_modules/.bin/$exe" ] || command -v "$exe" >/dev/null 2>&1; then
+      echo "ok|$dir|$exe"
+    else
+      echo "missing|$dir|$exe"
+    fi
+  done
+}
+
+echo "Project commands (.agent/project.yaml)"
+for step in install format format_check lint typecheck arch test build audit docs up; do
+  cmd="$(cfg "cmd_$step")"
+  if [ -z "$cmd" ]; then
+    case "$step" in format_check|lint|test) meh "cmd_$step empty — this gate is skipped" ;; esac
+    continue
+  fi
+  while IFS='|' read -r st dir exe; do
+    [ -z "$st" ] && continue
+    where=""; [ "$dir" != "." ] && where=" (in $dir)"
+    if [ "$st" = ok ]; then ok "$step: $exe$where"
+    else
+      case "$exe" in
+        vendor/bin/*) bad "$step: $exe$where not found — run kit-run install (composer) or add the dev dependency" ;;
+        ./mvnw|./gradlew) bad "$step: $exe$where missing — add the wrapper (mvn wrapper:wrapper / gradle wrapper) or use mvn/gradle" ;;
+        *) bad "$step: '$exe'$where not installed" ;;
+      esac
+    fi
+  done < <(check_cmd "$step" "$cmd")
+done
+
+echo "Module tools"
+mods="$(cfg modules)"
+for m in $mods; do
+  case "$m" in
+    codegraph) if command -v codegraph >/dev/null 2>&1; then
+                 if [ -d .codegraph ]; then ok "codegraph index present"; else meh "codegraph installed but not initialised — run: codegraph init"; fi
+               else meh "codegraph not installed — npm install -g @colbymchenry/codegraph"; fi ;;
+    docker)    if command -v docker >/dev/null 2>&1; then ok "docker available"; else meh "docker not installed — kit-run up/down unavailable"; fi
+               [ -f compose.yaml ] && { docker compose config -q >/dev/null 2>&1 && ok "compose.yaml valid" || meh "compose.yaml did not validate (docker compose config)"; } ;;
+    ba)        if command -v mmdc >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then ok "diagram rendering available (mmdc/docker)"
+               else meh "no mmdc or docker — kit-run docs will skip diagram checks"; fi ;;
+    serena)    if command -v uvx >/dev/null 2>&1; then ok "uvx available (serena)"; else meh "uvx missing — brew install uv"; fi ;;
+  esac
+done
+if command -v gitleaks >/dev/null 2>&1; then ok "gitleaks available"; else meh "gitleaks not installed (brew install gitleaks) — built-in patterns only"; fi
+
+if [ "${1:-}" = "--run" ]; then
+  echo "Running gates"
+  "$KIT_DIR/scripts/kit-run" format_check lint typecheck arch || problems=$((problems+1))
+fi
+
+echo
+if [ $problems -eq 0 ]; then info "doctor: OK"; else warn "doctor: $problems problem(s) — fix them or record as baseline debt in kit-onboard"; exit 1; fi

@@ -1,0 +1,17 @@
+title: Python — PEP 8 / PEP 257 / PEP 484, Ruff (format + lint), mypy --strict, import-linter
+detect: pyproject.toml requirements.txt setup.py
+globs: **/*.py
+app_port: 8000
+frameworks: fastapi django
+tools: python3
+dev_deps: pip install ruff mypy pytest pytest-cov pip-audit import-linter
+cmd_install: pip install -r requirements.txt
+cmd_format: ruff format .
+cmd_format_check: ruff format --check .
+cmd_lint: ruff check .
+cmd_typecheck: mypy .
+cmd_arch:
+cmd_test: pytest -q
+cmd_build:
+cmd_audit: pip-audit
+post_note: for layer rules copy .agent/stack/python/snippets/importlinter.ini to .importlinter, set root_package, then set cmd_arch: lint-imports.

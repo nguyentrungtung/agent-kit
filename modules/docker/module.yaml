@@ -1,0 +1,3 @@
+title: Docker — multi-stage Dockerfile per stack + compose.yaml for local dev from a service catalog (DB, cache, queue, auth, mail, observability)
+default: true
+tools_optional: docker

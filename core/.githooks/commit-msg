@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# agent-kit commit-msg: Conventional Commits + task trailer on task branches
+source "$(git rev-parse --show-toplevel)/.agent/scripts/lib.sh"
+msg_file="$1"
+first="$(grep -v '^#' "$msg_file" | head -n1)"
+
+case "$first" in Merge\ *|Revert\ *|fixup!*|squash!*|amend!*) exit 0 ;; esac
+
+types="$(cfg commit_types 'feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert|sec')"
+if ! printf '%s' "$first" | grep -Eq "^($types)(\([A-Za-z0-9._/-]+\))?!?: .{3,}"; then
+  cat >&2 <<MSG
+[kit] commit message must follow Conventional Commits:
+      <type>(<scope>): <summary>      types: $types
+      e.g.  feat(TASK-012): add login rate limiting
+      got:  $first
+MSG
+  exit 1
+fi
+[ "${#first}" -le "$(cfg commit_subject_max 100)" ] || die "commit subject longer than $(cfg commit_subject_max 100) chars"
+
+id="$(task_from_branch)"
+if [ -n "$id" ] && ! grep -q "$id" "$msg_file"; then
+  printf '\nRefs: %s\n' "$id" >> "$msg_file"
+fi

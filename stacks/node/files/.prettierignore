@@ -1,0 +1,15 @@
+dist
+build
+coverage
+.next
+node_modules
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+# agent-kit harness files (markdown docs/playbooks are not app code)
+.agent
+.claude
+.github
+docs
+AGENTS.md
+CLAUDE.md

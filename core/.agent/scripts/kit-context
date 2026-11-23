@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# kit-context [--brief] [TASK-ID]
+# Print a compact context pack for ANY agent harness (Claude Code, DeepSeek Harness, Codex, ...).
+# --brief : what a new session must know (used by the SessionStart hook), ~60 lines max.
+# default : brief + full task file + recent lessons + ADR index — paste into a fresh session.
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+
+brief=0; id=""
+for a in "$@"; do case "$a" in --brief) brief=1 ;; TASK-*) id="$a" ;; esac; done
+[ -n "$id" ] || id="$(task_from_branch)"
+
+section() { printf '\n### %s\n' "$1"; }
+clip() { head -n "${2:-40}" "$1" 2>/dev/null; }
+
+echo "## agent-kit context — $(cfg name "$(basename "$KIT_ROOT")") · $(now)"
+echo "stack: $(cfg stack) · docs language: $(cfg docs_language vi) · branch: $(current_branch)"
+is_protected "$(current_branch)" && echo "⚠ You are on a PROTECTED branch. Start a task first: .agent/scripts/kit-task start TASK-NNN"
+
+section "STATE (.agent/memory/STATE.md)"
+clip "$KIT_DIR/memory/STATE.md" 40
+
+if [ -n "$id" ]; then
+  f="$(task_file "$id")"
+  if [ -f "$f" ]; then
+    section "ACTIVE TASK $id (${f#"$KIT_ROOT"/})"
+    if [ $brief -eq 1 ]; then
+      sed -n '1,/^---$/!p' "$f" | sed -n '/^## Goal/,/^## Plan/p' | head -n 25
+      echo "… (read the full task file before working)"
+    else
+      cat "$f"
+    fi
+  fi
+fi
+
+section "OPEN TASKS"
+for t in "$KIT_TASKS"/TASK-*.md; do
+  [ -f "$t" ] || continue
+  st="$(fm_get "$t" status)"
+  case "$st" in done|abandoned) continue ;; esac
+  echo "- $(fm_get "$t" id) [$st] $(fm_get "$t" title)"
+done | head -n 15 || true
+
+if [ $brief -eq 0 ]; then
+  section "RECENT LESSONS (tail of .agent/memory/LESSONS.md)"
+  tail -n 15 "$KIT_DIR/memory/LESSONS.md" 2>/dev/null || true
+  section "DECISIONS (docs/adr)"
+  for a in "$KIT_ROOT"/docs/adr/[0-9]*.md; do
+    [ -f "$a" ] || continue; case "$a" in *0000-*) continue ;; esac; echo "- $(basename "$a")"
+  done
+fi
+
+section "READ ON DEMAND (do not load all at once)"
+echo "- Goals/scope: .agent/context/PROJECT.md · Architecture: .agent/context/ARCHITECTURE.md"
+echo "- Conventions: .agent/context/CONVENTIONS.md · Playbooks: .claude/skills/<name>/SKILL.md"

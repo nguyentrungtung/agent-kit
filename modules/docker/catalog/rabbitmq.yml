@@ -1,0 +1,15 @@
+# title: RabbitMQ 4 + management UI (:15672)
+# env: RABBITMQ_DEFAULT_USER=app RABBITMQ_DEFAULT_PASS=
+# volumes: rabbitdata
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-app}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-app}
+    ports: ["${RABBITMQ_PORT:-5672}:5672", "15672:15672"]
+    volumes: [rabbitdata:/var/lib/rabbitmq]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20

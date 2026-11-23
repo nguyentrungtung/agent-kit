@@ -1,0 +1,7 @@
+# title: Grafana LGTM — OpenTelemetry collector + Loki + Tempo + Prometheus + Grafana (:3001), profile "obs"
+# env: OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-lgtm:4318
+# volumes:
+  otel-lgtm:
+    image: grafana/otel-lgtm:0.8.1
+    profiles: ["obs"]
+    ports: ["3001:3000", "4317:4317", "4318:4318"]

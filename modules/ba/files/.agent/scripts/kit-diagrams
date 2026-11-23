@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# kit-diagrams check|export [path...] — validate (and optionally export to SVG) every Mermaid and PlantUML diagram
+# in Markdown files (default: docs/ and .agent/context/). Uses local mmdc/plantuml, falls back to Docker images.
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+mode="${1:-check}"; shift || true
+[ "$mode" = check ] || [ "$mode" = export ] || die "usage: kit-diagrams check|export [path...]"
+paths=("$@"); [ ${#paths[@]} -gt 0 ] || paths=(docs .agent/context)
+
+work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
+out="docs/diagrams/out"; [ "$mode" = export ] && mkdir -p "$out"
+
+# extract fenced blocks: <work>/<n>.mmd / <n>.puml + index file
+idx="$work/index"; : > "$idx"
+find "${paths[@]}" -name '*.md' -not -path '*/node_modules/*' 2>/dev/null | sort | while IFS= read -r f; do
+  awk -v f="$f" -v w="$work" -v idx="$idx" '
+    BEGIN { n = 0; inb = 0 }
+    /^```(mermaid|plantuml|puml)[[:space:]]*$/ { inb = 1; t = ($0 ~ /mermaid/) ? "mmd" : "puml"; n++; line = NR;
+      name = f; gsub(/[^A-Za-z0-9]/, "_", name); file = w "/" name "_" n "." t; next }
+    inb && /^```[[:space:]]*$/ { inb = 0; print file "\t" f ":" line >> idx; close(file); next }
+    inb { print > file }' "$f"
+done
+
+total=$(wc -l < "$idx" | tr -d ' ')
+[ "$total" -gt 0 ] || { info "no diagrams found in ${paths[*]}"; exit 0; }
+
+mmdc_cmd=""; puml_cmd=""
+if command -v mmdc >/dev/null 2>&1; then mmdc_cmd="mmdc"
+elif command -v docker >/dev/null 2>&1; then mmdc_cmd="docker"; fi
+if command -v plantuml >/dev/null 2>&1; then puml_cmd="plantuml"
+elif command -v docker >/dev/null 2>&1; then puml_cmd="docker"; fi
+
+render() { # render <src> <svg> → exit status of the renderer (never aborts the script)
+  local src="$1" svg="$2" b; b="$(basename "$src")"
+  case "$src" in
+    *.mmd)
+      if [ "$mmdc_cmd" = mmdc ]; then mmdc -q -i "$src" -o "$svg"
+      else docker run --rm -u "$(id -u):$(id -g)" -v "$work:/data" minlag/mermaid-cli -q -i "/data/$b" -o "/data/$(basename "$svg")"; fi ;;
+    *.puml)
+      grep -q '@start' "$src" || { { echo '@startuml'; cat "$src"; echo '@enduml'; } > "$src.t" && mv "$src.t" "$src"; }
+      if [ "$puml_cmd" = plantuml ]; then plantuml -tsvg -failfast2 "$src"
+      else docker run --rm -v "$work:/data" plantuml/plantuml -tsvg -failfast2 "/data/$b"; fi ;;
+  esac
+}
+
+fail=0; ok=0; skipped=0
+while IFS="$(printf '\t')" read -r file where; do
+  svg="$work/$(basename "${file%.*}").svg"
+  case "$file" in
+    *.mmd)  [ -n "$mmdc_cmd" ] || { skipped=$((skipped+1)); continue; } ;;
+    *.puml) [ -n "$puml_cmd" ] || { skipped=$((skipped+1)); continue; } ;;
+  esac
+  if render "$file" "$svg" </dev/null >"$work/err" 2>&1 && [ -s "$svg" ]; then
+    ok=$((ok+1))
+    if [ "$mode" = export ]; then cp "$svg" "$out/$(printf '%s' "$where" | tr '/:.' '___').svg"; fi
+  else
+    fail=$((fail+1)); printf '%s[FAIL]%s %s\n' "$c_red" "$c_off" "$where"; grep -v '^\s*at ' "$work/err" | sed 's/^/       /' | head -n 8
+  fi
+done < "$idx"
+
+[ $skipped -gt 0 ] && warn "$skipped diagram(s) not checked — install mermaid-cli (npm i -g @mermaid-js/mermaid-cli) / plantuml, or Docker"
+[ $fail -eq 0 ] || die "$fail of $total diagram(s) failed to render"
+info "$ok of $total diagram(s) render OK"
+[ "$mode" = export ] && info "SVGs written to $out" || true

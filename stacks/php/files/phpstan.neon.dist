@@ -1,0 +1,15 @@
+# agent-kit: PHPStan level 8 + strict rules. Raise towards "max"; never lower the level.
+# New errors must be fixed, not added to the baseline. Baseline only for legacy code at onboarding:
+#   vendor/bin/phpstan analyse --generate-baseline   (then add phpstan-baseline.neon to includes)
+includes:
+    - vendor/phpstan/phpstan-strict-rules/rules.neon
+
+parameters:
+    level: 8
+    paths:
+        - src
+        - tests
+    tmpDir: var/cache/phpstan
+    treatPhpDocTypesAsCertain: false
+    reportUnmatchedIgnoredErrors: true
+    checkMissingCallableSignature: true

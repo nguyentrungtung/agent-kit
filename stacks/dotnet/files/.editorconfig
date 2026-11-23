@@ -1,0 +1,48 @@
+# agent-kit: .NET coding conventions (Microsoft) — enforced at build via EnforceCodeStyleInBuild
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,xml,csproj,props,targets}]
+indent_size = 2
+
+[*.cs]
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_prefer_braces = true:warning
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_using_directive_placement = outside_namespace:warning
+dotnet_sort_system_directives_first = true
+dotnet_style_qualification_for_field = false:warning
+dotnet_style_readonly_field = true:warning
+dotnet_style_prefer_auto_properties = true:suggestion
+dotnet_diagnostic.IDE0005.severity = warning   # unused usings
+dotnet_diagnostic.CA2007.severity = none       # ConfigureAwait — not needed in ASP.NET Core apps
+
+# Naming: interfaces IPascal, types/members PascalCase, private fields _camelCase, locals/params camelCase
+dotnet_naming_rule.interfaces.symbols = interface_symbols
+dotnet_naming_rule.interfaces.style = i_prefix
+dotnet_naming_rule.interfaces.severity = warning
+dotnet_naming_symbols.interface_symbols.applicable_kinds = interface
+dotnet_naming_style.i_prefix.required_prefix = I
+dotnet_naming_style.i_prefix.capitalization = pascal_case
+
+dotnet_naming_rule.types.symbols = type_symbols
+dotnet_naming_rule.types.style = pascal
+dotnet_naming_rule.types.severity = warning
+dotnet_naming_symbols.type_symbols.applicable_kinds = class, struct, enum, delegate, method, property, event
+dotnet_naming_style.pascal.capitalization = pascal_case
+
+dotnet_naming_rule.private_fields.symbols = private_field_symbols
+dotnet_naming_rule.private_fields.style = underscore_camel
+dotnet_naming_rule.private_fields.severity = warning
+dotnet_naming_symbols.private_field_symbols.applicable_kinds = field
+dotnet_naming_symbols.private_field_symbols.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel.required_prefix = _
+dotnet_naming_style.underscore_camel.capitalization = camel_case

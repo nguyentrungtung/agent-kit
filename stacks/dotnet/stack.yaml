@@ -1,0 +1,16 @@
+title: .NET / C# — .NET coding conventions, .editorconfig + dotnet format, Roslyn analyzers (warnings as errors)
+detect: *.sln *.slnx *.csproj
+globs: **/*.cs
+app_port: 8080
+tools: dotnet
+dev_deps:
+cmd_install: dotnet restore
+cmd_format: dotnet format
+cmd_format_check: dotnet format --verify-no-changes
+cmd_lint: dotnet build --no-restore -warnaserror
+cmd_typecheck:
+cmd_arch: dotnet test --no-restore --filter "FullyQualifiedName~ArchitectureTests"
+cmd_test: dotnet test --no-restore
+cmd_build: dotnet build -c Release --no-restore
+cmd_audit: dotnet list package --vulnerable --include-transitive
+post_note: Directory.Build.props turns on nullable + analyzers + warnings-as-errors for every project; add NetArchTest tests from .agent/stack/dotnet/snippets.

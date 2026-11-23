@@ -1,0 +1,17 @@
+title: Node / TypeScript — Prettier, ESLint (typescript-eslint strict-type-checked), tsc strict, dependency-cruiser
+detect: package.json
+globs: **/*.ts **/*.tsx **/*.js **/*.jsx **/*.mjs **/*.cjs
+app_port: 3000
+frameworks: react nestjs
+tools: node npm
+dev_deps: npm install -D eslint @eslint/js typescript typescript-eslint prettier eslint-config-prettier dependency-cruiser
+cmd_install: npm ci
+cmd_format: npx --no-install prettier --write .
+cmd_format_check: npx --no-install prettier --check .
+cmd_lint: npx --no-install eslint . --max-warnings=0
+cmd_typecheck: npx --no-install tsc --noEmit
+cmd_arch: npx --no-install depcruise src --config .dependency-cruiser.cjs
+cmd_test: npm test --if-present
+cmd_build: npm run --if-present build
+cmd_audit: npm audit --audit-level=high --omit=dev
+post_note: make sure tsconfig.json has the strict flags from .agent/stack/node/snippets/tsconfig.strict.json.
