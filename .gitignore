@@ -1,1 +1,30 @@
+# Kit temporary files
 *.kit-new
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Gradle
+.gradle/
+build/
+!build.gradle
+!build.gradle.kts
+
+# Maven
+target/
+
+# Node / JS
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
