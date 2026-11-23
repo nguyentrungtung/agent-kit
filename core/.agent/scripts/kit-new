@@ -9,13 +9,14 @@
 #   kit-new story "<title>" [--uc UC-NN]                               → docs/ba/stories/US-NN-slug.md     (module ba)
 #   kit-new module <name> [--style layered|modular] [--component <path>]  → folders of one module per the architecture skeleton
 #   kit-new runbook "<alert or operation>"                             → docs/platform/runbooks/<slug>.md (module devops)
+#   kit-new postmortem "<incident title>"                              → docs/platform/incidents/<date>-<slug>.md (module devops)
 #   kit-new doc <path.md> "<title>"                                    → living document with front matter
 # Prints the created path. Never overwrites an existing file.
 source "$(dirname "$0")/lib.sh"
 cd "$KIT_ROOT"
 TPL="$KIT_DIR/templates"
 
-usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 slug() { ascii_slug "$1" 50; }
 esc() { printf '%s' "$1" | sed 's/[\/&|]/\\&/g'; }
 next_num() { # next_num <dir> <prefix-regex> <width>  → zero-padded next number
@@ -128,6 +129,11 @@ case "$kind" in
   runbook)
     title="$*"; [ -n "$title" ] || die 'usage: kit-new runbook "<alert or operation>"'
     render "$TPL/runbook.md" "$KIT_ROOT/docs/platform/runbooks/$(slug "$title").md" TITLE="$title" DATE="$(today)"
+    ;;
+
+  postmortem)
+    title="$*"; [ -n "$title" ] || die 'usage: kit-new postmortem "<incident title>"'
+    render "$TPL/postmortem.md" "$KIT_ROOT/docs/platform/incidents/$(today)-$(slug "$title").md" TITLE="$title" DATE="$(today)"
     ;;
 
   doc)

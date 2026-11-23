@@ -1,7 +1,11 @@
-# Release checklist (human-run; agent may prepare)
-- [ ] `release/x.y.z` branch from develop; version bumped; CHANGELOG from Conventional Commits
-- [ ] CI green on release branch; security scans clean (or accepted risks documented)
-- [ ] DB migrations tested forward + backward on a copy of production data
-- [ ] Rollback plan written (previous artifact/tag, migration down steps, feature flags)
-- [ ] Merge to main with tag `vX.Y.Z`; merge main back into develop
-- [ ] Post-release: smoke test, monitor errors/latency for 30 min, daily report entry
+# Release checklist (human-run; agent prepares with kit-release)
+- [ ] `.agent/scripts/kit-release plan` reviewed: next version (semver from Conventional Commits) and CHANGELOG are right
+- [ ] `.agent/scripts/kit-release prepare` → `release/vX.Y.Z` from develop, CHANGELOG + version bump committed, PR to main opened
+- [ ] CI green on the release PR; SAST/dependency/secret scans clean or accepted risks documented (named human + date)
+- [ ] Staging deployed from the release artefact; smoke tests + `kit-run perf` thresholds pass
+- [ ] **Security**: `kit-sec-scan dast <staging-url>` reviewed; pentest done for major releases / new attack surface (auth, payments, uploads, public APIs)
+- [ ] DB migrations tested forward + backward on an anonymised copy; expand/contract steps ordered
+- [ ] Rollback plan written (previous image tag, migration down/forward-fix, feature flags off)
+- [ ] Merge to main → `kit-release tag` (annotated vX.Y.Z) → production deploy approved in the GitHub environment
+- [ ] Merge main back into develop; announce deprecations/breaking changes to API/data consumers
+- [ ] Post-release: watch SLO dashboards 30–60 min; daily report entry

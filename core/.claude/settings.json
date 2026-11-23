@@ -6,6 +6,7 @@
       "Bash(.agent/scripts/kit-task status)",
       "Bash(.agent/scripts/kit-task list)",
       "Bash(.agent/scripts/kit-diagrams:*)",
+      "Bash(.agent/scripts/kit-release plan)",
       "Bash(.agent/scripts/kit-tools status)",
       "Bash(.agent/scripts/kit-sec-scan sbom)",
       "Bash(.agent/scripts/kit-ops-lint:*)",
@@ -38,7 +39,9 @@
       "Bash(.agent/scripts/kit-task cleanup:*)",
       "Bash(.agent/scripts/kit-sec-scan dast:*)",
       "Bash(.agent/scripts/kit-tools install:*)",
-      "Bash(.agent/scripts/kit-tools ensure:*)"
+      "Bash(.agent/scripts/kit-tools ensure:*)",
+      "Bash(.agent/scripts/kit-release prepare)",
+      "Bash(.agent/scripts/kit-release tag)"
     ],
     "deny": [
       "Read(./.env)",

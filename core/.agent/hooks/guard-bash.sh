@@ -14,7 +14,7 @@ if re '^\s*("?\S*/)?\.agent/scripts/kit-[a-z-]+"?(\s|$)' "$c" && ! re '[;&|`]|\$
 # 1) Never bypass hooks / guardrails
 re '--no-verify\b' "$c" && deny "--no-verify bypasses quality/secret hooks" "fix the reported problem, then commit normally"
 re 'core\.hooksPath' "$c" && deny "changing core.hooksPath disables git hooks"
-re '\b(HUSKY|KIT_SKIP[A-Z_]*|KIT_ALLOW[A-Z_]*|SKIP)=' "$c" && deny "skipping hooks via env vars is not allowed"
+re '\b(HUSKY|KIT_SKIP[A-Z_]*|KIT_ALLOW[A-Z_]*|KIT_RELEASE_PREP|SKIP)=' "$c" && deny "skipping hooks via env vars is not allowed"
 guard='(\.agent/hooks|\.githooks|\.claude/settings[^ ]*\.json)'
 if re "$guard" "$c" && { re '\b(rm|mv|cp|chmod|truncate|ln|tee|install)\b|\bsed\s+(-\S+\s+)*-i' "$c" || re ">>?\s*\S*$guard" "$c"; }; then
   deny "guardrail files can only be changed by a human"

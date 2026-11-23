@@ -118,6 +118,17 @@ UC/US (docs/ba) ─▶ OpenSpec change: proposal ─▶ specs ─▶ design ─�
 | E2E + accessibility (Playwright + axe, React) · test tải k6 với ngưỡng SLO | `kit-run e2e` · `kit-run perf` | theo task / trước release |
 Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết mới, module sâu, SOLID/KISS/YAGNI, khi nào dùng design pattern nào, anti-pattern). Checklist test theo loại thay đổi: `.agent/checklists/testing.md`.
 
+### Phát hành và vận hành
+| Việc | Lệnh / file |
+|---|---|
+| Version semver + CHANGELOG từ Conventional Commits | `kit-release plan` (xem trước) → `prepare` (nhánh `release/vX.Y.Z`, CHANGELOG, bump version) → `tag` sau khi merge vào main |
+| CD: build image một lần, develop → staging, tag → production (duyệt tay) | `.github/workflows/cd.yml` (module devops; các bước deploy là TODO cho DevOps điền) |
+| Cập nhật dependency tự động | `.github/dependabot.yml` sinh theo từng component (+ Docker, GitHub Actions) |
+| Sự cố production + post-mortem không đổ lỗi | `kit-incident`, `kit-new postmortem "<tiêu đề>"` |
+| Checklist release (gồm DAST/pentest trên staging, rollback) | `.agent/checklists/release.md` |
+| Nâng cấp kit cho dự án đã cài | `kit upgrade <dir>`: file bạn chưa sửa thì cập nhật, file bạn đã sửa thì giữ nguyên + `*.kit-new`, file bạn đã xoá thì không tạo lại; thêm key mới vào `project.yaml` (dựa trên `.agent/kit.manifest`) |
+| Kit tự test chính nó | `.github/workflows/kit-ci.yml`: lint shell + actionlint + gitleaks, `tests/smoke.sh` (init 14 dự án mẫu), `tests/e2e-workflow.sh` (luồng OpenSpec → task → finish) |
+
 ### Tài liệu nằm ở đâu (`.agent/rules/core/documentation.md`, bản đồ: `docs/README.md`)
 | Loại | Ở đâu |
 |---|---|

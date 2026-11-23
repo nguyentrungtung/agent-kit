@@ -4,7 +4,10 @@ source "$(git rev-parse --show-toplevel)/.agent/scripts/lib.sh"
 cd "$KIT_ROOT"
 
 branch="$(current_branch)"
-if git rev-parse -q --verify HEAD >/dev/null && is_protected "$branch"; then
+# kit-release prepare commits the CHANGELOG/version bump on its own release/* branch (only there)
+release_prep=0
+case "$branch" in release/*) [ "${KIT_RELEASE_PREP:-}" = 1 ] && release_prep=1 ;; esac
+if git rev-parse -q --verify HEAD >/dev/null && is_protected "$branch" && [ $release_prep -eq 0 ]; then
   die "direct commits to protected branch '$branch' are not allowed. Use: .agent/scripts/kit-task start TASK-NNN"
 fi
 

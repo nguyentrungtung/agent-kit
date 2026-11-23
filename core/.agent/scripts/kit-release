@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# kit-release plan            next version (semver from Conventional Commits since the last vX.Y.Z tag) + CHANGELOG preview
+# kit-release prepare         from develop: create release/vX.Y.Z, prepend CHANGELOG.md, bump version files, commit (then open a PR to main)
+# kit-release tag             on main after the release PR is merged: annotated tag vX.Y.Z (push it yourself — pushes ask for approval)
+# Rules: BREAKING CHANGE / "type!:" → major (minor while 0.x), feat → minor, fix|perf|sec → patch; other types don't trigger a release.
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+
+last_tag() { git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "${1:-HEAD}" 2>/dev/null || true; }
+range_of() { local t; t="$(last_tag "$1")"; if [ -n "$t" ]; then echo "$t..$1"; else echo "$1"; fi; }
+
+bump_kind() { # bump_kind <range> → major|minor|patch|none
+  local subjects bodies
+  subjects="$(git log --no-merges --format=%s "$1")"; bodies="$(git log --no-merges --format=%b "$1")"
+  if printf '%s\n' "$subjects" | grep -qE '^[a-z]+(\([^)]*\))?!:' || printf '%s\n' "$bodies" | grep -q '^BREAKING CHANGE'; then echo major; return; fi
+  if printf '%s\n' "$subjects" | grep -qE '^feat(\([^)]*\))?:'; then echo minor; return; fi
+  if printf '%s\n' "$subjects" | grep -qE '^(fix|perf|sec)(\([^)]*\))?:'; then echo patch; return; fi
+  echo none
+}
+
+next_version() { # next_version <current vX.Y.Z or empty> <kind>
+  local cur="${1#v}" kind="$2" ma mi pa
+  [ -n "$cur" ] || cur="0.0.0"
+  IFS=. read -r ma mi pa <<< "$cur"
+  case "$kind" in
+    major) if [ "$ma" -eq 0 ]; then mi=$((mi+1)); pa=0; else ma=$((ma+1)); mi=0; pa=0; fi ;;
+    minor) mi=$((mi+1)); pa=0 ;;
+    patch) pa=$((pa+1)) ;;
+  esac
+  echo "v$ma.$mi.$pa"
+}
+
+changelog_section() { # changelog_section <version> <range>
+  local v="$1" r="$2"
+  echo "## ${v#v} — $(today)"
+  git log --no-merges --format='%s%x09%h' "$r" | awk -F'\t' '
+    { s=$1; h=$2; t=s; sub(/[(!:].*/, "", t)
+      d=s; sub(/^[a-z]+(\([^)]*\))?!?: */, "", d)
+      sc=""; if (match(s, /\([^)]*\)/)) sc="**" substr(s, RSTART+1, RLENGTH-2) "**: "
+      line="- " sc d " (" h ")"
+      if (s ~ /^[a-z]+(\([^)]*\))?!:/) br=br line "\n"
+      if (t=="feat") f=f line "\n"; else if (t=="fix") x=x line "\n"; else if (t=="perf") p=p line "\n"; else if (t=="sec") c=c line "\n" }
+    END {
+      if (br!="") printf "\n### ⚠ Breaking changes\n%s", br
+      if (f!="")  printf "\n### Features\n%s", f
+      if (x!="")  printf "\n### Fixes\n%s", x
+      if (p!="")  printf "\n### Performance\n%s", p
+      if (c!="")  printf "\n### Security\n%s", c }'
+  echo
+}
+
+bump_files() { # bump version in files the project actually has (component-aware where easy)
+  local v="${1#v}" f
+  [ -f VERSION ] && echo "$v" > VERSION && info "VERSION → $v"
+  for f in $(git ls-files 'package.json' '*/package.json' | grep -v node_modules); do
+    if command -v npm >/dev/null 2>&1; then (cd "$(dirname "$f")" && npm version --no-git-tag-version --allow-same-version "$v" >/dev/null) && info "$f → $v"; fi
+  done
+  for f in $(git ls-files 'pyproject.toml' '*/pyproject.toml'); do
+    grep -qE '^version *= *"' "$f" || continue
+    awk -v v="$v" '!d && /^version *= *"/ {print "version = \"" v "\""; d=1; next} {print}' "$f" > "$f.tmp" && mv "$f.tmp" "$f" && info "$f → $v"
+  done
+  for f in $(git ls-files 'Cargo.toml' '*/Cargo.toml'); do
+    awk -v v="$v" 'BEGIN{p=0} /^\[package\]/{p=1} p && /^version *=/ && !d {print "version = \"" v "\""; d=1; next} {print}' "$f" > "$f.tmp" && mv "$f.tmp" "$f" && info "$f → $v"
+  done
+  for f in $(git ls-files 'pom.xml' '*/pom.xml'); do
+    if [ -x "$(dirname "$f")/mvnw" ]; then (cd "$(dirname "$f")" && ./mvnw -B -q versions:set -DnewVersion="$v" -DgenerateBackupPoms=false) && info "$f → $v"
+    else warn "$f: set <version>$v</version> (mvn versions:set -DnewVersion=$v)"; fi
+  done
+  return 0
+}
+
+case "${1:-plan}" in
+  plan)
+    base="$(develop_branch)"; git rev-parse -q --verify "$base" >/dev/null || base=HEAD
+    r="$(range_of "$base")"; cur="$(last_tag "$base")"; kind="$(bump_kind "$r")"
+    if [ "$kind" = none ]; then info "no feat/fix/perf/sec/breaking commits since ${cur:-the beginning} — nothing to release"; exit 0; fi
+    nv="$(next_version "$cur" "$kind")"
+    note=""; if [ "$kind" = major ]; then case "${cur:-v0.}" in v0.*) note=" (0.x: breaking → minor)" ;; esac; fi
+    info "current: ${cur:-none} · bump: $kind$note · next: $nv"
+    changelog_section "$nv" "$r" ;;
+  prepare)
+    [ "$(current_branch)" = "$(develop_branch)" ] || die "run from $(develop_branch) (current: $(current_branch))"
+    git diff --quiet && git diff --cached --quiet || die "working tree not clean"
+    r="$(range_of HEAD)"; cur="$(last_tag HEAD)"; kind="$(bump_kind "$r")"
+    [ "$kind" != none ] || die "nothing to release since ${cur:-the beginning}"
+    nv="$(next_version "$cur" "$kind")"; br="release/$nv"
+    git show-ref -q --verify "refs/heads/$br" && die "$br already exists"
+    git checkout -q -b "$br"
+    sec="$(mktemp)"; changelog_section "$nv" "$r" > "$sec"
+    if [ -f CHANGELOG.md ]; then
+      awk -v sf="$sec" 'NR==1 && /^# / {print; print ""; while ((getline l < sf) > 0) print l; next} {print}' CHANGELOG.md > CHANGELOG.md.tmp
+      grep -q "^## ${nv#v} " CHANGELOG.md.tmp || { { echo "# Changelog"; echo; cat "$sec"; tail -n +2 CHANGELOG.md; } > CHANGELOG.md.tmp; }
+      mv CHANGELOG.md.tmp CHANGELOG.md
+    else { echo "# Changelog"; echo; cat "$sec"; } > CHANGELOG.md; fi
+    rm -f "$sec"
+    bump_files "$nv"
+    git add -A
+    KIT_RELEASE_PREP=1 git commit -q -m "chore(release): ${nv}" || die "commit failed"
+    info "on $br with CHANGELOG + version bump. Next: run checks (kit-run ci), push $br and open a PR to $(main_branch) (release checklist: .agent/checklists/release.md)" ;;
+  tag)
+    [ "$(current_branch)" = "$(main_branch)" ] || die "run on $(main_branch) after the release PR is merged"
+    v="$(git log -1 --format=%s | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+    [ -n "$v" ] || v="$(git log --format=%s -20 | grep -oE 'chore\(release\): v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 | grep -oE 'v[0-9.]+' || true)"
+    [ -n "$v" ] || die "no 'chore(release): vX.Y.Z' commit found on $(main_branch)"
+    git rev-parse -q --verify "refs/tags/$v" >/dev/null && die "tag $v exists"
+    git tag -a "$v" -m "Release $v"
+    info "tagged $v. Push it (asks for approval): git push origin $v — then merge $(main_branch) back into $(develop_branch)" ;;
+  *) sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac
