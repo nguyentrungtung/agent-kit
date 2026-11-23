@@ -3,6 +3,8 @@
 Kit chứa **đủ mọi stack và module**. Lệnh `kit init` hỏi bạn chọn gì, rồi **chỉ cài phần đã chọn** vào dự án (mới hoặc đang có):
 convention chuẩn cộng đồng của từng ngôn ngữ (kèm file config tool thật), rules, playbook, hook, CI, BA, SA, Docker.
 
+👉 **Dành cho người mới bắt đầu:** Xem cẩm nang hướng dẫn thực hành từ A đến Z tại **[USER_GUIDE.md](USER_GUIDE.md)**.
+
 ```bash
 git clone <repo-agent-kit> ~/agent-kit
 ~/agent-kit/kit init /path/to/project          # menu chọn (dùng gum nếu có, không thì prompt thường)
