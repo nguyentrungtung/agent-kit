@@ -131,10 +131,30 @@ Mỗi tính năng được phân rã thành các Task vừa vặn (Size M: 150�
 
 ---
 
-### Giai đoạn 3: AI Viết code & Lưu mốc (In-task Checkpoints)
-Áp dụng quy tắc kiểm thử trước (TDD) và lưu tiến độ thường xuyên:
-1. AI viết test trước $\to$ Kiểm tra test thất bại (đúng kỳ vọng).
-2. AI viết mã nguồn để test vượt qua $\to$ Chạy kiểm tra:
+### Giai đoạn 3: Thiết kế Test Case & AI Viết code (TDD + Checkpoint)
+
+#### 3.1. Thiết kế ca kiểm thử: Bộ 6 Ca Kiểm Thử Bắt Buộc (Core 6 Test Matrix)
+Trước khi viết mã nguồn, QA Engineer / AI phải tạo tài liệu kiểm thử (`.agent/scripts/kit-new testplan TASK-NNN` $\to$ `docs/qa/TASK-NNN.md`) và phân tích **tối thiểu 5–6 góc độ kiểm thử** chuẩn mực:
+
+1. **TC-01 (Happy Path - Luồng chuẩn):** Dữ liệu hợp lệ, trạng thái sẵn sàng $\to$ Kết quả thành công (200/201, dữ liệu ghi vào DB).
+2. **TC-02 (Boundary & Limits - Giá trị biên):** Độ dài tối thiểu, tối đa, số 0, số âm, khoảng trắng đầu/cuối được trim (BVA).
+3. **TC-03 (Negative & Validation - Dữ liệu sai):** Thiếu trường bắt buộc, sai định dạng email/regex, trùng lặp tài nguyên (409 Conflict).
+4. **TC-04 (Security & Access Control - Phân quyền):** Chưa đăng nhập (401), không đủ quyền (403), cố tình sửa dữ liệu của user khác (IDOR).
+5. **TC-05 (State Transition & Business Rules - Trạng thái & Nghiệp vụ):** Tài khoản bị khóa mà cố đăng nhập, đơn hàng đã hủy mà cố thanh toán.
+6. **TC-06 (Resilience & Concurrency - Bất biến & Ngoại lệ):** Gửi 2 request trùng nhau cùng lúc (Idempotency key), mạng timeout.
+
+#### 3.2. Cấu trúc bảng Test Case đúng chuẩn:
+```markdown
+| ID | AC / Scenario | Type | Precondition | Test Data / Steps | Expected Result | Automated In | Status |
+|---|---|---|---|---|---|---|---|
+| TC-01 | US-01 AC1 (Happy) | unit | DB rỗng | Input: name="An" | Trả về: "Xin chào, An" | src/greeting.test.ts::testValid | passed |
+| TC-02 | US-01 AC2 (Boundary) | unit | - | Input: name="" | Trả về: "Xin chào, bạn" | src/greeting.test.ts::testEmpty | passed |
+| TC-03 | US-01 AC3 (Trim) | unit | - | Input: name="  An  " | Trả về: "Xin chào, An" | src/greeting.test.ts::testTrim | passed |
+```
+
+#### 3.3. Quy trình TDD và Lưu tiến độ (In-task Checkpoints):
+1. AI viết test trước $\to$ Chạy test thất bại (Red - đúng kỳ vọng).
+2. AI viết mã nguồn tối thiểu để test vượt qua (Green) $\to$ Chạy kiểm tra:
    ```bash
    .agent/scripts/kit-run check
    ```
