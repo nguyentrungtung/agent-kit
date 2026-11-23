@@ -13,3 +13,5 @@ yarn.lock
 docs
 AGENTS.md
 CLAUDE.md
+openspec
+.agents

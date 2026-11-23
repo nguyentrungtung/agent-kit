@@ -28,6 +28,12 @@ case "$tool" in
     if re '(^|/)(\.php-cs-fixer(\.dist)?\.php|phpstan\.neon(\.dist)?|deptrac\.ya?ml|pint\.json|eslint\.config\.[cm]?[jt]s|\.eslintrc[^/]*|\.prettierrc[^/]*|\.dependency-cruiser\.[cm]?js|ruff\.toml|mypy\.ini|\.importlinter|\.golangci\.ya?ml|rustfmt\.toml|clippy\.toml|deny\.toml|\.editorconfig|Directory\.Build\.props|checkstyle[^/]*\.xml)$' "$rel"; then
       ask "editing quality-tool config '$rel' (must not weaken rules — needs an ADR if relaxing)"
     fi
+    if re '^openspec/(config\.ya?ml|schemas/)' "$rel"; then
+      ask "editing the OpenSpec workflow/config '$rel' (team-wide workflow change)"
+    fi
+    if re '^openspec/specs/' "$rel"; then
+      ask "editing a living spec directly — behaviour changes go through an OpenSpec change (openspec/changes/<name>/specs/); direct edits only for Purpose/typos"
+    fi
     if re '^\.agent/rules/' "$rel"; then
       ask "editing project rules '$rel'"
     fi

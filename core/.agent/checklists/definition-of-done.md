@@ -1,4 +1,9 @@
-# Definition of Done — all must be true before `kit-task finish`
+# Definition of Done — all must be true before `kit-task finish` (machine part: `kit-task verify`)
+
+## Workflow (task file)
+- [ ] §1 Understand, §2 Clarifications, §3 Solution, §4 Test plan, §7 Result are filled
+- [ ] Tests were written first and seen failing; `docs/qa/TASK-NNN.md` covers every AC
+- [ ] OpenSpec change (if any) validates with `--strict`; spec deltas describe the new behaviour
 
 ## Scope
 - [ ] Every acceptance criterion in the task file is met and ticked
@@ -20,5 +25,5 @@
 ## Docs & memory
 - [ ] Task file: progress log + handoff notes updated
 - [ ] ADR written if a decision was made (`kit-adr`)
-- [ ] README / API docs / ARCHITECTURE.md updated if behaviour or structure changed
+- [ ] Living docs updated in this PR: OpenSpec specs (via the change), docs/api (OpenAPI), docs/architecture, README
 - [ ] Lesson added to LESSONS.md if something went wrong on the way

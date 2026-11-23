@@ -26,12 +26,15 @@ Stakeholder list with interest/influence, RACI for decisions, user roles/persona
 ## 4. Process modelling → `process.md` (template `process-asis-tobe.md`)
 - **As-is** (if a process exists) and **To-be** as **swimlane activity diagrams** (one lane per role/system), with decisions,
   exceptions and hand-offs. Mark pain points on as-is, improvements on to-be. Tables of steps (actor, input, output, rule).
-- **Use cases** (template `use-case.md`): diagram + one spec per key use case (actors, pre/post-conditions, main/alternative/exception flows).
+- **Use cases**: overview diagram (template `use-case.md`) + ONE FILE per use case: `.agent/scripts/kit-new usecase "<title>"`
+  → `docs/ba/use-cases/UC-NN-*.md` (actors, pre/post-conditions, main/alternative/exception flows, activity + sequence diagram).
 
 ## 5. Specification → `REQUIREMENTS.md` (+ feature files)
 - FR table (ID, statement "The system shall…", MoSCoW, source goal, stories). One testable statement each.
 - NFR table with **numbers** (ISO 25010 categories: performance, reliability/availability, security, usability/accessibility, maintainability, portability, compliance).
-- User stories `US-NN` grouped by epic in a **story map** (template `story-map.md`); INVEST; acceptance criteria in Given/When/Then incl. negative paths.
+- User stories: ONE FILE each, `.agent/scripts/kit-new story "<title>" --uc UC-NN` → `docs/ba/stories/US-NN-*.md`; INVEST;
+  acceptance criteria Given/When/Then incl. negative paths. Group them by epic in a **story map** (template `story-map.md`).
+  These AC become OpenSpec scenarios in kit-plan, so write them observable and testable.
 - Business rules `BR-NN` (calculations, validations, permissions) — referenced from stories, never duplicated.
 - Data: entities + fields + validation in a **data dictionary**, **ERD** (template `data-model.md`); lifecycle → **state diagram**.
 - Interactions across components/external systems → **sequence diagrams** (template `sequence.md`), include error/timeout paths.
@@ -53,4 +56,4 @@ Run `.agent/scripts/kit-run docs` (renders every Mermaid/PlantUML block; fails o
 
 ## 9. Hand-off
 Update `PROJECT.md` goals/non-goals and `GLOSSARY.md`. Summarise to the human (goals, Must-haves, open questions, diagrams produced).
-Next: **kit-sa** if architecture/infrastructure is undecided, else **kit-plan**.
+Next: **kit-sa** if architecture/infrastructure is undecided, else **kit-plan** (stories → OpenSpec changes → kit tasks).

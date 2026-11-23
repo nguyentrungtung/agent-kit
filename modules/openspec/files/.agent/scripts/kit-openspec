@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# kit-openspec <openspec args…> — run the OpenSpec CLI pinned to project.yaml `openspec_version`.
+# Uses an installed `openspec` when its version matches, otherwise `npx -y @fission-ai/openspec@<version>`.
+# Telemetry is off unless the project sets OPENSPEC_TELEMETRY itself.
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+export OPENSPEC_TELEMETRY="${OPENSPEC_TELEMETRY:-0}"
+want="$(cfg openspec_version 2.1.1)"
+if command -v openspec >/dev/null 2>&1 && [ "$(openspec --version 2>/dev/null)" = "$want" ]; then
+  exec openspec "$@"
+fi
+command -v npx >/dev/null 2>&1 || die "OpenSpec needs Node.js ≥ 20.19 (npx not found). Install Node or: npm install -g @fission-ai/openspec@$want"
+exec npx -y "@fission-ai/openspec@$want" "$@"

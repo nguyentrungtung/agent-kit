@@ -42,8 +42,9 @@ current_branch() { git rev-parse --abbrev-ref HEAD 2>/dev/null || echo ""; }
 # Task id from branch name, e.g. feature/TASK-012-login -> TASK-012
 task_from_branch() { current_branch | grep -oE 'TASK-[0-9]+' | head -n1 || true; }
 
-task_file() { # task_file TASK-012
-  local f; f="$(ls "$KIT_TASKS"/"$1"*.md 2>/dev/null | head -n1 || true)"
+task_file() { # task_file TASK-012 → active file, else archived one (.agent/tasks/archive/YYYY-MM/)
+  local f; f="$(ls "$KIT_TASKS"/"$1"-*.md "$KIT_TASKS"/"$1".md 2>/dev/null | head -n1 || true)"
+  [ -n "$f" ] || f="$(ls "$KIT_TASKS"/archive/*/"$1"-*.md 2>/dev/null | head -n1 || true)"
   printf '%s' "$f"
 }
 
@@ -67,14 +68,21 @@ task_branch() { # task_branch TASK-012 → local task branch name (not backup/*)
   [ -n "$b" ] || b="$(git for-each-ref --format='%(refname:short)' "refs/remotes/*/*/$1-*" 2>/dev/null | grep -v '/backup/' | head -n1 || true)"
   printf '%s' "$b"
 }
-task_names_all() { # every TASK-*.md name in the working tree and on task/base branches
-  { ls "$KIT_TASKS" 2>/dev/null | grep -E '^TASK-[0-9]+.*\.md$' || true
-    for b in $(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null | grep -v '^backup/'); do
-      git ls-tree --name-only "$b" .agent/tasks/ 2>/dev/null | sed 's#.*/##' | grep -E '^TASK-[0-9]+.*\.md$' || true
-    done; } | sort -u
+task_names_all() { # repo-relative paths of every task: working tree (active + archive), then ones only on branches
+  local seen=" " p b n
+  for p in $( (ls "$KIT_TASKS" 2>/dev/null | grep -E '^TASK-[0-9]+.*\.md$' | sed 's#^#.agent/tasks/#'
+               ls "$KIT_TASKS"/archive/*/ 2>/dev/null >/dev/null && find "$KIT_TASKS/archive" -name 'TASK-*.md' | sed "s#^$KIT_ROOT/##") || true); do
+    n="$(basename "$p")"; case "$seen" in *" $n "*) continue ;; esac; seen="$seen$n "; echo "$p"
+  done
+  for b in $(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null | grep -v '^backup/'); do
+    for p in $(git ls-tree --name-only "$b" .agent/tasks/ 2>/dev/null | grep -E '/TASK-[0-9]+[^/]*\.md$' || true); do
+      n="$(basename "$p")"; case "$seen" in *" $n "*) continue ;; esac; seen="$seen$n "; echo "$p"
+    done
+  done
 }
-task_view() { # task_view <TASK-…md name> → freshest content: its branch tip, else working tree, else any branch
-  local name="$1" id br rel b; id="$(printf '%s' "$name" | grep -oE '^TASK-[0-9]+')"; rel=".agent/tasks/$name"
+task_view() { # task_view <repo-relative task path> → freshest content: its branch tip, else working tree, else develop/main
+  local rel="$1" name id br b; name="$(basename "$rel")"; id="$(printf '%s' "$name" | grep -oE '^TASK-[0-9]+')"
+  case "$rel" in */archive/*) cat "$KIT_ROOT/$rel" 2>/dev/null; return 0 ;; esac   # archived = final
   br="$(task_branch "$id")"
   if [ -n "$br" ] && git cat-file -e "$br:$rel" 2>/dev/null; then git show "$br:$rel"; return; fi
   [ -f "$KIT_ROOT/$rel" ] && { cat "$KIT_ROOT/$rel"; return; }
@@ -102,4 +110,18 @@ issue_of() { # issue_of <TASK-ID> [<task-content>]
 issue_set() { # issue_set <TASK-ID> <n>
   touch "$ISSUE_MAP"; grep -v "^$1=" "$ISSUE_MAP" > "$ISSUE_MAP.tmp" || true
   echo "$1=$2" >> "$ISSUE_MAP.tmp"; sort -o "$ISSUE_MAP" "$ISSUE_MAP.tmp"; rm -f "$ISSUE_MAP.tmp"
+}
+
+# ---- OpenSpec links ----
+has_openspec() { [ -d "$KIT_ROOT/openspec" ] && [ -x "$KIT_DIR/scripts/kit-openspec" ]; }
+change_dir() { printf '%s/openspec/changes/%s' "$KIT_ROOT" "$1"; }
+tasks_of_change() { # tasks_of_change <change> → repo-relative task paths linked to it
+  local p; for p in $(task_names_all); do [ "$(fmv "$(task_view "$p")" change)" = "$1" ] && echo "$p"; done; return 0
+}
+
+# ascii_slug "<text>" [maxlen] → lowercase kebab-case ASCII; strips Vietnamese/Latin diacritics (đ → d)
+ascii_slug() {
+  perl -CSA -MUnicode::Normalize -e '
+    my $s = NFD($ARGV[0]); $s =~ s/\pM//g; $s =~ tr/\x{111}\x{110}/dD/; $s = lc $s;
+    $s =~ s/[^a-z0-9]+/-/g; $s =~ s/^-+|-+$//g; print $s' "$1" | cut -c1-"${2:-50}" | sed -E 's/-+$//'
 }

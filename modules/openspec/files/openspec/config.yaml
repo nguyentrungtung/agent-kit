@@ -1,0 +1,31 @@
+# OpenSpec project config — installed by agent-kit. Injected into every OpenSpec artifact prompt.
+schema: kit-flow
+
+context: |
+  This repository uses agent-kit. Rules live in .agent/rules/ (project > stack > core) and AGENTS.md; follow them.
+  Business analysis (use cases, stories, rules) lives in docs/ba/; architecture and data decisions in docs/architecture/ and docs/adr/.
+  Write all OpenSpec artifacts in: {{DOCS_LANGUAGE}}. Keep identifiers, code, and requirement keywords (SHALL, WHEN, THEN) in English.
+  openspec/specs/ is the single source of truth for current behaviour. Old task files and archived changes are history, not truth.
+
+rules:
+  proposal:
+    - Link the source use cases / user stories / business rules (docs/ba) and the PROJECT.md goal.
+    - Fill Clarifications before anything else; stop on unanswered blocking questions.
+    - State Out of scope explicitly.
+  specs:
+    - Every acceptance criterion becomes at least one scenario, named with its story/AC id.
+    - Include negative scenarios (validation, permission, not found, conflict).
+  design:
+    - Always include Impact & reuse, Test plan and Rules applied; Data model / API contract when they change.
+    - Prefer reusing existing code found with codegraph over writing new code.
+  tasks:
+    - One group per kit task (TASK-NNN in the heading), tests first in every group.
+
+operations:
+  apply:
+    guidance:
+      - Implement only through .agent/scripts/kit-task (start → checkpoint → finish); never commit on develop/main.
+      - Follow the kit-task playbook steps: understand, clarify, test first, implement, check, document.
+  archive:
+    guidance:
+      - Archiving is done by `.agent/scripts/kit-task finish` on the last task of the change, so specs merge with the code. Do not archive by hand.

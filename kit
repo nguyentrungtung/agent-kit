@@ -390,6 +390,13 @@ generate_compose() {
   rm -f "$envtmp"
 }
 
+render_module_placeholders() { # values only known at install time
+  local f="$TARGET/openspec/config.yaml" language
+  case "$LANG_DOCS" in vi) language=Vietnamese ;; en) language=English ;; *) language="$LANG_DOCS" ;; esac
+  [ -f "$f" ] && grep -q '{{DOCS_LANGUAGE}}' "$f" && { sed -i.bak "s/{{DOCS_LANGUAGE}}/$language/" "$f"; rm -f "$f.bak"; }
+  return 0
+}
+
 render_playbooks() { # fill AGENTS.md §6 from installed skills
   local list f n d af
   list="$(mktemp)"
@@ -577,6 +584,7 @@ cmd_init() {
   build_commands
   write_project_yaml
   apply_project_add
+  render_module_placeholders
   has_module docker && generate_compose
   render_playbooks
   insert_ci_setup
@@ -639,6 +647,7 @@ cmd_add() {
   sed -i.bak "s#^modules:.*#modules: $MODS#" "$cfg" && rm -f "$cfg.bak"
   grep -q '^modules:' "$cfg" || echo "modules: $MODS" >> "$cfg"
   apply_project_add
+  LANG_DOCS="$(yget "$cfg" docs_language)"; render_module_placeholders
   render_playbooks
   [ -f "$TARGET/.agent/kit.lock" ] && { sed -i.bak "s#^modules:.*#modules: $MODS#; s#^services:.*#services: $SERVICES#" "$TARGET/.agent/kit.lock"; rm -f "$TARGET/.agent/kit.lock.bak"; }
   local keep="$MODS"; MODS="$new"; [ "$SETUP" != no ] && run_module_setup; MODS="$keep"

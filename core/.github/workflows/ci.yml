@@ -55,6 +55,8 @@ jobs:
       - run: .agent/scripts/kit-run install
       - run: .agent/scripts/kit-run format_check lint typecheck
       - run: .agent/scripts/kit-run arch
+      - name: OpenSpec specs and changes valid
+        run: .agent/scripts/kit-run specs
       - run: .agent/scripts/kit-run test
       - run: .agent/scripts/kit-run build
       - name: Diagrams render (docs)

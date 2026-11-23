@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # kit-task — task lifecycle with gitflow branches, checkpoints and safe rollback
 #
-#   kit-task new "<title>" [--type feature|fix|hotfix|refactor|chore|docs|test] [--priority P1|P2|P3]
+#   kit-task new "<title>" [--type feature|fix|hotfix|refactor|chore|docs|test] [--priority P1|P2|P3] [--change <openspec-change>]
+#   kit-task verify [TASK-ID]         check the workflow gates (understand, clarify, solution, tests, result, AC, change)
 #   kit-task start <TASK-ID> [--worktree]  create <type>/<TASK-ID>-<slug> from develop (hotfix: from main), tag base
 #                                     --worktree: in a separate git worktree ../<repo>-<TASK-ID> (parallel agents)
 #   kit-task worktrees                list task worktrees
@@ -25,13 +26,20 @@ remote() { printf '%s' "${KIT_REMOTE:-origin}"; }
 require_clean() {
   git diff --quiet && git diff --cached --quiet || die "working tree has uncommitted changes — run: kit-task checkpoint \"<msg>\" (or stash) first"
 }
+PLANNING_RE='^(docs/|openspec/|\.agent/(tasks|memory|context)/)'
+require_clean_code() { # planning docs (BA, specs, changes, tasks, ADRs) may travel into the task branch; code may not
+  local dirty
+  dirty="$(git status --porcelain | cut -c4- | sed 's/.* -> //' | grep -vE "$PLANNING_RE" || true)"
+  [ -z "$dirty" ] || die "uncommitted code changes — checkpoint or stash them first:
+$(printf '%s\n' "$dirty" | head -n 10 | sed 's/^/   /')"
+}
 require_task_branch() {
   local id; id="$(task_from_branch)"
   [ -n "$id" ] || die "not on a task branch (expected <type>/TASK-NNN-slug). Current: $(current_branch)"
   is_protected "$(current_branch)" && die "refusing to operate on protected branch $(current_branch)"
   printf '%s' "$id"
 }
-slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-40 | sed -E 's/-+$//'; }
+slugify() { ascii_slug "$1" 40; }
 log_progress() { # log_progress <file> <text>
   local f="$1"; shift
   if grep -q '^## Progress log' "$f"; then
@@ -49,28 +57,37 @@ is_merged() {
   git merge-base --is-ancestor "$tip" "$(develop_branch)" 2>/dev/null || git merge-base --is-ancestor "$tip" "$(main_branch)" 2>/dev/null
 }
 
-# Mark review tasks that are merged as done. Writes files → only called right before a commit (kit-task start).
+# Mark review tasks that are merged as done, then move done/abandoned tasks to .agent/tasks/archive/YYYY-MM/
+# (so agents don't read finished work as current truth). Writes files → only called right before a commit (kit-task start).
 sync_done() {
-  local f
+  local f st month
   for f in "$KIT_TASKS"/TASK-*.md; do
     [ -f "$f" ] || continue
-    [ "$(fm_get "$f" status)" = review ] && is_merged "$f" || continue
-    fm_set "$f" status "done"; fm_set "$f" "done" "$(today)"; info "$(basename "$f" .md) → done (merged)"
+    st="$(fm_get "$f" status)"
+    if [ "$st" = review ] && is_merged "$f"; then
+      fm_set "$f" status "done"; fm_set "$f" "done" "$(today)"; st=done; info "$(basename "$f" .md) → done (merged)"
+    fi
+    case "$st" in done|abandoned) ;; *) continue ;; esac
+    month="$(fm_get "$f" "done" | cut -c1-7)"; [ -n "$month" ] || month="$(date +%Y-%m)"
+    mkdir -p "$KIT_TASKS/archive/$month"
+    git mv -k "$f" "$KIT_TASKS/archive/$month/" 2>/dev/null || mv "$f" "$KIT_TASKS/archive/$month/"
+    info "$(basename "$f" .md) → archive/$month"
   done
 }
 
 cmd_new() {
-  local title="" type=feature prio=P2
+  local title="" type=feature prio=P2 change=""
   while [ $# -gt 0 ]; do case "$1" in
-    --type) type="$2"; shift 2 ;; --priority) prio="$2"; shift 2 ;; *) title="${title:+$title }$1"; shift ;;
+    --type) type="$2"; shift 2 ;; --priority) prio="$2"; shift 2 ;; --change) change="$2"; shift 2 ;; *) title="${title:+$title }$1"; shift ;;
   esac; done
-  [ -n "$title" ] || die 'usage: kit-task new "<title>" [--type feature] [--priority P2]'
+  [ -n "$title" ] || die 'usage: kit-task new "<title>" [--type feature] [--priority P2] [--change <openspec-change>]'
+  if [ -n "$change" ] && [ ! -d "$(change_dir "$change")" ]; then warn "OpenSpec change '$change' not found under openspec/changes/ (create it: kit-new change $change)"; fi
   local last n id f
-  last="$( (ls "$KIT_TASKS" 2>/dev/null | grep -oE '^TASK-[0-9]+' || true) | sed 's/TASK-//' | sort -n | tail -n1)"
+  last="$(task_names_all | xargs -n1 basename 2>/dev/null | grep -oE '^TASK-[0-9]+' | sed 's/TASK-//' | sort -n | tail -n1 || true)"
   n=$(( 10#${last:-0} + 1 )); id="$(printf 'TASK-%03d' "$n")"
   f="$KIT_TASKS/$id-$(slugify "$title").md"
   local t_esc; t_esc="$(printf '%s' "$title" | sed 's/[\/&|]/\\&/g')"
-  sed -e "s/{{ID}}/$id/g" -e "s/{{TITLE}}/$t_esc/g" -e "s/{{TYPE}}/$type/g" -e "s/{{PRIORITY}}/$prio/g" -e "s/{{DATE}}/$(today)/g" \
+  sed -e "s/{{ID}}/$id/g" -e "s/{{TITLE}}/$t_esc/g" -e "s/{{TYPE}}/$type/g" -e "s/{{PRIORITY}}/$prio/g" -e "s/{{DATE}}/$(today)/g" -e "s/{{CHANGE}}/$change/g" \
     "$KIT_TASKS/_TEMPLATE.md" > "$f"
   info "created $f"
   echo "$id"
@@ -86,7 +103,7 @@ cmd_start() {
   base="$(base_for_type "$type")"
   git show-ref --verify -q "refs/heads/$base" || die "base branch '$base' missing (run install or: git branch $base $(main_branch))"
   if [ $wt -eq 1 ]; then start_worktree "$id" "$f" "$type" "$base"; return; fi
-  require_clean
+  require_clean_code
   br="$(fm_get "$f" branch)"
   if [ -n "$br" ] && git show-ref --verify -q "refs/heads/$br"; then
     git checkout -q "$br"; info "resumed $br"; return
@@ -99,9 +116,15 @@ cmd_start() {
   git tag -f "kit/$id/base" >/dev/null
   fm_set "$f" status in-progress; fm_set "$f" branch "$br"; fm_set "$f" started "$(today)"
   log_progress "$f" "started on $br (base: $base @ $(git rev-parse --short HEAD))"
-  git add -A "$KIT_TASKS"
+  # the task file + any planning docs written on the base branch (BA, ADR, OpenSpec change) travel with the first commit
+  git add -A "$KIT_TASKS" "$KIT_DIR/memory" "$KIT_DIR/context" 2>/dev/null || true
+  [ -d "$KIT_ROOT/docs" ] && git add -A "$KIT_ROOT/docs"
+  [ -d "$KIT_ROOT/openspec" ] && git add -A "$KIT_ROOT/openspec"
   git commit -q -m "chore($id): start task" || true
   info "on $br — restore point kit/$id/base created"
+  local ch; ch="$(fm_get "$f" change)"
+  [ -n "$ch" ] && info "OpenSpec change: openspec/changes/$ch/ (proposal, specs, design, tasks) — read it before coding"
+  return 0
 }
 
 wt_path_for() { # existing worktree path whose branch contains <id>
@@ -199,13 +222,74 @@ cmd_rollback() {
   info "rolled back to $tag. Previous state kept in branch $backup"
 }
 
+section_body() { # section_body <file> <heading-regex> → meaningful lines of that ## section (comments, blanks, table chrome removed)
+  perl -0pe 's/<!--.*?-->//gs' "$1" | awk -v h="$2" '/^## /{ins = ($0 ~ h); next} ins' \
+    | grep -vE '^[[:space:]]*$|^[[:space:]]*\|[-|: ]+\|[[:space:]]*$|^\|[[:space:]]*#[[:space:]]*\|[[:space:]]*Question' || true
+}
+
+cmd_verify() {
+  local id="${1:-}"; [ -n "$id" ] || id="$(require_task_branch)"
+  local f; f="$(task_file "$id")"; [ -f "$f" ] || die "task file for $id not found"
+  local type change bad=0 ac qa
+  type="$(fm_get "$f" type)"; change="$(fm_get "$f" change)"
+  gate() { if [ "$1" = ok ]; then printf '  %s✓%s %s\n' "$c_grn" "$c_off" "$2"; else printf '  %s✗%s %s\n' "$c_red" "$c_off" "$2"; bad=1; fi; }
+  echo "workflow gates for $id ($type)"
+  [ -n "$(section_body "$f" '^## 1\. Understand')" ] && gate ok "1 Understand filled" || gate no "1 Understand is empty — restate the problem and link its source (change / UC / US)"
+  [ -n "$(section_body "$f" '^## 2\. Clarifications')" ] && gate ok "2 Clarifications recorded" || gate no "2 Clarifications empty — record the Q&A, or write 'None' if nothing was unclear"
+  [ -n "$(section_body "$f" '^## 3\. Solution')" ] && gate ok "3 Solution filled" || gate no "3 Solution is empty — approach, reuse found, files touched"
+  ac="$(section_body "$f" '^## Acceptance criteria')"
+  if printf '%s\n' "$ac" | grep -qE '^- \[[xX]\]' && ! printf '%s\n' "$ac" | grep -qE '^- \[ \]'; then gate ok "all acceptance criteria ticked"
+  else gate no "acceptance criteria: every item must be ticked [x] (and proven by a test)"; fi
+  case "$type" in
+    feature|fix|hotfix|refactor)
+      qa="$KIT_ROOT/docs/qa/$id.md"
+      if [ -f "$qa" ]; then
+        gate ok "test plan docs/qa/$id.md exists"
+        local n missing=""
+        for n in $(printf '%s\n' "$ac" | grep -oE '^- \[.\] AC[0-9]+' | grep -oE 'AC[0-9]+'); do grep -qw "$n" "$qa" || missing="$missing $n"; done
+        [ -z "$missing" ] && gate ok "every AC appears in the test plan" || gate no "AC without test cases in docs/qa/$id.md:$missing"
+      else gate no "missing docs/qa/$id.md — create it: .agent/scripts/kit-new testplan $id"; fi ;;
+  esac
+  [ -n "$(section_body "$f" '^## 7\. Result')" ] && gate ok "7 Result filled" || gate no "7 Result is empty — what changed, how verified, docs updated"
+  if [ -n "$change" ] && has_openspec; then
+    if [ -d "$(change_dir "$change")" ]; then
+      if "$KIT_DIR/scripts/kit-openspec" validate "$change" --strict --no-interactive >/dev/null 2>&1; then gate ok "OpenSpec change '$change' valid (--strict)"
+      else gate no "OpenSpec change '$change' invalid — run: .agent/scripts/kit-openspec validate $change --strict"; fi
+    elif ls -d "$KIT_ROOT"/openspec/changes/archive/*-"$change" >/dev/null 2>&1; then gate ok "OpenSpec change '$change' already archived"
+    else gate no "OpenSpec change '$change' not found"; fi
+  fi
+  [ $bad -eq 0 ] || return 1
+  info "gates OK"
+}
+
+archive_change_if_last() { # archive_change_if_last <id> <task-file> — OpenSpec archive on the last task of a change
+  local id="$1" f="$2" change p st open="" unchecked
+  change="$(fm_get "$f" change)"
+  [ -n "$change" ] && has_openspec && [ -d "$(change_dir "$change")" ] || return 0
+  for p in $(tasks_of_change "$change"); do
+    [ "$(basename "$p")" = "$(basename "$f")" ] && continue
+    st="$(task_effective_status "$(task_view "$p")")"
+    case "$st" in done|abandoned|review) ;; *) open="$open $(basename "$p" .md | grep -oE '^TASK-[0-9]+')" ;; esac
+  done
+  if [ -n "$open" ]; then info "OpenSpec change '$change' still has open tasks:$open — it is archived by the last one"; return 0; fi
+  unchecked="$(grep -cE '^[[:space:]]*- \[ \]' "$(change_dir "$change")/tasks.md" 2>/dev/null || true)"
+  [ "${unchecked:-0}" -eq 0 ] || die "openspec/changes/$change/tasks.md has $unchecked unticked item(s) — finish them or move them to a new task/change first"
+  info "archiving OpenSpec change '$change' → openspec/specs (merged with this PR)"
+  "$KIT_DIR/scripts/kit-openspec" archive "$change" -y >/dev/null || die "openspec archive failed — run: .agent/scripts/kit-openspec archive $change"
+  log_progress "$f" "OpenSpec change $change archived into openspec/specs"
+  git add -A "$KIT_ROOT/openspec" "$KIT_TASKS"
+  git commit -q -m "docs($id): archive OpenSpec change $change into specs" || true
+}
+
 cmd_finish() {
   local id; id="$(require_task_branch)"
   require_clean
+  cmd_verify "$id" || die "workflow gates not met — complete the task file (see above), checkpoint, then finish again"
   info "running quality gate: kit-run check"
   "$KIT_DIR/scripts/kit-run" check || die "checks failed — fix before finishing"
   local f type base br title
   f="$(task_file "$id")"; type="$(fm_get "$f" type)"; base="$(base_for_type "${type:-feature}")"
+  archive_change_if_last "$id" "$f"
   br="$(current_branch)"; title="$(fm_get "$f" title)"
   fm_set "$f" status review
   log_progress "$f" "finished, PR to $base"
@@ -271,7 +355,7 @@ gh_ready() {
 }
 issue_body() { # issue_body <task-content> <file-name>
   printf '%s\n' "$1" | awk '/^## Goal/{p=1} /^## (Context|Out of scope|Plan|Test cases|Risks|Progress log|Handoff)/{p=0} /^## Acceptance criteria/{p=1} p'
-  printf '\n---\nTask file: `.agent/tasks/%s` · synced by agent-kit (edit the task file, not this issue body)\n' "$2"
+  printf '\n---\nTask file: `%s` · synced by agent-kit (edit the task file, not this issue body)\n' "$2"
 }
 ensure_labels() {
   local l
@@ -288,7 +372,7 @@ cmd_sync_gh() {
   proj="$(cfg gh_project)"
   ensure_labels
   for name in $(task_names_all); do
-    id="$(printf '%s' "$name" | grep -oE '^TASK-[0-9]+')"
+    id="$(basename "$name" | grep -oE '^TASK-[0-9]+')"
     [ "$sel" = --all ] || [ "$sel" = "$id" ] || continue
     c="$(task_view "$name")"; [ -n "$c" ] || continue
     title="$(fmv "$c" title)"; st="$(task_effective_status "$c")"; type="$(fmv "$c" type)"; prio="$(fmv "$c" priority)"; issue="$(issue_of "$id" "$c")"
@@ -355,8 +439,8 @@ cmd_list() {
 
 sub="${1:-status}"; shift || true
 case "$sub" in
-  new|start|checkpoint|points|rollback|finish|merged|revert|abandon|status|list|worktrees|cleanup) "cmd_$sub" "$@" ;;
+  new|start|checkpoint|points|rollback|finish|merged|revert|abandon|status|list|worktrees|cleanup|verify) "cmd_$sub" "$@" ;;
   sync-gh) cmd_sync_gh "$@" ;;
   pull-gh) cmd_pull_gh "$@" ;;
-  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

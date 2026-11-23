@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# kit-new <kind> … — create documents from the templates in .agent/templates (never let an agent invent the skeleton)
+#   kit-new task "<title>" [--type …] [--priority …] [--change <c>]   → .agent/tasks/TASK-NNN-slug.md (kit-task new)
+#   kit-new change <kebab-name> ["<description>"]                     → openspec/changes/<name>/ (schema kit-flow)
+#   kit-new testplan TASK-NNN                                          → docs/qa/TASK-NNN.md, one row per acceptance criterion
+#   kit-new adr "<title>" [--task TASK-NNN]                            → docs/adr/NNNN-slug.md + index in DECISIONS.md
+#   kit-new usecase "<title>"                                          → docs/ba/use-cases/UC-NN-slug.md   (module ba)
+#   kit-new story "<title>" [--uc UC-NN]                               → docs/ba/stories/US-NN-slug.md     (module ba)
+#   kit-new doc <path.md> "<title>"                                    → living document with front matter
+# Prints the created path. Never overwrites an existing file.
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+TPL="$KIT_DIR/templates"
+
+usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+slug() { ascii_slug "$1" 50; }
+esc() { printf '%s' "$1" | sed 's/[\/&|]/\\&/g'; }
+next_num() { # next_num <dir> <prefix-regex> <width>  → zero-padded next number
+  local n; n="$(ls "$1" 2>/dev/null | grep -oE "^$2[0-9]+" | grep -oE '[0-9]+$' | sed 's/^0*//' | sort -n | tail -n1)"
+  printf "%0${3}d" $(( ${n:-0} + 1 ))
+}
+render() { # render <template> <dest> <key=value>...
+  local t="$1" d="$2"; shift 2
+  [ -f "$t" ] || die "template $(basename "$t") not found in .agent/templates (module not installed?)"
+  [ -e "$d" ] && die "$d already exists"
+  mkdir -p "$(dirname "$d")"
+  local args=() kv
+  for kv in "$@"; do args+=(-e "s|{{${kv%%=*}}}|$(esc "${kv#*=}")|g"); done
+  sed "${args[@]}" "$t" > "$d"
+  echo "${d#"$KIT_ROOT"/}"
+}
+
+kind="${1:-}"; shift || true
+case "$kind" in
+  task) exec "$KIT_DIR/scripts/kit-task" new "$@" ;;
+
+  change)
+    name="${1:-}"; [ -n "$name" ] || die 'usage: kit-new change <kebab-name> ["<description>"]'
+    printf '%s' "$name" | grep -qE '^[a-z0-9]+(-[a-z0-9]+)*$' || die "change name must be kebab-case (e.g. add-order-export)"
+    has_openspec || die "OpenSpec module not installed (kit add openspec)"
+    "$KIT_DIR/scripts/kit-openspec" new change "$name" --schema kit-flow ${2:+--description "$2"} >/dev/null || die "openspec new change failed"
+    echo "openspec/changes/$name/"
+    info "next: write proposal → specs → design → tasks (Claude Code: /openspec-propose $name, or: .agent/scripts/kit-openspec instructions proposal --change $name)"
+    ;;
+
+  testplan)
+    id="${1:-}"; [ -n "$id" ] || id="$(task_from_branch)"; [ -n "$id" ] || die "usage: kit-new testplan TASK-NNN"
+    f="$(task_file "$id")"; [ -f "$f" ] || die "task $id not found"
+    rows="$(mktemp)"
+    sed -n '/^## Acceptance criteria/,/^## [^A]/p' "$f" | grep -E '^- \[.\] AC[0-9]+' | sed -E 's/^- \[.\] //' | awk '
+      { ac = $1; txt = $0; sub(/^AC[0-9]+[[:space:]]*/, "", txt); sub(/^(—|-|:)[[:space:]]*/, "", txt); gsub(/\|/, "/", txt); n++
+        printf "| TC-%02d | %s — %s | positive | unit | | | | | todo |\n", n, ac, txt }' > "$rows"
+    [ -s "$rows" ] || echo "| TC-01 | AC1 | positive | unit | | | | | todo |" > "$rows"
+    out="$(render "$TPL/testplan.md" "$KIT_ROOT/docs/qa/$id.md" ID="$id" TITLE="$(fm_get "$f" title)" CHANGE="$(fm_get "$f" change)" DATE="$(today)")"
+    awk -v rf="$rows" '$0 == "{{ROWS}}" { while ((getline l < rf) > 0) print l; next } { print }' "$KIT_ROOT/$out" > "$KIT_ROOT/$out.tmp" \
+      && mv "$KIT_ROOT/$out.tmp" "$KIT_ROOT/$out"; rm -f "$rows"
+    echo "$out"
+    ;;
+
+  adr)
+    title=""; task="$(task_from_branch)"
+    while [ $# -gt 0 ]; do case "$1" in --task) task="$2"; shift 2 ;; *) title="${title:+$title }$1"; shift ;; esac; done
+    [ -n "$title" ] || die 'usage: kit-new adr "<title>" [--task TASK-NNN]'
+    num="$(next_num docs/adr '' 4)"
+    out="$(render "$TPL/adr.md" "$KIT_ROOT/docs/adr/$num-$(slug "$title").md" NUM="$num" TITLE="$title" DATE="$(today)" TASK="${task:-}")"
+    [ -f "$KIT_DIR/memory/DECISIONS.md" ] && printf '| ADR-%s | %s | %s | proposed | %s |\n' "$num" "$(today)" "$title" "$out" >> "$KIT_DIR/memory/DECISIONS.md"
+    echo "$out"
+    ;;
+
+  usecase)
+    title="$*"; [ -n "$title" ] || die 'usage: kit-new usecase "<title>"'
+    num="$(next_num docs/ba/use-cases 'UC-' 2)"
+    render "$TPL/usecase.md" "$KIT_ROOT/docs/ba/use-cases/UC-$num-$(slug "$title").md" NUM="$num" TITLE="$title" DATE="$(today)"
+    ;;
+
+  story)
+    title=""; uc=""
+    while [ $# -gt 0 ]; do case "$1" in --uc) uc="$2"; shift 2 ;; *) title="${title:+$title }$1"; shift ;; esac; done
+    [ -n "$title" ] || die 'usage: kit-new story "<title>" [--uc UC-NN]'
+    num="$(next_num docs/ba/stories 'US-' 2)"
+    render "$TPL/story.md" "$KIT_ROOT/docs/ba/stories/US-$num-$(slug "$title").md" NUM="$num" TITLE="$title" UC="$uc" DATE="$(today)"
+    ;;
+
+  doc)
+    path="${1:-}"; shift || true; title="$*"
+    [ -n "$path" ] && [ -n "$title" ] || die 'usage: kit-new doc <path.md> "<title>"'
+    render "$TPL/living-doc.md" "$KIT_ROOT/$path" TITLE="$title" DATE="$(today)"
+    ;;
+
+  *) usage ;;
+esac

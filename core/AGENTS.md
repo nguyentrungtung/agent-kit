@@ -20,23 +20,29 @@
 | Current status / where we left off | `.agent/memory/STATE.md` |
 | Past decisions | `.agent/memory/DECISIONS.md` → `docs/adr/` |
 | Mistakes not to repeat | `.agent/memory/LESSONS.md` |
-| Requirements (BA) | `docs/ba/` · Architecture: `docs/architecture/` · Plan & roadmap: `docs/plan/` |
+| **Current behaviour (source of truth)** | `openspec/specs/` — read before changing anything |
+| Changes in progress | `openspec/changes/<change>/` (proposal, spec deltas, design, tasks) |
+| Requirements (BA) | `docs/ba/` · Architecture: `docs/architecture/` · API: `docs/api/` · Plan & roadmap: `docs/plan/` |
+| Where each kind of document lives | `.agent/rules/core/documentation.md` · map: `docs/README.md` |
 | Tasks | `.agent/tasks/` (one file per task) |
 | Playbooks (step-by-step procedures) | `.claude/skills/<name>/SKILL.md` |
 | Checklists | `.agent/checklists/` |
 | Project commands | `.agent/project.yaml` (run them via `.agent/scripts/kit-run <step>`) |
 
-## 2. Workflow (never skip a step)
+## 2. Workflow (never skip a step) — details: `.agent/rules/core/workflow.md`
 ```
-idea ─▶ kit-ba ─▶ (kit-sa ─▶ kit-docker) ─▶ kit-plan ─▶ kit-task start ─▶ implement + checkpoint ─▶ kit-testcases ─▶ kit-review + kit-security ─▶ kit-task finish (PR) ─▶ human merge ─▶ kit-task merged
-                                                            ▲                    │
-                                                            └── kit-task rollback ┘  (wrong direction? go back to a restore point)
+idea ─▶ kit-ba (UC/US/BR) ─▶ kit-sa (architecture, data) ─▶ kit-plan: OpenSpec change (proposal → specs → design → tasks) + kit tasks
+     ─▶ per task: kit-task start ─▶ 1 understand ─▶ 2 clarify (ask!) ─▶ 3 solution ─▶ 4 tests first (red) ─▶ 5 implement + checkpoint
+     ─▶ 6 verify ─▶ 7 document (living docs) ─▶ 8 kit-task finish (gates, archive change → specs, PR) ─▶ human merge
+                     ▲                                  │
+                     └──────── kit-task rollback ◀──────┘   (wrong direction? back to a restore point)
 ```
-- **No code without a task.** No task without acceptance criteria. Unclear requirement → ask, don't guess.
+- **No code without a task. No task without acceptance criteria. Unclear → ask, never guess.**
+- Everything traces to a use case: UC/US → change → TASK → test → code → spec.
 - Work **only on a task branch** (`<type>/TASK-NNN-slug`). `main`, `develop`, `release/*`, `hotfix/*` are protected.
-- Small steps: change → `kit-run check` (or the relevant step) → `kit-task checkpoint "<what is now working>"`.
-- Going in circles (same error 3×, or the plan no longer fits) → stop, `kit-task rollback`, write the lesson in `LESSONS.md`, re-plan.
-- Done = every item of `.agent/checklists/definition-of-done.md` is true. Then `kit-task finish`.
+- Create documents with `.agent/scripts/kit-new <task|change|testplan|adr|usecase|story|doc>` — never invent the skeleton.
+- Small steps: change → `kit-run check` → `kit-task checkpoint "<what is now working>"`. Same error 3× → rollback, LESSONS.md, re-plan.
+- Done = `kit-task verify` passes + `.agent/checklists/definition-of-done.md`. Then `kit-task finish`.
 
 ## 3. Hard rules (also enforced by hooks / git hooks / CI)
 - Never read, print, create or commit secrets: `.env*` (except `.env.example`), keys, certs, credentials, tokens.

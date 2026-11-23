@@ -56,6 +56,7 @@ Monorepo: mỗi component là `path=stack+framework`. Lệnh được ghép ki�
 | `sa` | ✔ | `kit-sa` + agent `solution-architect`: kịch bản chất lượng, so sánh phương án, arc42-lite `docs/architecture/SOLUTION.md`, C4 context/container/deployment, `sizing.md` (sizing + chi phí), ADR |
 | `docker` | ✔ | Dockerfile cho từng component, `compose.yaml` sinh từ catalog (postgres, mysql, redis, rabbitmq, kafka, minio, mailpit, keycloak, observability), `kit-run up/down/logs`, skill `kit-docker` |
 | `codegraph` | ✔ | `codegraph init` (index + MCP), rule `code-intelligence.md`, `.codegraph/` vào gitignore |
+| `openspec` | ✔ | [OpenSpec](https://github.com/Fission-AI/OpenSpec) 2.1.1 (ghim version, chạy qua `kit-openspec`, tắt telemetry) + schema **`kit-flow`**: proposal có Source/Clarifications, design có Impact & reuse/Data model/API/Test plan, tasks mỗi nhóm = 1 kit task, test trước. Cần Node ≥ 20.19 |
 | `serena` | | thêm Serena (LSP qua MCP, chạy bằng uvx) vào `.mcp.json` |
 
 ### Rules nằm ở đâu
@@ -67,6 +68,34 @@ Monorepo: mỗi component là `path=stack+framework`. Lệnh được ghép ki�
 .claude/rules/stack-*.md   — chỉ trỏ tới file trên, có `paths:` nên Claude Code chỉ nạp khi đụng đúng loại file
 ```
 Thứ tự ưu tiên: `project` > `stack` > `core`. Tool (formatter, linter, arch test) thắng mọi văn bản. Khi agent sửa `.agent/rules/**` hoặc file config tool (phpstan.neon, eslint.config…), hook sẽ hỏi người duyệt.
+
+### Quy trình chuẩn cho mọi task (`.agent/rules/core/workflow.md`)
+
+```
+UC/US (docs/ba) ─▶ OpenSpec change: proposal ─▶ specs ─▶ design ─▶ tasks      (kit-plan, kit-new change)
+                         │ Source + Clarifications (hỏi rõ trước)   │ mỗi nhóm = 1 TASK
+                         ▼                                          ▼
+ kit-task start ─▶ 1 Hiểu ─▶ 2 Hỏi rõ ─▶ 3 Giải pháp (codegraph: tái sử dụng) ─▶ 4 Test trước (đỏ) ─▶ 5 Code + checkpoint
+               ─▶ 6 Verify ─▶ 7 Tài liệu (Result + living docs) ─▶ 8 kit-task finish
+                                                                    │ verify gates → kit-run check → archive change vào openspec/specs → PR
+```
+- `kit-task verify` **chặn bằng máy**: §1 Understand, §2 Clarifications, §3 Solution, §7 Result phải có nội dung; mọi AC đã tick; `docs/qa/TASK-NNN.md` có đủ mọi AC; change OpenSpec hợp lệ `--strict`.
+- Task cuối của một change sẽ **archive change vào `openspec/specs/` trong cùng PR** với code. Spec luôn khớp với code đã merge.
+- Tài liệu kế hoạch (BA, ADR, change) viết trên `develop` được `kit-task start` mang sang nhánh task. Code chưa commit thì vẫn bị chặn.
+- Task done được chuyển vào `.agent/tasks/archive/YYYY-MM/` để agent không đọc lịch sử như sự thật hiện tại.
+
+### Tài liệu nằm ở đâu (`.agent/rules/core/documentation.md`, bản đồ: `docs/README.md`)
+| Loại | Ở đâu |
+|---|---|
+| Hệ thống đang làm gì (living) | `openspec/specs/` |
+| Cấu trúc, dữ liệu, hạ tầng (living) | `docs/architecture/`, `docs/api/` |
+| Nghiệp vụ | `docs/ba/` (use case, story mỗi cái một file) |
+| Thay đổi đang làm | `openspec/changes/<change>/` |
+| Nhật ký thực thi một task | `.agent/tasks/TASK-NNN-*.md` + `docs/qa/TASK-NNN.md` |
+| Quyết định | `docs/adr/` |
+
+### Scaffold bằng script (`.agent/scripts/kit-new`), không để AI tự sinh khung
+`kit-new task|change|testplan|adr|usecase|story|doc`. Template nằm ở `.agent/templates/`, schema OpenSpec ở `openspec/schemas/kit-flow/`. Tự đánh số (UC-NN, US-NN, ADR-NNNN, TASK-NNN), slug tiếng Việt bỏ dấu đúng (`Chào người dùng` → `chao-nguoi-dung`).
 
 ## 1. Kiến trúc: 4 lớp
 
@@ -138,6 +167,9 @@ Thứ tự ưu tiên: `project` > `stack` > `core`. Tool (formatter, linter, arc
 | Lệnh | Việc |
 |---|---|
 | `.agent/scripts/kit-run <step…>` | Chạy lệnh dự án theo `project.yaml`: `install format format_check lint typecheck arch test build audit secrets docs up down logs`, `check`, `ci` |
+| `kit-task new "<title>" --change <c>` / `kit-task verify` | Task gắn với change OpenSpec / kiểm tra các gate của quy trình |
+| `.agent/scripts/kit-new <kind> …` | Tạo tài liệu từ template: task, change, testplan, adr, usecase, story, doc |
+| `.agent/scripts/kit-openspec <args>` | OpenSpec CLI đúng version ghim trong `project.yaml` (dùng `npx` nếu máy chưa cài) |
 | `kit-task start TASK-NNN --worktree` | Task chạy trong worktree riêng `../<repo>-TASK-NNN` để nhiều agent làm song song |
 | `kit-task worktrees` / `cleanup TASK-NNN` | Liệt kê worktree / gỡ worktree (từ chối nếu còn việc chưa commit) |
 | `kit-task sync-gh [TASK-NNN\|--all]` / `pull-gh <issue#>` | Đồng bộ task ↔ GitHub Issues (label status/type/priority, tự đóng khi done, tuỳ chọn thêm vào GitHub Project) / tạo task từ issue |

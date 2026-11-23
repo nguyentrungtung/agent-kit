@@ -47,7 +47,7 @@ json() {
     function deps(s,  a,n,i,o) { if (s=="") return "[]"; n=split(s,a,","); o="["; for(i=1;i<=n;i++) o=o (i>1?",":"") "\"" esc(a[i]) "\""; return o "]" }
     BEGIN { printf "{\"project\":%s,\"repo\":%s,\"generated\":\"%s\",\"tasks\":[", str(name), str(repo), gen }
     { printf "%s{\"id\":%s,\"status\":%s,\"priority\":%s,\"type\":%s,\"title\":%s,\"branch\":%s,\"worktree\":%s,\"issue\":%s,\"goal_ref\":%s,\"depends_on\":%s,\"started\":%s,\"done\":%s,\"checkpoints\":%d,\"dirty_files\":%s,\"file\":%s}",
-        (NR>1?",":""), str($1), str($2), str($3), str($4), str($5), str($6), str($7), ($8==""?"null":$8), str($9), deps($10), str($11), str($12), $13, ($14==""?"null":$14), str(".agent/tasks/" $15) }
+        (NR>1?",":""), str($1), str($2), str($3), str($4), str($5), str($6), str($7), ($8==""?"null":$8), str($9), deps($10), str($11), str($12), $13, ($14==""?"null":$14), str($15) }
     END { print "]}" }' "$rows"
 }
 

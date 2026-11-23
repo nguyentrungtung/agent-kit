@@ -24,8 +24,10 @@ if [ -n "$id" ]; then
   f="$(task_file "$id")"
   if [ -f "$f" ]; then
     section "ACTIVE TASK $id (${f#"$KIT_ROOT"/})"
+    ch="$(fm_get "$f" change)"
+    [ -n "$ch" ] && echo "OpenSpec change: openspec/changes/$ch/ (proposal, specs, design, tasks)"
     if [ $brief -eq 1 ]; then
-      sed -n '1,/^---$/!p' "$f" | sed -n '/^## Goal/,/^## Plan/p' | head -n 25
+      perl -0pe 's/<!--.*?-->//gs' "$f" | sed -n '/^## 1\. Understand/,/^## 3\. Solution/p' | grep -v '^[[:space:]]*$' | head -n 25
       echo "… (read the full task file before working)"
     else
       cat "$f"
@@ -51,5 +53,7 @@ if [ $brief -eq 0 ]; then
 fi
 
 section "READ ON DEMAND (do not load all at once)"
-echo "- Goals/scope: .agent/context/PROJECT.md · Architecture: .agent/context/ARCHITECTURE.md"
+echo "- Current behaviour: openspec/specs/ (source of truth) · Docs map: docs/README.md · Workflow: .agent/rules/core/workflow.md"
+echo "- Goals/scope: .agent/context/PROJECT.md · Architecture: .agent/context/ARCHITECTURE.md · Rules: .agent/rules/"
+echo "- Finished tasks live in .agent/tasks/archive/ — history only, do not read them to learn the system"
 echo "- Conventions: .agent/context/CONVENTIONS.md · Playbooks: .claude/skills/<name>/SKILL.md"
