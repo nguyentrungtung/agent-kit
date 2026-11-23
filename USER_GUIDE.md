@@ -207,6 +207,12 @@ Khi có các task độc lập không phụ thuộc nhau (ví dụ: Task 1 làm 
 ```
 Hai agent làm việc cùng lúc trên 2 thư mục làm việc độc lập, nhân đôi tốc độ dự án mà không lo xung đột mã nguồn.
 
+### 3. Quy chuẩn viết tài liệu Markdown (Diátaxis Style Guide)
+Tất cả tài liệu kỹ thuật trong dự án tuân thủ nghiêm ngặt tiêu chuẩn [docs/STYLEGUIDE.md](core/docs/STYLEGUIDE.md):
+* **Khung Diátaxis:** Phân loại rõ ràng 4 loại: *Tutorials* (hướng dẫn người mới), *How-to* (xử lý tác vụ cụ thể), *Reference* (tra cứu API/lệnh), *Explanation* (kiến trúc & lý do).
+* **Định dạng Markdown:** Duy nhất 1 thẻ H1, không nhảy cóc cấp tiêu đề, code block luôn có cú pháp ngôn ngữ, sơ đồ Mermaid được kiểm tra bằng `.agent/scripts/kit-run docs`.
+* **Thông báo chuẩn GitHub:** Sử dụng `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`.
+
 ---
 
 ## 6. Quản trị & Khôi phục an toàn (Rollback)

@@ -15,4 +15,5 @@ Rule: read **living** docs to understand the system; change records only for the
 | `adr/` | Architecture decision records | decision | `kit-new adr`, `kit-adr` |
 | `plan/` | Roadmap and milestones | living (plan) | `kit-plan` |
 | `security/` | Threat model, PII register, accepted risks (module `security`) | living | `kit-appsec`, `kit-security` |
+| `STYLEGUIDE.md` | Markdown documentation standards (Diataxis, formatting, alerts) | standard | human / tech lead |
 | `daily/` | Daily / weekly reports | report | `kit-daily` |

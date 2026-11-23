@@ -14,10 +14,15 @@ Separate by **lifetime**. Agents read living docs to understand the system; chan
 | **Reports** | What happened today/this week? | `docs/daily/` | End of session | Rarely |
 | **History** | — | `.agent/tasks/archive/YYYY-MM/`, `openspec/changes/archive/` | Never edited | Archaeology only |
 
-## Rules
-- Living docs carry front matter `title, status, owner, updated` (`kit-new doc`). Stale living docs are bugs.
-- A PR that changes behaviour, structure or a contract without updating the matching living doc is incomplete (DoD).
-- Task files record the journey (Q&A, decisions, results, timestamps) — they are not the spec. Once done they move to the archive.
-- Never duplicate: link instead (task → change → spec → UC). One fact, one home.
-- Create documents with `kit-new` from `.agent/templates/`; do not invent structure.
-- `docs/README.md` is the map — add new top-level docs there.
+## Rules & Style Guide
+Full documentation style guide: `docs/STYLEGUIDE.md`. Every agent creating or editing markdown docs MUST obey:
+1. **Diataxis Framework:** Classify the doc into one quadrant (Tutorial, How-to, Reference, Explanation). Never mix disparate purposes on one page.
+2. **Heading Discipline:** Exactly one `# H1` title at top. Heading hierarchy strictly sequential (`#` → `##` → `###`); never skip levels.
+3. **Front Matter:** Living docs carry front matter `title, category, status, owner, updated` (`kit-new doc`). Stale living docs are bugs.
+4. **Code Fences:** Always specify language tag after backticks (` ```bash `, ` ```typescript `); never leave raw backticks.
+5. **Diagrams:** Mermaid/PlantUML node labels with spaces or symbols must be quoted. Validate syntax via `kit-run docs`.
+6. **Callouts:** Use GitHub alerts (`> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`, `> [!CAUTION]`).
+7. **Relative Links:** Use relative paths only (`[text](../path/file.md)`); never machine-specific absolute paths.
+8. **Single Source of Truth:** Never duplicate paragraphs; link instead (task → change → spec → UC). One fact, one home.
+9. **Living Docs Rule:** A PR that changes behaviour, structure, or a contract without updating the matching living doc is incomplete (Definition of Done).
+10. `docs/README.md` is the map — add new top-level docs there.
