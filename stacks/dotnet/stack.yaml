@@ -11,6 +11,7 @@ cmd_lint: dotnet build --no-restore -warnaserror
 cmd_typecheck:
 cmd_arch: dotnet test --no-restore --filter "FullyQualifiedName~ArchitectureTests"
 cmd_test: dotnet test --no-restore
+cmd_coverage: dotnet test --no-restore /p:CollectCoverage=true /p:Threshold=${KIT_COVERAGE_MIN} /p:ThresholdType=line
 cmd_build: dotnet build -c Release --no-restore
 cmd_audit: dotnet list package --vulnerable --include-transitive
 post_note: Directory.Build.props turns on nullable + analyzers + warnings-as-errors for every project; add NetArchTest tests from .agent/stack/dotnet/snippets.

@@ -1,0 +1,29 @@
+{
+  "threshold": 3,
+  "minLines": 8,
+  "minTokens": 60,
+  "reporters": ["console"],
+  "gitignore": true,
+  "absolute": false,
+  "ignore": [
+    "**/node_modules/**",
+    "**/vendor/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/target/**",
+    "**/dbt_packages/**",
+    "**/.agent/**",
+    "**/.agents/**",
+    "**/.claude/**",
+    "**/openspec/**",
+    "**/docs/**",
+    "**/*.lock",
+    "**/package-lock.json",
+    "**/*.min.*",
+    "**/migrations/**",
+    "**/*.md",
+    "**/*.json",
+    "**/*.yml",
+    "**/*.yaml"
+  ]
+}

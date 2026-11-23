@@ -11,6 +11,7 @@ cmd_lint: sqlfluff lint .
 cmd_typecheck: dbt parse --target ci
 cmd_arch: dbt build --target ci --select package:dbt_project_evaluator
 cmd_test: dbt build --target ci --exclude package:dbt_project_evaluator
+cmd_coverage: 
 cmd_build: dbt docs generate --target ci
 cmd_audit:
 post_note: copy .agent/stack/dbt/snippets/profiles.example.yml into your dbt profiles (target ci = DuckDB, no warehouse needed in CI), add packages.yml from the snippets, then kit-run install.

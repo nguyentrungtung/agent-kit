@@ -9,10 +9,11 @@ dev_deps:
 cmd_install: ./gradlew --no-daemon -q dependencies
 cmd_format: ./gradlew --no-daemon spotlessApply
 cmd_format_check: ./gradlew --no-daemon spotlessCheck
-cmd_lint: ./gradlew --no-daemon checkstyleMain checkstyleTest
+cmd_lint: ./gradlew --no-daemon checkstyleMain checkstyleTest pmdMain
 cmd_typecheck: ./gradlew --no-daemon compileJava compileTestJava
 cmd_arch: ./gradlew --no-daemon test --tests '*ArchitectureTest'
 cmd_test: ./gradlew --no-daemon test
+cmd_coverage: ./gradlew --no-daemon test jacocoTestCoverageVerification -Pcoverage.min=$(awk "BEGIN{print ${KIT_COVERAGE_MIN}/100}")
 cmd_build: ./gradlew --no-daemon build -x test
 cmd_audit: ./gradlew --no-daemon dependencyCheckAnalyze
 post_note: merge .agent/stack/java-gradle/snippets/build.gradle.kts into your build script and copy ArchitectureTest.java into src/test/java/<base package>/.

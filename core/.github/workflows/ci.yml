@@ -65,7 +65,10 @@ jobs:
         run: .agent/scripts/kit-run specs
       - name: Ops lint (Dockerfile, workflows, shell, compose, terraform, k8s)
         run: .agent/scripts/kit-run ops
-      - run: .agent/scripts/kit-run test
+      - name: Tests (+ coverage gate when cmd_coverage is set)
+        run: .agent/scripts/kit-run testcov
+      - name: Duplicated code
+        run: .agent/scripts/kit-run dup
       - run: .agent/scripts/kit-run build
       - name: Diagrams render (docs)
         run: .agent/scripts/kit-run docs

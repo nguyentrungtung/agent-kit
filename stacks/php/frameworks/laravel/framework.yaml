@@ -5,3 +5,4 @@ cmd_format: vendor/bin/pint
 cmd_format_check: vendor/bin/pint --test
 cmd_test: php artisan test
 exclude_files: .php-cs-fixer.dist.php
+cmd_coverage: php artisan test --coverage --min=${KIT_COVERAGE_MIN}

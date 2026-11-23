@@ -16,6 +16,10 @@ export default tseslint.config(
     },
     rules: {
       eqeqeq: ['error', 'always'],
+      complexity: ['error', 10],
+      'max-depth': ['error', 3],
+      'max-params': ['error', 4],
+      'max-lines-per-function': ['error', { max: 60, skipBlankLines: true, skipComments: true }],
       'no-console': ['error', { allow: ['warn', 'error'] }],
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-floating-promises': 'error',
@@ -31,6 +35,10 @@ export default tseslint.config(
         },
       ],
     },
+  },
+  {
+    files: ['**/*.{test,spec}.{ts,tsx,js}', 'tests/**', 'e2e/**'],
+    rules: { 'max-lines-per-function': 'off' },
   },
   { files: ['**/*.js', '**/*.mjs', '**/*.cjs'], ...tseslint.configs.disableTypeChecked },
   {

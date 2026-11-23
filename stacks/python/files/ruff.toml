@@ -15,9 +15,18 @@ select = [
   "SIM", "C4", "RET", "PTH", "ERA",
   "ANN",           # type annotations
   "PL",            # pylint subset
+  "C90",           # mccabe complexity
   "RUF",
 ]
-ignore = ["D100", "D104", "D105", "D107", "ANN401", "PLR0913"]
+ignore = ["D100", "D104", "D105", "D107", "ANN401"]
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.pylint]
+max-args = 5
+max-branches = 10
+max-statements = 40
 
 [lint.per-file-ignores]
 "tests/**" = ["S101", "D", "ANN", "PLR2004"]

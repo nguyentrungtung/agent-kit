@@ -18,7 +18,13 @@ linters:
     - contextcheck
     - errname
     - exhaustive
+    - gocognit
+    - gocyclo
+    - funlen
   settings:
+    gocognit: { min-complexity: 15 }
+    gocyclo: { min-complexity: 10 }
+    funlen: { lines: 60, statements: 40 }
     revive:
       rules:
         - name: exported

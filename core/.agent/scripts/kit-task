@@ -227,6 +227,23 @@ section_body() { # section_body <file> <heading-regex> → meaningful lines of t
     | grep -vE '^[[:space:]]*$|^[[:space:]]*\|[-|: ]+\|[[:space:]]*$|^\|[[:space:]]*#[[:space:]]*\|[[:space:]]*Question' || true
 }
 
+unresolved_test_refs() { # unresolved_test_refs <docs/qa/TASK-NNN.md> → one line per test case whose "Automated in" does not resolve
+  local qa="$1" tag tc ref file name
+  awk -F'|' '/^\| *TC-[0-9]+/ {
+      ref=$9; st=tolower($10); gsub(/^[ `]+|[ `]+$/, "", ref); gsub(/^ +| +$/, "", st)
+      if (st ~ /manual/) next
+      if (ref == "") { print "MISSING" "\t" $2; next }
+      print "CHECK" "\t" $2 "\t" ref }' "$qa" |
+  while IFS="$(printf '\t')" read -r tag tc ref; do
+    if [ "$tag" = MISSING ]; then echo "$tc: no 'Automated in'"; continue; fi
+    file="${ref%%::*}"; name=""
+    if [ "${ref#*::}" != "$ref" ]; then name="${ref#*::}"; fi
+    if [ ! -f "$KIT_ROOT/$file" ]; then echo "$tc: $file not found"
+    elif [ -n "$name" ] && ! grep -qF -- "$name" "$KIT_ROOT/$file"; then echo "$tc: '$name' not in $file"; fi
+  done
+  return 0
+}
+
 cmd_verify() {
   local id="${1:-}"; [ -n "$id" ] || id="$(require_task_branch)"
   local f; f="$(task_file "$id")"; [ -f "$f" ] || die "task file for $id not found"
@@ -248,6 +265,11 @@ cmd_verify() {
         local n missing=""
         for n in $(printf '%s\n' "$ac" | grep -oE '^- \[.\] AC[0-9]+' | grep -oE 'AC[0-9]+'); do grep -qw "$n" "$qa" || missing="$missing $n"; done
         [ -z "$missing" ] && gate ok "every AC appears in the test plan" || gate no "AC without test cases in docs/qa/$id.md:$missing"
+        # every non-manual test case must point to a real test: `path` or `path::test name`
+        local bad_ref; bad_ref="$(unresolved_test_refs "$qa")"
+        [ -z "$bad_ref" ] && gate ok "every automated test case points to an existing test" \
+          || gate no "test plan references that do not resolve (fill 'Automated in' as path::test-name, or Status 'manual' + reason):
+$(printf '%s\n' "$bad_ref" | sed 's/^/      /' | head -n 10)"
       else gate no "missing docs/qa/$id.md — create it: .agent/scripts/kit-new testplan $id"; fi ;;
   esac
   [ -n "$(section_body "$f" '^## 7\. Result')" ] && gate ok "7 Result filled" || gate no "7 Result is empty — what changed, how verified, docs updated"

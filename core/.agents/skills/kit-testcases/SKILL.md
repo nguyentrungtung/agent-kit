@@ -7,7 +7,7 @@ description: QA — derive test cases from acceptance criteria (positive, negati
 Delegate to the `qa-engineer` sub-agent when available (give it the task file + changed files list).
 
 ## Steps
-1. Inputs: task acceptance criteria, related user stories/business rules (`docs/ba/`), the diff (`git diff kit/TASK-NNN/base`).
+1. Inputs: `.agent/checklists/testing.md` (tests required per kind of change), task acceptance criteria, related user stories/business rules (`docs/ba/`), the diff (`git diff kit/TASK-NNN/base`).
 2. **Design** cases with techniques: equivalence partitions, boundary values, decision tables (rules), state transitions,
    error guessing; plus security (invalid/malicious input, unauthorized access) and regression for fixed bugs.
 3. Create `docs/qa/TASK-NNN.md` with `.agent/scripts/kit-new testplan TASK-NNN` (one row per AC), then complete it:

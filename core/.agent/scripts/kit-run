@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 # kit-run <step...> — run project commands defined in .agent/project.yaml
-# Steps: install format format_check lint typecheck arch test specs build audit secrets docs ops sbom up down logs
+# Steps: install format format_check lint typecheck arch test coverage specs dup build audit secrets docs ops sbom e2e perf api up down logs
+#        testcov = coverage if cmd_coverage is set (fails under coverage_min), else test
 #        check   = format_check lint typecheck arch test specs secrets   (before every commit/PR)
-#        ci      = install check build audit                       (what CI runs)
+#        ci      = install format_check lint typecheck arch testcov specs dup secrets build audit   (what CI runs)
 # Empty commands are skipped (not failed). Exit code != 0 if any step fails.
 source "$(dirname "$0")/lib.sh"
 cd "$KIT_ROOT"
 
-usage() { sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 [ $# -ge 1 ] || usage
 
+tc() { if [ -n "$(cfg cmd_coverage)" ]; then echo coverage; else echo test; fi; }   # testcov resolution
 expand() {
   local s out=()
   for s in "$@"; do
     case "$s" in
       check) out+=(format_check lint typecheck arch test specs secrets) ;;
-      ci)    out+=(install format_check lint typecheck arch test specs secrets build audit) ;;
+      ci)    out+=(install format_check lint typecheck arch "$(tc)" specs dup secrets build audit) ;;
+      testcov) out+=("$(tc)") ;;
       format-check) out+=(format_check) ;;
       *)     out+=("$s") ;;
     esac
@@ -23,6 +26,7 @@ expand() {
   printf '%s\n' "${out[@]}"
 }
 
+export KIT_COVERAGE_MIN="$(cfg coverage_min 70)"
 failed=(); ran=0
 for step in $(expand "$@"); do
   if [ "$step" = secrets ]; then

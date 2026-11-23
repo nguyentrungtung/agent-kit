@@ -103,6 +103,16 @@ UC/US (docs/ba) ─▶ OpenSpec change: proposal ─▶ specs ─▶ design ─�
 - Tài liệu kế hoạch (BA, ADR, change) viết trên `develop` được `kit-task start` mang sang nhánh task. Code chưa commit thì vẫn bị chặn.
 - Task done được chuyển vào `.agent/tasks/archive/YYYY-MM/` để agent không đọc lịch sử như sự thật hiện tại.
 
+### Chất lượng được máy kiểm tra
+| Kiểm tra | Lệnh | Ở đâu |
+|---|---|---|
+| Mỗi AC có test case, mỗi test case trỏ tới **test có thật** (`path::tên test`) hoặc ghi rõ `manual` + lý do | `kit-task verify` | trước `finish` |
+| Coverage ≥ `coverage_min` (c8, pytest-cov, JaCoCo, `go tool cover`, cargo-llvm-cov, coverlet, Laravel `--min`) | `kit-run coverage` / `testcov` | CI |
+| Code trùng lặp ≤ 3% (jscpd, mọi ngôn ngữ) | `kit-run dup` | CI |
+| Độ phức tạp: ESLint `complexity`/`max-params`/`max-depth`, Ruff `C90`/`PLR`, PHPStan cognitive-complexity, PMD (Java), gocognit/gocyclo/funlen, CA1502 (.NET), clippy | `kit-run lint` | pre-push, CI |
+| E2E + accessibility (Playwright + axe, React) · test tải k6 với ngưỡng SLO | `kit-run e2e` · `kit-run perf` | theo task / trước release |
+Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết mới, module sâu, SOLID/KISS/YAGNI, khi nào dùng design pattern nào, anti-pattern). Checklist test theo loại thay đổi: `.agent/checklists/testing.md`.
+
 ### Tài liệu nằm ở đâu (`.agent/rules/core/documentation.md`, bản đồ: `docs/README.md`)
 | Loại | Ở đâu |
 |---|---|

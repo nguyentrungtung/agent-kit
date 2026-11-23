@@ -12,6 +12,7 @@ cmd_lint: ruff check .
 cmd_typecheck: mypy .
 cmd_arch:
 cmd_test: pytest -q
+cmd_coverage: pytest -q --cov --cov-fail-under=${KIT_COVERAGE_MIN}
 cmd_build:
 cmd_audit: pip-audit
 post_note: for layer rules copy .agent/stack/python/snippets/importlinter.ini to .importlinter, set root_package, then set cmd_arch: lint-imports.

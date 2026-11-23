@@ -18,7 +18,7 @@ set -euo pipefail
 KIT_SRC="$(cd "$(dirname "$0")" && pwd)"
 CORE="$KIT_SRC/core"; STACKS="$KIT_SRC/stacks"; MODULES="$KIT_SRC/modules"
 VERSION="$(cat "$KIT_SRC/VERSION" 2>/dev/null || echo dev)"
-STEPS="install format format_check lint typecheck arch test build audit"
+STEPS="install format format_check lint typecheck arch test coverage build audit"
 DETECT_ORDER="java-maven java-gradle php dbt python go rust dotnet node"
 
 if [ -t 2 ]; then G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; B=$'\033[1m'; D=$'\033[2m'; N=$'\033[0m'; else G=; Y=; R=; B=; D=; N=; fi
@@ -303,6 +303,7 @@ install_component() { # install_component <idx>
   src="$(stack_asset "$s" rules.md)"; [ -n "$src" ] && copy_file "$src" "$TARGET/.agent/rules/stack/$s.md"
   [ -n "$fd" ] && [ -f "$fd/rules.md" ] && copy_file "$fd/rules.md" "$TARGET/.agent/rules/stack/$f.md"
   src="$(stack_asset "$s" snippets)"; [ -n "$src" ] && copy_tree "$src" "$TARGET/.agent/stack/$s/snippets"
+  [ -n "$fd" ] && [ -d "$fd/snippets" ] && copy_tree "$fd/snippets" "$TARGET/.agent/stack/$s/snippets"
   # 3. Claude Code path-scoped rule pointer
   globs="$(yget "$(stack_yaml "$s")" globs)"
   if [ -n "$globs" ]; then

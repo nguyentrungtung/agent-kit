@@ -21,6 +21,7 @@ gh_project:                  # optional GitHub Project for kit-task sync-gh, as 
 # Steps: install format format_check lint typecheck arch test build audit docs up down logs
 # Multi-component repos: each cmd runs per component as (cd <path> && …) joined with &&.
 {{COMMANDS}}
+cmd_dup: npx -y jscpd@4.0.5 --config .jscpd.json .
 cmd_lint_staged:             # optional fast lint for pre-commit (e.g. lint-staged, ruff on changed files)
 
 # --- Gates ---

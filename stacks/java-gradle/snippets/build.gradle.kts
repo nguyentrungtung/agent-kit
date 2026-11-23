@@ -2,6 +2,7 @@
 plugins {
     java
     checkstyle
+    pmd
     jacoco
     id("com.diffplug.spotless") version "7.0.2"
     id("org.owasp.dependencycheck") version "12.1.0"
@@ -32,4 +33,16 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     finalizedBy(tasks.jacocoTestReport)
+}
+
+tasks.jacocoTestCoverageVerification {
+    violationRules {
+        rule { limit { minimum = (project.findProperty("coverage.min") ?: "0.70").toString().toBigDecimal() } }
+    }
+}
+
+pmd {
+    ruleSetFiles = files("config/pmd-ruleset.xml")
+    ruleSets = listOf()
+    isConsoleOutput = true
 }

@@ -17,6 +17,7 @@ codegraph|codegraph --version||@colbymchenry/codegraph||module codegraph|1
 openspec|openspec --version||@fission-ai/openspec@{{OPENSPEC_VERSION}}||module openspec (or npx)|0
 node|node --version|node|||module openspec, stack node|0
 mmdc|mmdc --version||@mermaid-js/mermaid-cli||module ba (or Docker)|0
+npx|npx --version|node|||core (jscpd duplicate check, OpenSpec)|0
 docker|docker --version||||module devops (compose, dockerised linters)|0
 hadolint|hadolint --version|hadolint|||module devops (or Docker)|0
 actionlint|actionlint --version|actionlint||go install github.com/rhysd/actionlint/cmd/actionlint@latest|module devops (or Docker)|0

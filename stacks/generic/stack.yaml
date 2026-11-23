@@ -11,5 +11,6 @@ cmd_lint:
 cmd_typecheck:
 cmd_arch:
 cmd_test:
+cmd_coverage: 
 cmd_build:
 cmd_audit:

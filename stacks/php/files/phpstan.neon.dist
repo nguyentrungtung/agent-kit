@@ -3,6 +3,7 @@
 #   vendor/bin/phpstan analyse --generate-baseline   (then add phpstan-baseline.neon to includes)
 includes:
     - vendor/phpstan/phpstan-strict-rules/rules.neon
+    - vendor/tomasvotruba/cognitive-complexity/config/extension.neon
 
 parameters:
     level: 8
@@ -13,3 +14,6 @@ parameters:
     treatPhpDocTypesAsCertain: false
     reportUnmatchedIgnoredErrors: true
     checkMissingCallableSignature: true
+    cognitive_complexity:
+        function: 15
+        class: 60
