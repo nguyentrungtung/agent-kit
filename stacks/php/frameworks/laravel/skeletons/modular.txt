@@ -1,0 +1,11 @@
+# Laravel modular monolith: one folder per module, hexagonal inside. Other modules use only Contracts/ and events.
+app/Modules/{{Module}}/Contracts/              # PUBLIC API of the module: interfaces + DTOs other modules may use. Nothing else is public.
+app/Modules/{{Module}}/Http/Controllers/       # Thin controllers → Application actions.
+app/Modules/{{Module}}/Http/Requests/          # Validation + authorization.
+app/Modules/{{Module}}/Application/            # Use cases (actions), transactions, events dispatched.
+app/Modules/{{Module}}/Domain/                 # Models' invariants, value objects, domain events, enums. No Http/Infrastructure imports.
+app/Modules/{{Module}}/Infrastructure/         # Eloquent repositories, external clients, listeners (adapters).
+app/Modules/{{Module}}/Providers/              # {{Module}}ServiceProvider: bindings, routes, migrations of this module.
+app/Modules/{{Module}}/Database/Migrations/    # Tables owned by this module only.
+tests/Modules/{{Module}}/Feature/              # HTTP tests.
+tests/Modules/{{Module}}/Unit/                 # Domain + application tests.

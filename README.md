@@ -60,6 +60,7 @@ Monorepo: mỗi component là `path=stack+framework`. Lệnh được ghép ki�
 | `codegraph` | ✔ | `codegraph init` (index + MCP), rule `code-intelligence.md`, `.codegraph/` vào gitignore |
 | `openspec` | ✔ | [OpenSpec](https://github.com/Fission-AI/OpenSpec) 2.1.1 (ghim version, chạy qua `kit-openspec`, tắt telemetry) + schema **`kit-flow`**: proposal có Source/Clarifications, design có Impact & reuse/Data model/API/Test plan, tasks mỗi nhóm = 1 kit task, test trước. Cần Node ≥ 20.19 |
 | `data` | preset `data` | `kit-data` + agent `data-engineer`: kiến trúc dữ liệu (batch/stream, warehouse/lakehouse, medallion / staging→marts), mô hình Kimball (grain, SCD), **data contract** (`kit-new contract`), chất lượng dữ liệu viết test trước, lineage, backfill idempotent, PII; schema OpenSpec **`data-flow`** (`kit-new change <tên> --schema data-flow`); rule `.agent/rules/data/`; hook hỏi trước khi chạy vào prod (`--target prod`, `airflow dags backfill`) |
+| `api` | preset `app` | `kit-api`: OpenAPI 3.1 **contract-first** (`docs/api/openapi.yaml`), Spectral (`kit-run api`: kebab-case path, camelCase operationId, lỗi RFC 9457), CI **chặn thay đổi phá vỡ tương thích** bằng oasdiff, Swagger UI (`--services swagger-ui`), bảng thư viện sinh docs theo framework |
 | `eng-skills` | ✔ | 13 skill của [mattpocock/skills](https://github.com/mattpocock/skills) v1.3.2 (MIT, copy cố định, tiền tố `mp-`): `mp-grilling`/`mp-grill-with-docs` (hỏi rõ yêu cầu theo vòng), `mp-domain-modeling` (GLOSSARY + ADR), `mp-tdd`, `mp-diagnosing-bugs`, `mp-codebase-design`/`mp-improve-codebase-architecture` (module sâu), `mp-code-review` (2 chiều: chuẩn + spec), `mp-pr`, `mp-wizard` (script cho bước người làm), `mp-retro`, `mp-to-questionnaire`, `mp-writing-for-agents`. Đã gắn vào kit-task/kit-review/kit-ba/kit-sa/kit-devops/kit-handoff. Cập nhật: `scripts/vendor-mattpocock.py` |
 | `serena` | | thêm Serena (LSP qua MCP, chạy bằng uvx) vào `.mcp.json` |
 
@@ -102,6 +103,10 @@ UC/US (docs/ba) ─▶ OpenSpec change: proposal ─▶ specs ─▶ design ─�
 - Task cuối của một change sẽ **archive change vào `openspec/specs/` trong cùng PR** với code. Spec luôn khớp với code đã merge.
 - Tài liệu kế hoạch (BA, ADR, change) viết trên `develop` được `kit-task start` mang sang nhánh task. Code chưa commit thì vẫn bị chặn.
 - Task done được chuyển vào `.agent/tasks/archive/YYYY-MM/` để agent không đọc lịch sử như sự thật hiện tại.
+
+### Thiết kế: data model và skeleton kiến trúc
+- `kit-datamodel` (module sa): entity/aggregate, quan hệ 1-1/1-n/n-n, chuẩn hoá và khi nào phi chuẩn hoá, **quy tắc chọn ID** (BIGINT / UUIDv7 / public_id), constraint, index, multi-tenancy, migration expand → migrate → contract → `docs/architecture/data-model.md`.
+- `kit-new module <tên> [--style layered|modular]`: sinh khung thư mục một module theo `arch_style` (ADR) cho Laravel, PHP, Spring (Modulith: `<base>/<module>/internal/{api,application,domain,infrastructure}`, cần `base_package`), NestJS/TypeScript, FastAPI. Mỗi thư mục có README ghi trách nhiệm của lớp. Cấu hình arch test tương ứng nằm ở `.agent/stack/<stack>/skeletons/`.
 
 ### Chất lượng được máy kiểm tra
 | Kiểm tra | Lệnh | Ở đâu |

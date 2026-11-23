@@ -1,0 +1,7 @@
+# NestJS modular monolith with hexagonal modules; modules talk via exported providers or events only.
+src/modules/{{module}}/                  # {{module}}.module.ts exports ONLY the public facade provider.
+src/modules/{{module}}/api/              # Controllers + DTOs.
+src/modules/{{module}}/application/      # Use cases (services), ports.
+src/modules/{{module}}/domain/           # Entities/value objects, rules. No Nest/ORM imports.
+src/modules/{{module}}/infrastructure/   # ORM repositories, clients — implement ports.
+test/{{module}}/

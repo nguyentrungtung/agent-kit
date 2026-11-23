@@ -1,0 +1,7 @@
+# PHP layered (clean): src/<Layer>/<Module>. Matches the default deptrac.yaml.
+src/Presentation/{{Module}}/   # HTTP/CLI adapters: parse input, call Application, map output.
+src/Application/{{Module}}/    # Use cases, transactions, ports (interfaces) for infrastructure.
+src/Domain/{{Module}}/         # Entities, value objects, domain services and events. Pure PHP, no framework.
+src/Infrastructure/{{Module}}/ # Adapters: repositories (DB), HTTP clients, queues — implement Application ports.
+tests/Unit/{{Module}}/         # Domain + application tests.
+tests/Integration/{{Module}}/  # Adapters against real services (containers).

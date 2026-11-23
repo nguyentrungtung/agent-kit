@@ -1,0 +1,9 @@
+# title: Swagger UI for docs/api/openapi.yaml (http://localhost:8081)
+# env:
+# volumes:
+  swagger-ui:
+    image: swaggerapi/swagger-ui:v5.18.2
+    environment:
+      SWAGGER_JSON: /api/openapi.yaml
+    volumes: ["./docs/api:/api:ro"]
+    ports: ["8081:8080"]

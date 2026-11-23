@@ -1,0 +1,6 @@
+# TypeScript layered: src/<layer>/<module>.
+src/api/{{module}}/            # HTTP handlers/routes + request/response schemas (zod). No DB access.
+src/services/{{module}}/       # Use cases; depend on repository interfaces.
+src/domain/{{module}}/         # Types, value objects, rules. Pure functions, no I/O.
+src/repositories/{{module}}/   # DB access implementing service interfaces.
+tests/{{module}}/              # Unit + integration tests.

@@ -50,7 +50,7 @@ PRESETS="app data platform minimal"
 preset_modules() { # preset_modules <preset> → module list (only modules that exist)
   local want m o=""
   case "$1" in
-    app)      want="ba sa devops security openspec eng-skills codegraph" ;;
+    app)      want="ba sa api devops security openspec eng-skills codegraph" ;;
     data)     want="ba sa data devops security openspec eng-skills codegraph" ;;
     platform) want="devops security openspec eng-skills codegraph" ;;
     minimal)  want="openspec eng-skills codegraph" ;;
@@ -58,7 +58,7 @@ preset_modules() { # preset_modules <preset> → module list (only modules that 
   esac
   for m in $want; do [ -d "$MODULES/$m" ] && o="$o $m"; done; echo $o
 }
-preset_title() { case "$1" in app) echo "Web/API application — BA, SA, DevOps, Security, OpenSpec, engineering skills, CodeGraph";; data) echo "Data engineering — BA, SA, Data (dbt/Airflow/PySpark), DevOps, Security, OpenSpec data-flow";; platform) echo "Infrastructure / platform repo — DevOps, Security, OpenSpec, CodeGraph";; minimal) echo "Minimal — gates + OpenSpec + CodeGraph only";; esac; }
+preset_title() { case "$1" in app) echo "Web/API application — BA, SA, API contracts, DevOps, Security, OpenSpec, engineering skills, CodeGraph";; data) echo "Data engineering — BA, SA, Data (dbt/Airflow/PySpark), DevOps, Security, OpenSpec data-flow";; platform) echo "Infrastructure / platform repo — DevOps, Security, OpenSpec, CodeGraph";; minimal) echo "Minimal — gates + OpenSpec + CodeGraph only";; esac; }
 all_services() { local f; for f in "$MODULES"/devops/catalog/*.yml; do basename "$f" .yml; done; }
 svc_meta() { sed -n "s/^# $2:[[:space:]]*//p" "$MODULES/devops/catalog/$1.yml" | head -n1; }
 
@@ -304,6 +304,16 @@ install_component() { # install_component <idx>
   [ -n "$fd" ] && [ -f "$fd/rules.md" ] && copy_file "$fd/rules.md" "$TARGET/.agent/rules/stack/$f.md"
   src="$(stack_asset "$s" snippets)"; [ -n "$src" ] && copy_tree "$src" "$TARGET/.agent/stack/$s/snippets"
   [ -n "$fd" ] && [ -d "$fd/snippets" ] && copy_tree "$fd/snippets" "$TARGET/.agent/stack/$s/snippets"
+  # architecture skeletons (kit-new module): framework definitions win over the stack's
+  if [ -n "$fd" ] && [ -d "$fd/skeletons" ]; then copy_tree "$fd/skeletons" "$TARGET/.agent/stack/$s/skeletons"; fi
+  src="$(stack_asset "$s" skeletons)"
+  if [ -n "$src" ]; then
+    for rel in "$src"/*; do
+      [ -f "$rel" ] || continue
+      [ -n "$fd" ] && [ -f "$fd/skeletons/$(basename "$rel")" ] && continue
+      copy_file "$rel" "$TARGET/.agent/stack/$s/skeletons/$(basename "$rel")"
+    done
+  fi
   # 3. Claude Code path-scoped rule pointer
   globs="$(yget "$(stack_yaml "$s")" globs)"
   if [ -n "$globs" ]; then

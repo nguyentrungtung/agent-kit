@@ -1,0 +1,9 @@
+# Laravel layered: Controller → Action/Service → Repository/Model. Placeholders: {{module}} {{Module}}
+app/Http/Controllers/{{Module}}/   # Thin controllers: FormRequest → Action → Resource. No queries, no business rules.
+app/Http/Requests/{{Module}}/      # FormRequest classes: validation + authorize().
+app/Http/Resources/{{Module}}/     # JsonResource classes: the API contract (never return models).
+app/Actions/{{Module}}/            # One class per use case (__invoke). Business rules live here or in models' invariants.
+app/Repositories/{{Module}}/       # Optional query objects for complex reads; simple CRUD may use Eloquent directly in Actions.
+app/Policies/                      # Authorization per model ({{Module}}Policy).
+tests/Feature/{{Module}}/          # HTTP tests per endpoint (RefreshDatabase).
+tests/Unit/{{Module}}/             # Action/rule unit tests.

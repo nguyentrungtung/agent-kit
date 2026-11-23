@@ -1,0 +1,8 @@
+# Spring Modulith: <base>/<module> root package = public API (facade + events); internals under internal/. ApplicationModules.verify() enforces it.
+src/main/java/{{package_path}}/{{module}}/                          # PUBLIC: {{Module}}Api facade, published events, DTOs. Other modules use only this package.
+src/main/java/{{package_path}}/{{module}}/internal/api/             # Controllers (web adapter) — request/response records.
+src/main/java/{{package_path}}/{{module}}/internal/application/     # Use cases, @Transactional, event publishing.
+src/main/java/{{package_path}}/{{module}}/internal/domain/          # Aggregates, value objects, domain rules. No Spring web/persistence imports.
+src/main/java/{{package_path}}/{{module}}/internal/infrastructure/  # JPA entities/repositories, external clients, event listeners.
+src/test/java/{{package_path}}/{{module}}/                          # @ApplicationModuleTest per module + unit tests.
+src/main/resources/db/migration/                                    # Flyway; tables named with the module prefix.

@@ -4,6 +4,8 @@ description: {{DESCRIPTION}}
 stack: {{STACK}}                # primary stack
 components: {{COMPONENTS}}      # path=stack[+framework] … (kit init)
 modules: {{MODULES}}
+arch_style: modular         # layered | modular — decided by an ADR (kit-sa); used by kit-new module
+base_package:               # Java/Kotlin base package, e.g. com.example.shop (kit-new module)
 docs_language: vi            # language the agent writes docs/reports in (vi | en)
 kit_version: {{KIT_VERSION}}
 

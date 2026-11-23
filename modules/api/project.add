@@ -1,0 +1,1 @@
+cmd_api: npx -y @stoplight/spectral-cli@6.14.2 lint docs/api/openapi.yaml --fail-severity warn

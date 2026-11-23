@@ -1,0 +1,6 @@
+# NestJS feature module (Nest convention).
+src/{{module}}/            # {{module}}.module.ts, {{module}}.controller.ts, {{module}}.service.ts
+src/{{module}}/dto/        # class-validator DTOs (request/response).
+src/{{module}}/entities/   # ORM entities.
+src/{{module}}/repositories/  # Repository providers behind injection tokens.
+test/{{module}}/           # e2e tests (supertest).

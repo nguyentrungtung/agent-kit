@@ -1,0 +1,7 @@
+# FastAPI modular monolith; other modules import only app/modules/<module>/__init__.py exports. import-linter enforces it.
+app/modules/{{module}}/                  # __init__.py = PUBLIC API.
+app/modules/{{module}}/api/              # Routers + schemas.
+app/modules/{{module}}/application/      # Use cases.
+app/modules/{{module}}/domain/           # Pure domain.
+app/modules/{{module}}/infrastructure/   # Repositories, clients.
+tests/modules/{{module}}/

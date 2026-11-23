@@ -1,0 +1,6 @@
+# FastAPI layered.
+app/api/{{module}}/            # APIRouter + Pydantic request/response models.
+app/services/{{module}}/       # Use cases.
+app/domain/{{module}}/         # Dataclasses / rules, no FastAPI/SQLAlchemy imports.
+app/repositories/{{module}}/   # SQLAlchemy repositories.
+tests/{{module}}/

@@ -1,0 +1,15 @@
+# agent-kit: deptrac for app/Modules/<Module>/<Layer>. Copy over deptrac.yaml when arch_style: modular.
+deptrac:
+  paths: [./app]
+  layers:
+    - { name: Api, collectors: [{ type: directory, value: 'app/Modules/[^/]+/Contracts/.*' }] }
+    - { name: Presentation, collectors: [{ type: directory, value: 'app/Modules/[^/]+/Http/.*' }] }
+    - { name: Application, collectors: [{ type: directory, value: 'app/Modules/[^/]+/Application/.*' }] }
+    - { name: Domain, collectors: [{ type: directory, value: 'app/Modules/[^/]+/Domain/.*' }] }
+    - { name: Infrastructure, collectors: [{ type: directory, value: 'app/Modules/[^/]+/Infrastructure/.*' }] }
+  ruleset:
+    Api: ~
+    Presentation: [Application, Domain, Api]
+    Application: [Domain, Api]
+    Infrastructure: [Domain, Application, Api]
+    Domain: ~

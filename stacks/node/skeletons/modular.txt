@@ -1,0 +1,7 @@
+# TypeScript modular monolith: src/modules/<module>/<layer>; other modules import only index.ts.
+src/modules/{{module}}/                 # index.ts = PUBLIC API (functions/types other modules may use).
+src/modules/{{module}}/api/             # HTTP adapters.
+src/modules/{{module}}/application/     # Use cases.
+src/modules/{{module}}/domain/          # Pure domain logic.
+src/modules/{{module}}/infrastructure/  # DB, clients, queues.
+src/modules/{{module}}/__tests__/

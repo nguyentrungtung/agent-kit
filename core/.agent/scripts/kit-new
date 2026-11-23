@@ -7,6 +7,7 @@
 #   kit-new adr "<title>" [--task TASK-NNN]                            → docs/adr/NNNN-slug.md + index in DECISIONS.md
 #   kit-new usecase "<title>"                                          → docs/ba/use-cases/UC-NN-slug.md   (module ba)
 #   kit-new story "<title>" [--uc UC-NN]                               → docs/ba/stories/US-NN-slug.md     (module ba)
+#   kit-new module <name> [--style layered|modular] [--component <path>]  → folders of one module per the architecture skeleton
 #   kit-new runbook "<alert or operation>"                             → docs/platform/runbooks/<slug>.md (module devops)
 #   kit-new doc <path.md> "<title>"                                    → living document with front matter
 # Prints the created path. Never overwrites an existing file.
@@ -14,7 +15,7 @@ source "$(dirname "$0")/lib.sh"
 cd "$KIT_ROOT"
 TPL="$KIT_DIR/templates"
 
-usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 slug() { ascii_slug "$1" 50; }
 esc() { printf '%s' "$1" | sed 's/[\/&|]/\\&/g'; }
 next_num() { # next_num <dir> <prefix-regex> <width>  → zero-padded next number
@@ -89,6 +90,39 @@ case "$kind" in
   contract)
     title="$*"; [ -n "$title" ] || die 'usage: kit-new contract "<dataset>"'
     render "$TPL/data-contract.md" "$KIT_ROOT/docs/data/contracts/$(slug "$title").md" TITLE="$title" DATE="$(today)"
+    ;;
+
+  module)
+    name=""; style="$(cfg arch_style modular)"; comp=""
+    while [ $# -gt 0 ]; do case "$1" in --style) style="$2"; shift 2 ;; --component) comp="$2"; shift 2 ;; *) name="$1"; shift ;; esac; done
+    [ -n "$name" ] || die 'usage: kit-new module <name> [--style layered|modular] [--component <path>]'
+    # component → stack (first component by default)
+    entry=""; for e in $(cfg components ".=$(cfg stack)+"); do
+      p="${e%%=*}"; if [ -z "$comp" ] || [ "$p" = "$comp" ] || [ "$p" = "${comp%/}" ]; then entry="$e"; break; fi; done
+    [ -n "$entry" ] || die "component '$comp' not found in project.yaml components"
+    cpath="${entry%%=*}"; rest="${entry#*=}"; stack="${rest%%+*}"
+    skel="$KIT_DIR/stack/$stack/skeletons/$style.txt"
+    [ -f "$skel" ] || die "no '$style' skeleton for stack $stack (available: $(ls "$KIT_DIR/stack/$stack/skeletons" 2>/dev/null | sed 's/\.txt$//' | tr '\n' ' '))"
+    kebab="$(ascii_slug "$name" 40)"; snake="$(printf '%s' "$kebab" | tr '-' '_')"; flat="$(printf '%s' "$kebab" | tr -d '-')"
+    pascal="$(printf '%s' "$kebab" | awk -F- '{for(i=1;i<=NF;i++) printf "%s%s", toupper(substr($i,1,1)), substr($i,2)}')"
+    case "$stack" in java-*) mod="$flat" ;; python|dbt) mod="$snake" ;; *) mod="$kebab" ;; esac
+    pkg="$(cfg base_package)"; pkgpath="$(printf '%s' "$pkg" | tr '.' '/')"
+    if grep -q '{{package_path}}' "$skel" && [ -z "$pkg" ]; then die "set base_package in .agent/project.yaml (e.g. com.example.shop) first"; fi
+    root="$KIT_ROOT"; [ "$cpath" != "." ] && root="$KIT_ROOT/$cpath"
+    made=0
+    while IFS= read -r line; do
+      case "$line" in ''|'#'*) continue ;; esac
+      path="$(printf '%s' "${line%%#*}" | sed 's/[[:space:]]*$//')"; note=""
+      [ "${line#*#}" != "$line" ] && note="$(printf '%s' "${line#*#}" | sed 's/^[[:space:]]*//')"
+      path="$(printf '%s' "$path" | sed -e "s#{{module}}#$mod#g" -e "s#{{Module}}#$pascal#g" -e "s#{{package_path}}#$pkgpath#g")"
+      mkdir -p "$root/$path"
+      if [ -n "$note" ] && [ ! -f "$root/$path/README.md" ]; then
+        printf '# %s\n\n%s\n\nPart of module **%s** (%s, `%s` style — see .agent/stack/%s/skeletons/%s.txt).\n' \
+          "${path%/}" "$note" "$pascal" "$stack" "$style" "$stack" "$style" > "$root/$path/README.md"
+      fi
+      echo "${cpath#.}${cpath:+/}${path}" | sed 's#^\./##; s#^/##'; made=$((made+1))
+    done < "$skel"
+    info "module $pascal ($style, $stack): $made folder(s). Next: kit-task for its first use case; architecture rules: .agent/stack/$stack/skeletons/"
     ;;
 
   runbook)

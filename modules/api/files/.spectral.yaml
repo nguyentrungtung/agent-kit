@@ -1,0 +1,32 @@
+# agent-kit: OpenAPI style rules (Spectral). Run: .agent/scripts/kit-run api
+extends: ['spectral:oas']
+rules:
+  operation-operationId: error
+  operation-description: warn
+  operation-tags: error
+  oas3-api-servers: warn
+  info-contact: off
+  kit-paths-kebab-case:
+    description: Path segments are kebab-case, collections plural (e.g. /order-lines/{orderLineId}).
+    given: '$.paths[*]~'
+    then:
+      {
+        function: pattern,
+        functionOptions: { match: "^(/([a-z0-9]+(-[a-z0-9]+)*|\\{[a-zA-Z]+\\}))+$" },
+      }
+    severity: error
+  kit-operation-id-camel:
+    description: operationId is camelCase (listOrders, createOrder).
+    given: '$.paths[*][*].operationId'
+    then: { function: pattern, functionOptions: { match: '^[a-z][a-zA-Z0-9]+$' } }
+    severity: error
+  kit-errors-problem-json:
+    description: 4xx/5xx responses use RFC 9457 application/problem+json.
+    given: "$.paths[*][*].responses[?(@property >= '400')].content"
+    then: { field: 'application/problem+json', function: truthy }
+    severity: error
+  kit-properties-camel:
+    description: JSON properties are camelCase.
+    given: '$..properties[*]~'
+    then: { function: casing, functionOptions: { type: camel } }
+    severity: warn

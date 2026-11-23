@@ -63,6 +63,18 @@ jobs:
       - run: .agent/scripts/kit-run arch
       - name: OpenSpec specs and changes valid
         run: .agent/scripts/kit-run specs
+      - name: API contract lint (Spectral)
+        if: hashFiles('docs/api/openapi.yaml') != ''
+        run: .agent/scripts/kit-run api
+      - name: API breaking changes vs base branch (oasdiff)
+        if: github.event_name == 'pull_request' && hashFiles('docs/api/openapi.yaml') != ''
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch -q origin "$BASE_REF" --depth=1
+          if git show "origin/$BASE_REF:docs/api/openapi.yaml" > /tmp/openapi-base.yaml 2>/dev/null; then
+            docker run --rm -v /tmp:/base -v "$PWD/docs/api:/head" tufin/oasdiff:v1.11.1 breaking /base/openapi-base.yaml /head/openapi.yaml --fail-on ERR
+          else echo "no base contract yet"; fi
       - name: Ops lint (Dockerfile, workflows, shell, compose, terraform, k8s)
         run: .agent/scripts/kit-run ops
       - name: Tests (+ coverage gate when cmd_coverage is set)

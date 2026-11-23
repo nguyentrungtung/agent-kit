@@ -1,0 +1,8 @@
+# PHP modular monolith: src/<Module>/<Layer>. deptrac: use .agent/stack/php/skeletons/deptrac-modular.yaml.
+src/{{Module}}/Api/            # PUBLIC API of the module (facade interfaces + DTOs). Other modules import only this.
+src/{{Module}}/Presentation/   # HTTP/CLI adapters.
+src/{{Module}}/Application/    # Use cases + ports.
+src/{{Module}}/Domain/         # Entities, value objects, domain events. Pure PHP.
+src/{{Module}}/Infrastructure/ # Repositories, clients, listeners.
+tests/{{Module}}/Unit/
+tests/{{Module}}/Integration/

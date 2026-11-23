@@ -1,0 +1,7 @@
+# Spring layered, package-by-feature: <base>/<module>/<layer>. Matches the default ArchitectureTest. Placeholder {{package_path}} = base package as path.
+src/main/java/{{package_path}}/{{module}}/controller/   # @RestController + request/response records. No repositories here.
+src/main/java/{{package_path}}/{{module}}/service/      # @Service use cases, @Transactional boundaries.
+src/main/java/{{package_path}}/{{module}}/domain/       # Entities, value objects, domain rules (no Spring imports where possible).
+src/main/java/{{package_path}}/{{module}}/repository/   # Spring Data repositories.
+src/test/java/{{package_path}}/{{module}}/              # @WebMvcTest, @DataJpaTest + Testcontainers, unit tests.
+src/main/resources/db/migration/                        # Flyway: V<yyyyMMddHHmm>__<verb>_<detail>.sql

@@ -1,0 +1,60 @@
+openapi: 3.1.0
+info:
+  title: Example API
+  version: 0.1.0
+  description: Contract-first API of this project. Change this file in the same PR as the code (kit-api playbook).
+servers:
+  - url: http://localhost:8080
+    description: local
+tags:
+  - name: health
+    description: Liveness and readiness
+paths:
+  /health:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: Liveness probe
+      description: Returns 200 when the process is up.
+      security: []
+      responses:
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: Not ready
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+components:
+  # Pagination parameters (cursor, pageSize ≤ 100) are added here when the first list endpoint is designed (kit-api).
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok] }
+    Problem:
+      type: object
+      description: RFC 9457 problem details
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }
+security:
+  - bearerAuth: []

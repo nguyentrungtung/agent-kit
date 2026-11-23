@@ -36,7 +36,9 @@ Use **mp-codebase-design** vocabulary (deep modules, small interfaces, seams) fo
 ## 5. Design → `docs/architecture/SOLUTION.md` (arc42-lite)
 - C4 **Context** + **Container**; module/bounded-context map with allowed dependencies → `.agent/rules/project/modules.md` + the stack's arch test.
 - **Integration**: API style, contracts (OpenAPI/AsyncAPI under docs/api/), sync vs async, idempotency, retries, timeouts.
-- **Logical data model**: entities and ownership per module, consistency (transaction vs eventual + outbox), ID strategy (ADR).
+- **Logical data model**: entities and ownership per module, consistency (transaction vs eventual + outbox), ID strategy (ADR) —
+  detailed with the **kit-datamodel** playbook into `docs/architecture/data-model.md` (relationships, keys, constraints, migrations).
+- **API contracts**: with module api, the **kit-api** playbook (contract-first `docs/api/openapi.yaml`).
 - **Key runtime scenarios** as sequence diagrams (happy + failure).
 - **Cross-cutting decisions**: authN/Z approach, multitenancy, i18n, error model, configuration.
 - **Cost envelope**: order of magnitude per month for the chosen style (details by DevOps).
