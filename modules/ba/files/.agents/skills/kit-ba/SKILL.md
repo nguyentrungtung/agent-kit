@@ -16,11 +16,17 @@ Write in `docs_language` (`.agent/project.yaml`). Diagrams follow the **kit-diag
 `.agent/context/PROJECT.md`, `GLOSSARY.md`, existing `docs/ba/**`, `docs/architecture/**`. Prefer codegraph/grep over opening whole files.
 For an existing system, derive the **as-is** behaviour from code before asking.
 
-## 2. Elicitation — one batch of ≤ 7 questions
-With module eng-skills: run **mp-grill-with-docs** (grilling rounds + glossary/ADR updates as terms settle);
-stakeholders not in the session → **mp-to-questionnaire** to send them an async questionnaire.
-Only what blocks analysis: who/which roles, problem & current workaround, measurable success, constraints (legal, deadline, budget, tech),
-out of scope, volumes (users, transactions/day, data size), integrations. If no human: write `ASSUMPTION:` lines and continue.
+## 2. Elicitation & Clarification Interview Protocol
+Never assume business facts, client platforms, or security rules. If an incoming request is vague (e.g. "implement user authentication", "add checkout"), **DO NOT generate documents immediately**.
+Run an elicitation round (with module eng-skills: **mp-grill-with-docs** or **mp-to-questionnaire**):
+Ask **ONE batch of 3–5 focused clarifying questions** (with recommended defaults / multiple-choice options) covering:
+1. **Actors & Authentication Scope:** Who logs in (End-users, Admins, Partners)? Which methods (Email+Password, Phone+OTP, Social OAuth2: Google/Apple, SSO)?
+2. **Client Platforms:** Web SPA, Web SSR (Blade/Next.js), Mobile App (iOS/Android), or Public API? *(Critical input for SA to choose Session vs JWT vs OAuth2 PKCE)*.
+3. **Security & Business Rules:** MFA needed? Password rules? Lock account after N failed attempts? Session duration ("Remember me")?
+4. **Data Privacy (PII):** What personal data is collected? (Full name, phone, ID number — check Vietnam Law 91/2025/QH15).
+5. **Exceptions & Edge Cases:** What happens if email exists? What if verification OTP expires?
+
+Record all questions and answers in `docs/ba/BRIEF.md` under *Clarifications Q&A*. If no human is present: write `ASSUMPTION:` lines and continue.
 
 ## 3. Stakeholders → `stakeholders.md` (template `stakeholders.md`)
 Stakeholder list with interest/influence, RACI for decisions, user roles/personas with goals and pain points.
@@ -31,16 +37,22 @@ Stakeholder list with interest/influence, RACI for decisions, user roles/persona
 - **Use cases**: overview diagram (template `use-case.md`) + ONE FILE per use case: `.agent/scripts/kit-new usecase "<title>"`
   → `docs/ba/use-cases/UC-NN-*.md` (actors, pre/post-conditions, main/alternative/exception flows, activity + sequence diagram).
 
-## 5. Specification → `REQUIREMENTS.md` (+ feature files)
-- FR table (ID, statement "The system shall…", MoSCoW, source goal, stories). One testable statement each.
-- NFR table with **numbers** (ISO 25010 categories: performance, reliability/availability, security, usability/accessibility, maintainability, portability, compliance).
-- User stories: ONE FILE each, `.agent/scripts/kit-new story "<title>" --uc UC-NN` → `docs/ba/stories/US-NN-*.md`; INVEST;
+## 5. Specification with EARS & INVEST → `REQUIREMENTS.md` (+ feature files)
+- **Functional Requirements using EARS (Easy Approach to Requirements Syntax)**:
+  Every requirement MUST be unambiguous and testable using one of the EARS patterns:
+  - *Event-driven:* **WHEN** `<trigger>`, the system SHALL `<response>`. (e.g. *WHEN the user submits valid credentials, the system SHALL authenticate and issue an active session.*)
+  - *State-driven:* **WHILE** `<in state>`, the system SHALL `<response>`. (e.g. *WHILE an account is locked, the system SHALL deny all login attempts.*)
+  - *Unwanted behavior:* **IF** `<error/unwanted condition>`, **THEN** the system SHALL `<response>`. (e.g. *IF 5 consecutive failed login attempts occur, THEN the system SHALL lock the account for 15 minutes.*)
+  - *Optional:* **WHERE** `<feature enabled>`, the system SHALL `<response>`. (e.g. *WHERE 2FA is enabled, the system SHALL request an OTP before completing authentication.*)
+  - *Ubiquitous:* The system SHALL `<response>`.
+- **NFR table with numbers** (ISO 25010: p95 latency, availability 99.9%, password hashing standards).
+- **User stories**: ONE FILE each, `.agent/scripts/kit-new story "<title>" --uc UC-NN` → `docs/ba/stories/US-NN-*.md`; INVEST;
   acceptance criteria Given/When/Then incl. negative paths. Group them by epic in a **story map** (template `story-map.md`).
   These AC become OpenSpec scenarios in kit-plan, so write them observable and testable.
-- Business rules `BR-NN` (calculations, validations, permissions) — referenced from stories, never duplicated.
-- Data: entities + fields + validation in a **data dictionary**, **ERD** (template `data-model.md`); lifecycle → **state diagram**.
-- Interactions across components/external systems → **sequence diagrams** (template `sequence.md`), include error/timeout paths.
-- UI-heavy: low-fi wireframe (ASCII or simple HTML) + screen → story mapping.
+- **Business rules `BR-NN`** (calculations, validations, permissions) — referenced from stories, never duplicated.
+- **Data**: entities + fields + validation in a **data dictionary**, **ERD** (template `data-model.md`); lifecycle → **state diagram**.
+- **Interactions across components/external systems** → **sequence diagrams** (template `sequence.md`), include error/timeout paths.
+- **UI-heavy**: low-fi wireframe (ASCII or simple HTML) + screen → story mapping.
 
 ## 6. Traceability → `RTM.md` (template `RTM.md`)
 Goal → FR/NFR → US → AC → (TASK, Test case filled later by kit-plan / kit-testcases). No orphan FR, no story without a goal.
@@ -56,6 +68,13 @@ Run `.agent/scripts/kit-run docs` (renders every Mermaid/PlantUML block; fails o
 - [ ] No solution design leaking into requirements unless stated as a constraint (→ kit-sa decides HOW).
 - [ ] Open questions listed with owner; blockers answered.
 
-## 9. Hand-off
-Update `PROJECT.md` goals/non-goals and `GLOSSARY.md`. Summarise to the human (goals, Must-haves, open questions, diagrams produced).
-Next: **kit-sa** if architecture/infrastructure is undecided, else **kit-plan** (stories → OpenSpec changes → kit tasks).
+## 9. Hand-off (BA → SA → Planner)
+Update `PROJECT.md` goals/non-goals and `GLOSSARY.md`.
+Deliver the **Architecture Hand-off Packet** in `docs/ba/BRIEF.md`:
+- Client platforms (Web SPA, Web SSR, Mobile App, API)
+- Expected load, transaction volume, and latency numbers (from NFRs)
+- Required external integrations (OAuth providers, payment gateways, legacy systems)
+- Architectural decision questions for SA (e.g. Auth approach: Session vs JWT vs OAuth2, DB choice, sync vs async messaging)
+
+Summarise to the human (goals, Must-haves, open questions, diagrams produced).
+Next: **kit-sa** (to decide HOW, draw system sequence diagrams, and record ADRs), then **kit-plan** (to split into OpenSpec changes and tasks).

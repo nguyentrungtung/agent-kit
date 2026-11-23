@@ -85,19 +85,37 @@ kit init . --stack python::fastapi --yes
 
 Sau khi chạy `kit init`, trong dự án của bạn đã có file [AGENTS.md](file:///Users/tungnt/Desktop/MBFS-REAL/agent-kit/core/AGENTS.md) và thư mục `.agent/`. Hãy mở AI coding agent (Claude Code, Gemini CLI, Antigravity, Cursor...) và thực hiện theo 4 giai đoạn sau:
 
-### Giai đoạn 1: Phân tích & Lập kế hoạch (BA / Architecture)
-Đừng vội để AI code ngay! Hãy yêu cầu AI phân tích yêu cầu nghiệp vụ:
+### Giai đoạn 1: Phân tích & Thiết kế kiến trúc (BA ➔ SA ➔ Planner)
+Đừng vội để AI code ngay! Hãy yêu cầu AI phân tích yêu cầu nghiệp vụ và chốt giải pháp kiến trúc:
+
+#### 1.1. BA phỏng vấn làm rõ yêu cầu (Elicitation & Q&A)
+Khi bạn đưa ra một yêu cầu mới (ví dụ: *"làm tính năng đăng nhập, đăng ký"*), AI BA sẽ **chủ động phỏng vấn bạn 3–5 câu hỏi then chốt** trước khi viết tài liệu:
+* Ai sử dụng? (Người dùng cuối, Admin, Khách vãng lai).
+* Nền tảng nào? (Chỉ Web SSR, hay Web SPA + Mobile App tương lai).
+* Phương thức gì? (Email/Password, OTP SMS, hay Google/Apple OAuth2).
+* Chính sách bảo mật & Điều kiện biên? (Khóa khi sai 5 lần, thời hạn phiên, 2FA).
+
+Sau đó, BA chuẩn hóa yêu cầu theo **cú pháp EARS** (Event-driven, State-driven, Unwanted behavior) và xuất ra gói **Architecture Hand-off Packet** cho SA.
 ```bash
-# 1. Tạo tài liệu Use Case
+# Tạo tài liệu Use Case
 .agent/scripts/kit-new usecase "Dang ky nguoi dung"
 
-# 2. Tạo User Story kèm Acceptance Criteria (Given-When-Then)
+# Tạo User Story kèm Acceptance Criteria (Given-When-Then chuẩn EARS)
 .agent/scripts/kit-new story "Dang ky bang Email va Mat khau" --uc UC-01
+```
 
-# 3. Tạo đề xuất thay đổi chuẩn OpenSpec
+#### 1.2. SA thiết kế giải pháp & Sơ đồ kết nối (Sequence Diagram & ADR)
+Sau khi có đầu vào từ BA, Solution Architect (role `sa`) sẽ giải quyết câu hỏi **HOW**:
+* Nếu ứng dụng chỉ chạy trên Web: Chọn **Session Cookie (HttpOnly)** để chống tấn công XSS.
+* Nếu có Mobile App hoặc SPA: Chọn **OAuth2 PKCE + JWT Token** (Access token ngắn hạn + Refresh token xoay vòng).
+* Vẽ **Sơ đồ Sequence (Mermaid)** mô tả cách Client $\leftrightarrow$ API Gateway $\leftrightarrow$ Auth Service $\leftrightarrow$ DB/Redis tương tác với nhau.
+* Ghi quyết định vào **ADR** (`.agent/scripts/kit-new adr "Chon co che Authentication"`).
+
+#### 1.3. Lập kế hoạch OpenSpec & Chia Task (`kit-plan`)
+Gói toàn bộ đặc tả vào OpenSpec và chia thành các Task cỡ vừa (Size M):
+```bash
 .agent/scripts/kit-new change register-flow "User Registration Flow"
 ```
-AI sẽ điền nội dung vào đề xuất: Tại sao làm? Thay đổi những gì? Thiết kế ra sao? Kế hoạch kiểm thử thế nào?
 
 ---
 

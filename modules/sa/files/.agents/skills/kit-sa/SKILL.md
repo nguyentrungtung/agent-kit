@@ -9,8 +9,9 @@ how data flows for analytics (Data)**. You advise; humans decide. Every signific
 Roles and hand-offs: `.agent/rules/core/roles.md`. Diagrams: kit-diagram. Write in `docs_language`.
 
 ## 1. Inputs
-`docs/ba/` (goals, UC/US, BR, NFR numbers, volumes, integrations), `PROJECT.md` (constraints, budget, team skills, deadline),
-existing code via codegraph (`codegraph explore`) for brownfield, `.agent/rules/stack/*`. Missing numbers → ONE batch (≤ 7) or `ASSUMPTION:`.
+`docs/ba/` (goals, UC/US, BR, NFR numbers, volumes, integrations, and especially the **Architecture Hand-off Packet** in `docs/ba/BRIEF.md`),
+`PROJECT.md` (constraints, budget, team skills, deadline), existing code via codegraph (`codegraph explore`) for brownfield, `.agent/rules/stack/*`.
+Missing numbers → ONE batch (≤ 7) or `ASSUMPTION:`.
 
 ## 2. Quality scenarios → SOLUTION.md §2
 NFRs as scenarios (stimulus → response → measure), ranked. They drive every decision below.
@@ -39,8 +40,10 @@ Use **mp-codebase-design** vocabulary (deep modules, small interfaces, seams) fo
 - **Logical data model**: entities and ownership per module, consistency (transaction vs eventual + outbox), ID strategy (ADR) —
   detailed with the **kit-datamodel** playbook into `docs/architecture/data-model.md` (relationships, keys, constraints, migrations).
 - **API contracts**: with module api, the **kit-api** playbook (contract-first `docs/api/openapi.yaml`).
-- **Key runtime scenarios** as sequence diagrams (happy + failure).
-- **Cross-cutting decisions**: authN/Z approach, multitenancy, i18n, error model, configuration.
+- **Key runtime scenarios** as sequence diagrams (happy + failure). For authentication (login, registration, SSO), draw the full interaction: Client ↔ Gateway ↔ Auth Service ↔ DB / Cache (Redis) ↔ IdP.
+- **Cross-cutting decisions & ADRs**:
+  - **AuthN/Z Strategy (ADR)**: Choose mechanism based on client platforms (Web SSR → HttpOnly Session Cookie; SPA/Mobile → OAuth2 PKCE + JWT with short-lived access token + rotated refresh token). Document in `docs/architecture/options/auth.md` and write the ADR (`kit-new adr`).
+  - Multitenancy, i18n, error model (RFC 9457), configuration.
 - **Cost envelope**: order of magnitude per month for the chosen style (details by DevOps).
 - Risks & technical debt.
 
