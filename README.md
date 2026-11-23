@@ -262,13 +262,29 @@ OpenSpec được init cho `claude, codex, gemini, antigravity, dsh`. Ở harnes
 - **Hook Stop** (Claude Code): khi agent sắp kết thúc lượt trên nhánh task mà code chưa commit làm fail `stop_checks` (mặc định `format_check lint`), hook chặn **một lần** và trả lỗi để agent sửa. Tắt bằng `stop_checks: none`.
 - **Đường lên UI kiểu Vibe Kanban:** `kit-board --json` đã có đủ dữ liệu một UI cần (trạng thái, nhánh, worktree, issue, checkpoint, số file chưa commit). Một UI chỉ cần đọc JSON này và gọi `kit-task start --worktree` / `finish` để điều khiển agent. Không cần đổi format dữ liệu.
 
-## 6. Thiết lập phía GitHub (bắt buộc để chặn ở server)
+## 6. Thiết lập phía GitHub và sử dụng `gh` CLI (bắt buộc để chặn ở server)
 
+Để đảm bảo an toàn tuyệt đối khi đẩy code qua `git push` hoặc `gh`:
+
+### Cấu hình Branch Protection (`main` và `develop`)
 Settings → Branches → bảo vệ `main` và `develop`:
-- Require a pull request before merging (≥ 1 approval nếu có team)
-- Require status checks: `guard (secrets, branch, commits)`, `quality (…)`, `security (…)`
-- Block force pushes, không cho xoá branch, bật "Do not allow bypassing the above settings"
-- Settings → Code security: bật **Secret scanning + Push protection**
+- Require a pull request before merging (≥ 1 approval nếu có team).
+- Require status checks: `guard (secrets, branch, commits)`, `quality (…)`, `security (…)`.
+- Block force pushes, không cho xoá branch, bật "Do not allow bypassing the above settings".
+- Settings → Code security: bật **Secret scanning + Push protection**.
+
+### Đẩy code và tạo PR với GitHub CLI (`gh`)
+```bash
+# Đẩy nhánh task lên GitHub
+git push -u origin feature/TASK-NNN-slug
+
+# Tạo Pull Request vào develop (hoặc kit-task finish tự làm qua gh)
+gh pr create --base develop --head feature/TASK-NNN-slug --title "feat: mô tả task" --body "Closes #issue_id"
+
+# Kiểm tra trạng thái CI workflow trên GitHub Actions
+gh run list --limit 5
+gh run view <run_id> --log-failed
+```
 
 ## 7. Tuỳ biến
 
@@ -305,9 +321,24 @@ docs/     ba/ (+_templates) · architecture/ · plan/ · adr/ · qa/ · security
 - **Module mới:** `modules/<tên>/module.yaml` (`title default setup_desc`), `files/`, và nếu cần thì `project.add`, `gitignore.add`, `setup.sh`.
 - **Docker service mới:** `modules/docker/catalog/<tên>.yml` (header `# title:` `# env:` `# volumes:` + fragment service thụt 2 khoảng trắng).
 
-## 10. Giới hạn cần biết
+## 10. Lưu ý quan trọng khi đưa vào dự án thực tế
 
-- Hook của Claude Code chỉ chạy trong Claude Code. Với harness khác, lớp bảo vệ là git hooks và CI. Git hooks ở máy local có thể bị người tắt, nên **branch protection + CI mới là chốt chặn cuối**.
-- Bộ quét secret dựng sẵn chỉ bắt các mẫu có độ tin cậy cao. Nên cài thêm `gitleaks` ở máy (`brew install gitleaks`), script sẽ tự dùng.
+> [!IMPORTANT]
+> Mặc dù bộ khung đã hoàn chỉnh, khi đưa vào dự án thực tế bạn nên chú ý 3 điểm sau:
+>
+> 1. **Thiết lập Branch Protection trên GitHub (Rất quan trọng):**  
+>    Các hook ở local (`.githooks/`) có thể bị lập trình viên bỏ qua nếu cố tình dùng terminal máy tính cá nhân (hoặc tham số `--no-verify`). Do đó, bạn **bắt buộc phải cấu hình Branch Protection Rules trên GitHub** (yêu cầu PR, chặn force push, bắt buộc pass các status check `guard`, `quality`, `security`) để làm chốt chặn bảo vệ cuối cùng trên server.
+>
+> 2. **Cài đặt các công cụ CLI hỗ trợ trên máy:**  
+>    - Các công cụ bắt buộc: `git`, `jq`, `gh` (để tạo PR, đồng bộ task issue).  
+>    - Các công cụ kiểm tra nâng cao: `gitleaks`, `spectral`, `hadolint`, `actionlint`, `jscpd` nên được cài qua `kit tools install` hoặc chạy qua container Docker để các lệnh kiểm tra trước khi push không bị báo thiếu tool.
+>
+> 3. **Môi trường hoạt động của Hooks:**  
+>    - Hệ thống hook chặn runtime (`guard-bash.sh`, `guard-files.sh`) tích hợp sâu nhất với **Claude Code** (chặn ngay lập tức trước khi thực thi shell command hoặc đọc/sửa file).  
+>    - Khi làm việc với các harness khác như **Gemini CLI, Antigravity, Codex, Cursor**, lớp bảo vệ chính của bạn sẽ là **Git Hooks cục bộ (`.githooks/`) và GitHub Actions CI**.
+
+## 11. Giới hạn cần biết
+
+- Bộ quét secret dựng sẵn chỉ bắt các mẫu có độ tin cậy cao. Nên cài thêm `gitleaks` ở máy (`brew install gitleaks` hoặc `kit tools install`), script sẽ tự dùng.
 - Lệnh trong profile là mặc định hợp lý. Với Java, Rust, Go và .NET, một phần cấu hình phải merge vào file build (`pom.xml`, `Cargo.toml`…). Kit để sẵn ở `.agent/stack/<stack>/snippets/`, `kit-onboard` merge rồi chạy `kit-doctor --run` để xác nhận.
 - Config tool đang giả định layout phổ biến (`src/`, `tests/`, `app/`). Dự án khác layout thì chỉnh đường dẫn trong config, **đừng nới rule**.

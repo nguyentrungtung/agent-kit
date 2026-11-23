@@ -118,7 +118,8 @@ $N testplan TASK-001 >/dev/null
 printf "import { greet } from './greeting.js';\n\nexport const cases: [string, string][] = [\n  ['An', greet('An')],\n  ['', greet('')],\n];\n" > src/greeting.test.ts
 printf "export const greet = (name: string): string => {\n  const n = name.trim();\n  return n === '' ? 'Xin chào, bạn' : \`Xin chào, \${n}\`;\n};\n" > src/greeting.ts
 npx --no-install prettier --write src >/dev/null
-sed -i '' 's/^- \[ \] AC/- [x] AC/' "$F"; sed -i '' 's/^- \[ \]/- [x]/' $C/tasks.md
+sed -i.bak 's/^- \[ \] AC/- [x] AC/' "$F" && rm -f "$F.bak"
+sed -i.bak 's/^- \[ \]/- [x]/' "$C/tasks.md" && rm -f "$C/tasks.md.bak"
 python3 - "$F" <<'EOF'
 import sys;p=sys.argv[1];s=open(p).read()
 s=s.replace("## Risks / rollback notes","Thêm greet() + test; spec greeting archive vào openspec/specs.\n\n## Risks / rollback notes",1)
