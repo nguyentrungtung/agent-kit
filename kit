@@ -3,12 +3,15 @@
 #
 #   kit init [dir] [options]      interactive picker (gum if installed, plain prompts otherwise)
 #       --stack <spec>            stack[:path[:framework]][,…]   e.g. php::laravel  or  java-maven:backend:spring,node:frontend:react
-#       --modules <list|default|all|none>   e.g. ba,sa,docker,codegraph
-#       --services <list>         docker catalog services, e.g. postgres,redis   (needs module docker)
+#       --preset app|platform|minimal   module bundle (default app); --modules overrides it
+#       --modules <list|default|all|none>   e.g. ba,sa,devops,security,openspec  (docker = alias of devops)
+#       --services <list>         docker catalog services, e.g. postgres,redis   (needs module devops)
 #       --name <n> --lang vi|en   --yes (accept defaults, install dev deps, run module setup)
-#       --no-deps --no-setup --force (overwrite) --no-git
+#       --install-tools (install MISSING global tools without asking; never implied by --yes)
+#       --no-deps --no-setup --no-tools --force (overwrite) --no-git
 #   kit add <module…> [--dir <project>] [--services …] [--yes]   add modules to an installed project
 #   kit doctor [dir] [--run]      check tools/configs of an installed project
+#   kit tools [dir] [install] [--yes]   tools the project needs; installs only the missing ones
 #   kit list                      stacks, frameworks, modules, docker services
 set -euo pipefail
 
@@ -22,7 +25,7 @@ if [ -t 2 ]; then G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; B=$'\033[1m'; D=$
 say()  { printf '%s[kit]%s %s\n' "$G" "$N" "$*" >&2; }
 note() { printf '%s[kit]%s %s\n' "$Y" "$N" "$*" >&2; }
 die()  { printf '%s[kit] ERROR:%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
-usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 # ---------------------------------------------------------------- yaml-ish helpers
 yget() { # yget <file> <key> — flat "key: value" (inline " # comment" stripped)
@@ -43,8 +46,20 @@ fw_list() { yget "$(stack_yaml "$1")" frameworks; }
 all_stacks() { local d; for d in "$STACKS"/*/; do basename "$d"; done; }
 all_modules() { local d; for d in "$MODULES"/*/; do basename "$d"; done; }
 default_modules() { local m o=""; for m in $(all_modules); do [ "$(yget "$MODULES/$m/module.yaml" default)" = true ] && o="$o $m"; done; echo $o; }
-all_services() { local f; for f in "$MODULES"/docker/catalog/*.yml; do basename "$f" .yml; done; }
-svc_meta() { sed -n "s/^# $2:[[:space:]]*//p" "$MODULES/docker/catalog/$1.yml" | head -n1; }
+PRESETS="app platform minimal"
+preset_modules() { # preset_modules <preset> → module list (only modules that exist)
+  local want m o=""
+  case "$1" in
+    app)      want="ba sa devops security openspec codegraph" ;;
+    platform) want="devops security openspec codegraph" ;;
+    minimal)  want="openspec codegraph" ;;
+    *) die "unknown preset '$1' (app, platform, minimal)" ;;
+  esac
+  for m in $want; do [ -d "$MODULES/$m" ] && o="$o $m"; done; echo $o
+}
+preset_title() { case "$1" in app) echo "Web/API application — BA, SA, DevOps, Security, OpenSpec, CodeGraph";; platform) echo "Infrastructure / platform repo — DevOps, Security, OpenSpec, CodeGraph";; minimal) echo "Minimal — gates + OpenSpec + CodeGraph only";; esac; }
+all_services() { local f; for f in "$MODULES"/devops/catalog/*.yml; do basename "$f" .yml; done; }
+svc_meta() { sed -n "s/^# $2:[[:space:]]*//p" "$MODULES/devops/catalog/$1.yml" | head -n1; }
 
 matches() { # matches <dir> "<spec spec…>"  spec = glob  |  file~regex
   local dir="$1" spec f re
@@ -304,7 +319,7 @@ install_component() { # install_component <idx>
     write_file "$TARGET/.claude/rules/$rel.md" "$tmp"; rm -f "$tmp"
   fi
   # 4. Dockerfile
-  if has_module docker; then
+  if has_module devops; then
     src="$(comp_dockerfile "$i")"
     [ -n "$src" ] && copy_file "$src" "$dest/Dockerfile"
   fi
@@ -315,13 +330,14 @@ install_component() { # install_component <idx>
 
 MODS=""; SERVICES=""; NOTES=""
 has_module() { case " $MODS " in *" $1 "*) return 0 ;; esac; return 1; }
+norm_mods() { echo $* | tr ' ' '\n' | sed 's/^docker$/devops/' | awk 'NF && !seen[$0]++' | tr '\n' ' ' | sed 's/ $//'; }
 
 install_module_files() { # install_module_files <module>
   local m="$1" md="$MODULES/$1"
   [ -d "$md" ] || die "unknown module '$m' (kit list)"
   copy_tree "$md/files" "$TARGET"
   [ -f "$md/gitignore.add" ] && append_lines_missing "$md/gitignore.add" "$TARGET/.gitignore"
-  if [ "$m" = docker ]; then copy_tree "$md/catalog" "$TARGET/.agent/docker/catalog"; fi
+  if [ "$m" = devops ]; then copy_tree "$md/catalog" "$TARGET/.agent/docker/catalog"; fi
   return 0
 }
 apply_project_add() { # put module cmd_* lines into project.yaml (fill empty keys, insert missing ones after cmd_audit, in order)
@@ -348,8 +364,8 @@ generate_compose() {
   local out="$TARGET/compose.yaml" tmp i p s port host svc used="" deps="" sv vols="" v envtmp e
   [ -f "$out" ] && [ $FORCE -eq 0 ] && { note "compose.yaml exists — kept (add services with the kit-docker playbook; catalog in .agent/docker/catalog)"; return 0; }
   for sv in $SERVICES; do
-    [ -f "$MODULES/docker/catalog/$sv.yml" ] || die "unknown docker service '$sv' (kit list)"
-    if grep -q 'healthcheck:' "$MODULES/docker/catalog/$sv.yml" && ! grep -q 'profiles:' "$MODULES/docker/catalog/$sv.yml"; then deps="$deps $sv"; fi
+    [ -f "$MODULES/devops/catalog/$sv.yml" ] || die "unknown docker service '$sv' (kit list)"
+    if grep -q 'healthcheck:' "$MODULES/devops/catalog/$sv.yml" && ! grep -q 'profiles:' "$MODULES/devops/catalog/$sv.yml"; then deps="$deps $sv"; fi
     v="$(svc_meta "$sv" volumes)"; [ -n "$v" ] && vols="$vols $v"
   done
   tmp="$(mktemp)"
@@ -375,7 +391,7 @@ generate_compose() {
         for sv in $deps; do echo "      $sv: { condition: service_healthy }"; done
       fi
     done
-    for sv in $SERVICES; do grep -v '^#' "$MODULES/docker/catalog/$sv.yml"; done
+    for sv in $SERVICES; do grep -v '^#' "$MODULES/devops/catalog/$sv.yml"; done
     if [ -n "$vols" ]; then echo "volumes:"; for v in $vols; do echo "  $v:"; done; fi
   } > "$tmp"
   if grep -q '^  [a-z]' "$tmp"; then copy_file "$tmp" "$out"; fi
@@ -466,6 +482,19 @@ run_dev_deps() {
   done
 }
 
+run_tools() { # report the tools this selection needs; install only missing ones (asks, or --yes)
+  local kt="$TARGET/.agent/scripts/kit-tools"
+  [ -x "$kt" ] || return 0
+  printf '\n' >&2; say "tools needed by this project:"
+  (cd "$TARGET" && "$kt" status >&2) || true
+  case "$TOOLS" in
+    yes) (cd "$TARGET" && "$kt" install --yes >&2) || true ;;
+    ask) if ui_confirm "Install the MISSING tools now (installed ones are kept as they are)?" y; then (cd "$TARGET" && "$kt" install >&2) || true; fi ;;
+    *)   note "install missing tools later: kit tools $TARGET install" ;;
+  esac
+  return 0
+}
+
 run_module_setup() {
   local m desc
   for m in $MODS; do
@@ -474,7 +503,7 @@ run_module_setup() {
     if [ "$SETUP" = ask ]; then ui_confirm "module $m: $desc — run now?" y || { NOTES="$NOTES
    - module $m setup skipped: $desc"; continue; }; fi
     say "module $m: $desc"
-    (cd "$TARGET" && "$MODULES/$m/setup.sh") || note "module $m setup failed — rerun later"
+    (cd "$TARGET" && KIT_YES=$( [ "${TOOLS:-no}" = yes ] && echo 1 || echo 0 ) KIT_NO_INSTALL=$( [ "${TOOLS:-no}" = no ] && echo 1 || echo 0 ) "$MODULES/$m/setup.sh") || note "module $m setup failed — rerun later"
   done
 }
 
@@ -519,10 +548,14 @@ pick_interactive() {
     done
   fi
   if [ -z "$MODS_FLAG" ]; then
+    if [ -z "${PRESET_SET:-}" ]; then
+      opts=(); for o in $PRESETS; do opts+=("$(lbl "$o" "$(preset_title "$o")")"); done
+      PRESET="$(ui_one "Preset (module bundle — fine-tune next)" app "${opts[@]}")"
+    fi
     opts=(); for o in $(all_modules); do opts+=("$(lbl "$o" "$(yget "$MODULES/$o/module.yaml" title)")"); done
-    MODS="$(ui_many "Modules" "$(default_modules)" "${opts[@]}")"
+    MODS="$(ui_many "Modules" "$(preset_modules "$PRESET")" "${opts[@]}")"
   fi
-  if has_module docker && [ -z "$SERVICES_FLAG" ]; then
+  if has_module devops && [ -z "$SERVICES_FLAG" ]; then
     opts=(); for o in $(all_services); do opts+=("$(lbl "$o" "$(svc_meta "$o" title)")"); done
     SERVICES="$(ui_many "Docker services for local dev" "postgres" "${opts[@]}")"
   fi
@@ -531,13 +564,14 @@ pick_interactive() {
 
 # ---------------------------------------------------------------- commands
 cmd_init() {
-  TARGET=""; PROJECT_NAME=""; LANG_DOCS=vi; YES=0; DEPS=ask; SETUP=ask; GITSETUP=1
-  local stack_flag="" fw_flag=""; MODS_FLAG=""; SERVICES_FLAG=""
+  TARGET=""; PROJECT_NAME=""; LANG_DOCS=vi; YES=0; DEPS=ask; SETUP=ask; TOOLS=ask; GITSETUP=1
+  local stack_flag="" fw_flag=""; MODS_FLAG=""; SERVICES_FLAG=""; PRESET=app
   while [ $# -gt 0 ]; do
     case "$1" in
       --stack) stack_flag="$2"; shift 2 ;;
       --framework) fw_flag="$2"; shift 2 ;;
       --modules) MODS_FLAG="$2"; shift 2 ;;
+      --preset) PRESET="$2"; PRESET_SET=1; shift 2 ;;
       --services) SERVICES_FLAG="$2"; shift 2 ;;
       --name) PROJECT_NAME="$2"; shift 2 ;;
       --lang) LANG_DOCS="$2"; shift 2 ;;
@@ -545,6 +579,8 @@ cmd_init() {
       --deps) DEPS=yes; shift ;;
       --no-deps) DEPS=no; shift ;;
       --no-setup) SETUP=no; shift ;;
+      --no-tools) TOOLS=no; shift ;;
+      --install-tools) TOOLS=yes; shift ;;
       --force) FORCE=1; shift ;;
       --no-git) GITSETUP=0; shift ;;
       -h|--help) usage ;;
@@ -560,7 +596,7 @@ cmd_init() {
 
   [ -n "$stack_flag" ] && parse_stack_flag "$stack_flag"
   [ -n "$fw_flag" ] && [ ${#C_PATH[@]} -eq 1 ] && { C_FW[0]="$fw_flag"; [ -n "$(fw_dir "${C_STACK[0]}" "$fw_flag")" ] || die "unknown framework $fw_flag"; }
-  case "$MODS_FLAG" in "") MODS="$(default_modules)" ;; default) MODS="$(default_modules)" ;; all) MODS="$(all_modules)" ;; none) MODS="" ;; *) MODS="$(echo "$MODS_FLAG" | tr ',' ' ')" ;; esac
+  case "$MODS_FLAG" in "") MODS="$(preset_modules "$PRESET")" ;; default) MODS="$(default_modules)" ;; all) MODS="$(all_modules)" ;; none) MODS="" ;; *) MODS="$(echo "$MODS_FLAG" | tr ',' ' ')" ;; esac
   [ "$MODS_FLAG" = "" ] || MODS_FLAG=set
   SERVICES="$(echo "${SERVICES_FLAG:-postgres}" | tr ',' ' ')"; [ "$SERVICES_FLAG" = none ] && SERVICES=""
 
@@ -571,11 +607,13 @@ cmd_init() {
     parse_components_str "$(detect_components "$TARGET")"
   fi
   [ $YES -eq 1 ] && { [ "$DEPS" = ask ] && DEPS=yes; [ "$SETUP" = ask ] && SETUP=yes; }
-  [ $INTERACTIVE -eq 0 ] && { [ "$DEPS" = ask ] && DEPS=no; [ "$SETUP" = ask ] && SETUP=no; }
+  [ $INTERACTIVE -eq 0 ] && { [ "$DEPS" = ask ] && DEPS=no; [ "$SETUP" = ask ] && SETUP=no; [ "$TOOLS" = ask ] && TOOLS=no; }
+  [ $YES -eq 1 ] && [ "$TOOLS" = ask ] && TOOLS=no   # --yes never installs global software
+  MODS="$(norm_mods $MODS)"
   for m in $MODS; do [ -d "$MODULES/$m" ] || die "unknown module '$m' (kit list)"; done
 
   printf '\n' >&2; say "target:     $TARGET"; say "components:"; describe_components
-  say "modules:    ${MODS:-none}"; has_module docker && say "services:   ${SERVICES:-none}"; say "docs:       $LANG_DOCS"
+  say "modules:    ${MODS:-none}"; has_module devops && say "services:   ${SERVICES:-none}"; say "docs:       $LANG_DOCS"
   if [ $INTERACTIVE -eq 1 ]; then ui_confirm "Install with this selection?" y || die "aborted"; fi
 
   install_core
@@ -585,11 +623,12 @@ cmd_init() {
   write_project_yaml
   apply_project_add
   render_module_placeholders
-  has_module docker && generate_compose
+  has_module devops && generate_compose
   render_playbooks
   insert_ci_setup
   chmod +x "$TARGET"/.agent/scripts/* "$TARGET"/.agent/hooks/*.sh "$TARGET"/.githooks/* 2>/dev/null || true
   [ $GITSETUP -eq 1 ] && git_setup
+  run_tools
   [ "$DEPS" != no ] && run_dev_deps
   [ "$SETUP" != no ] && run_module_setup
   report
@@ -633,15 +672,15 @@ cmd_add() {
   [ $YES -eq 1 ] && SETUP=yes; [ $INTERACTIVE -eq 0 ] && [ "$SETUP" = ask ] && SETUP=no
   PROJECT_NAME="$(yget "$cfg" name)"
   parse_components_str "$(yget "$cfg" components)"; [ ${#C_PATH[@]} -gt 0 ] || add_component . "$(yget "$cfg" stack)" ""
-  local old m new=""; old="$(yget "$cfg" modules)"
+  local old m new=""; old="$(norm_mods $(yget "$cfg" modules))"; add="$(norm_mods $add)"
   for m in $add; do [ -d "$MODULES/$m" ] || die "unknown module '$m'"; case " $old " in *" $m "*) note "module $m already installed — refreshing files";; esac; new="$new $m"; done
   MODS="$(echo $old $new | tr ' ' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ' ' | sed 's/ $//')"
   SERVICES="${SERVICES_ADD:-$(yget "$TARGET/.agent/kit.lock" services)}"
-  case " $new " in *" docker "*) [ -z "$SERVICES" ] && [ $INTERACTIVE -eq 1 ] && {
+  case " $new " in *" devops "*) [ -z "$SERVICES" ] && [ $INTERACTIVE -eq 1 ] && {
       local opts=() o; for o in $(all_services); do opts+=("$(lbl "$o" "$(svc_meta "$o" title)")"); done
       SERVICES="$(ui_many "Docker services for local dev" "postgres" "${opts[@]}")"; } ;; esac
   for m in $new; do install_module_files "$m"; done
-  case " $new " in *" docker "*)
+  case " $new " in *" devops "*)
     local i; for i in "${!C_PATH[@]}"; do src="$(comp_dockerfile "$i")"; [ -n "$src" ] && copy_file "$src" "$TARGET/${C_PATH[$i]}/Dockerfile"; done
     generate_compose ;; esac
   sed -i.bak "s#^modules:.*#modules: $MODS#" "$cfg" && rm -f "$cfg.bak"
@@ -664,10 +703,19 @@ cmd_list() {
     printf '  %-12s %s\n' "$s" "$(yget "$(stack_yaml "$s")" title)"
     for f in $(fw_list "$s"); do printf '  %-12s   + %-8s %s\n' "" "$f" "$(yget "$(fw_dir "$s" "$f")/framework.yaml" title)"; done
   done
+  printf '\n%sPresets%s (--preset; default app)\n' "$B" "$N"
+  for m in $PRESETS; do printf '  %-10s %s  [%s]\n' "$m" "$(preset_title "$m")" "$(preset_modules "$m")"; done
   printf '\n%sModules%s (--modules; * = default)\n' "$B" "$N"
   for m in $(all_modules); do printf '  %-10s %s %s\n' "$m" "$( [ "$(yget "$MODULES/$m/module.yaml" default)" = true ] && echo '*' || echo ' ')" "$(yget "$MODULES/$m/module.yaml" title)"; done
-  printf '\n%sDocker services%s (--services, module docker)\n' "$B" "$N"
+  printf '\n%sDocker services%s (--services, module devops)\n' "$B" "$N"
   for sv in $(all_services); do printf '  %-14s %s\n' "$sv" "$(svc_meta "$sv" title)"; done
+}
+
+cmd_tools() {
+  local dir="." args=()
+  while [ $# -gt 0 ]; do case "$1" in install|status|ensure|--yes) args+=("$1") ;; *) if [ -d "$1" ]; then dir="$1"; else args+=("$1"); fi ;; esac; shift; done
+  [ -x "$dir/.agent/scripts/kit-tools" ] || die "$dir is not an agent-kit project (or predates kit-tools — run kit init again)"
+  cd "$dir" && exec .agent/scripts/kit-tools ${args[@]+"${args[@]}"}
 }
 
 cmd_doctor() {
@@ -681,6 +729,7 @@ case "${1:-}" in
   init)   shift; cmd_init "$@" ;;
   add)    shift; cmd_add "$@" ;;
   doctor) shift; cmd_doctor "$@" ;;
+  tools)  shift; cmd_tools "$@" ;;
   list)   cmd_list ;;
   version|--version) echo "$VERSION" ;;
   ""|-h|--help|help) usage ;;

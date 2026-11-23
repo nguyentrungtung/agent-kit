@@ -6,6 +6,9 @@
       "Bash(.agent/scripts/kit-task status)",
       "Bash(.agent/scripts/kit-task list)",
       "Bash(.agent/scripts/kit-diagrams:*)",
+      "Bash(.agent/scripts/kit-tools status)",
+      "Bash(.agent/scripts/kit-sec-scan sbom)",
+      "Bash(.agent/scripts/kit-ops-lint:*)",
       "Bash(.agent/scripts/kit-task new:*)",
       "Bash(.agent/scripts/kit-task verify:*)",
       "Bash(.agent/scripts/kit-openspec:*)",
@@ -32,7 +35,10 @@
       "Bash(git push:*)",
       "Bash(.agent/scripts/kit-task sync-gh:*)",
       "Bash(.agent/scripts/kit-task pull-gh:*)",
-      "Bash(.agent/scripts/kit-task cleanup:*)"
+      "Bash(.agent/scripts/kit-task cleanup:*)",
+      "Bash(.agent/scripts/kit-sec-scan dast:*)",
+      "Bash(.agent/scripts/kit-tools install:*)",
+      "Bash(.agent/scripts/kit-tools ensure:*)"
     ],
     "deny": [
       "Read(./.env)",

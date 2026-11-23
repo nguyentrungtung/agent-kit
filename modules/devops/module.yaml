@@ -1,0 +1,3 @@
+title: DevOps / Platform — environments, IaC, containers (Dockerfile + compose catalog), CI/CD, deploy strategy, observability & SLOs, backup/DR, runbooks; ops lint (hadolint, actionlint, shellcheck, terraform, kubeconform)
+default: true
+tools_optional: docker hadolint actionlint shellcheck terraform tflint kubeconform

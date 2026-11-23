@@ -53,16 +53,32 @@ Monorepo: mỗi component là `path=stack+framework`. Lệnh được ghép ki�
 | Module | Mặc định | Cài thêm |
 |---|---|---|
 | `ba` | ✔ | `kit-ba` theo BABOK (stakeholder, as-is/to-be swimlane, use case, sequence, state, ERD, story map, RTM), skill `kit-diagram`, template trong `docs/ba/_templates/`, `kit-run docs` render và kiểm tra mọi sơ đồ Mermaid/PlantUML (mmdc/plantuml, hoặc qua Docker) |
-| `sa` | ✔ | `kit-sa` + agent `solution-architect`: kịch bản chất lượng, so sánh phương án, arc42-lite `docs/architecture/SOLUTION.md`, C4 context/container/deployment, `sizing.md` (sizing + chi phí), ADR |
-| `docker` | ✔ | Dockerfile cho từng component, `compose.yaml` sinh từ catalog (postgres, mysql, redis, rabbitmq, kafka, minio, mailpit, keycloak, observability), `kit-run up/down/logs`, skill `kit-docker` |
+| `sa` | ✔ | Vai trò **tích hợp**: kịch bản chất lượng, hướng dẫn chọn kiểu kiến trúc (MVC + repository, HMVC, modular monolith, hexagonal, microservice, event-driven), so sánh phương án + ADR, C4, tích hợp, data model mức logic, khung chi phí. **Bàn giao** cho DevOps, AppSec, Data |
+| `devops` | ✔ | `kit-devops` + agent `devops-engineer`: môi trường, IaC, CI/CD, chiến lược deploy, observability/SLO, backup/DR, sizing, runbook (`docs/platform/`). Gồm luôn phần Docker: Dockerfile từng stack, `compose.yaml` từ catalog, `kit-run up/down/logs`. **`kit-run ops`** = hadolint, actionlint, shellcheck, compose config, terraform, kubeconform (dùng tool trên máy hoặc image Docker ghim version). `docker` là tên cũ, vẫn dùng được |
+| `security` | ✔ | `kit-appsec` + agent `security-architect`: threat model (DFD + STRIDE), chọn mức ASVS, yêu cầu bảo mật thành scenario OpenSpec, thiết kế authN/Z, sổ dữ liệu cá nhân theo **Luật 91/2025/QH15 + NĐ 356/2025/NĐ-CP**, SBOM (`kit-run sbom`), DAST baseline (ZAP, chỉ cho local/staging) |
 | `codegraph` | ✔ | `codegraph init` (index + MCP), rule `code-intelligence.md`, `.codegraph/` vào gitignore |
 | `openspec` | ✔ | [OpenSpec](https://github.com/Fission-AI/OpenSpec) 2.1.1 (ghim version, chạy qua `kit-openspec`, tắt telemetry) + schema **`kit-flow`**: proposal có Source/Clarifications, design có Impact & reuse/Data model/API/Test plan, tasks mỗi nhóm = 1 kit task, test trước. Cần Node ≥ 20.19 |
 | `serena` | | thêm Serena (LSP qua MCP, chạy bằng uvx) vào `.mcp.json` |
 
+### Preset và vai trò
+`kit init --preset app|platform|minimal` chọn sẵn bộ module (xem `kit list`); `--modules` để chỉnh tay. Ai làm gì, bàn giao thế nào: `.agent/rules/core/roles.md` (RACI).
+
+```
+kit-ba ─▶ kit-sa (giải pháp tổng thể) ─┬─▶ kit-devops (hạ tầng, CI/CD, vận hành)  → docs/platform/
+                                        ├─▶ kit-appsec (thiết kế bảo mật, PII)     → docs/security/
+                                        └─▶ kit-data   (dữ liệu phân tích, Phase 7) → docs/data/
+                                                    ─▶ kit-plan ─▶ kit-task …
+```
+
+### Tool trên máy: có thì dùng, thiếu mới cài
+`kit tools <dir>` liệt kê các tool mà dự án cần (tính theo stack và module) và cho biết tool nào đã có. `kit tools <dir> install` **chỉ cài tool còn thiếu**, hỏi từng cái (brew → npm → go/cargo/pipx). Tool đã có thì giữ nguyên, không đổi version. `kit init` làm bước này tự động (`--no-tools` để bỏ qua). Setup của module dùng `kit-tools ensure`, ví dụ codegraph: đã cài thì chỉ chạy `init` hoặc `sync`.
+
 ### Rules nằm ở đâu
 ```
 .agent/rules/
-  core/      git-workflow · security · testing · error-handling · logging · api-design · database (+ code-intelligence)
+  core/      workflow · documentation · roles · git-workflow · security · testing · error-handling · logging · api-design · database (+ code-intelligence)
+  devops/    infrastructure · containers · ci-cd · observability          (module devops)
+  security/  authn-authz · data-protection · supply-chain                 (module security)
   stack/     <stack>.md + <framework>.md   — chuẩn cộng đồng, mỗi rule ghi tool ép nó
   project/   luật riêng của dự án (kit-onboard / kit-sa / người viết)
 .claude/rules/stack-*.md   — chỉ trỏ tới file trên, có `paths:` nên Claude Code chỉ nạp khi đụng đúng loại file
@@ -134,7 +150,7 @@ UC/US (docs/ba) ─▶ OpenSpec change: proposal ─▶ specs ─▶ design ─�
 | Checklist chất lượng | `checklists/definition-of-done.md`, `code-review.md`, `security.md`, `release.md` + PR template |
 | Docs & báo cáo hằng ngày | `docs/daily/YYYY-MM/YYYY-MM-DD.md`: phần tự động lấy từ git (commit, task, restore point), phần tóm tắt/vướng mắc/kế hoạch do agent viết. Có thêm `kit-daily --week` để tổng kết tuần |
 | BA, phân tích, mô tả mục tiêu, plan | Module `ba`: brief, stakeholder, quy trình swimlane, use case, sequence/state/ERD, FR/NFR/US/AC, RTM, sơ đồ được kiểm tra render. `docs/plan/ROADMAP.md`, `docs/adr/` |
-| Kiến trúc, hạ tầng, môi trường chạy | Module `sa` (phương án, C4, sizing, chi phí, ADR) + module `docker` (Dockerfile, compose.yaml từ catalog service) |
+| Kiến trúc, hạ tầng, bảo mật thiết kế | Module `sa` (giải pháp tổng thể, ADR) → `devops` (hạ tầng, CI/CD, vận hành, Docker) · `security` (threat model, ASVS, PII) — RACI trong `.agent/rules/core/roles.md` |
 
 ## 3. Luồng làm việc
 

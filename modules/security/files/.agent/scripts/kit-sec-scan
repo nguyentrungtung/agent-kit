@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# kit-sec-scan sbom              → CycloneDX SBOM of the repo at .agent/local/sbom.cdx.json + licence summary
+# kit-sec-scan dast <url>        → OWASP ZAP baseline (passive) scan against a RUNNING local/staging app; report in .agent/local/
+# Uses local syft / zap when installed, otherwise pinned Docker images. Never point DAST at production or third-party sites.
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+SYFT_IMG=anchore/syft:v1.18.1
+ZAP_IMG=ghcr.io/zaproxy/zaproxy:stable
+out="$KIT_DIR/local"; mkdir -p "$out"
+have_docker() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
+
+case "${1:-}" in
+  sbom)
+    f="$out/sbom.cdx.json"
+    if command -v syft >/dev/null 2>&1; then syft scan dir:. -o cyclonedx-json="$f" -q
+    elif have_docker; then docker run --rm -v "$KIT_ROOT:/src:ro" "$SYFT_IMG" scan dir:/src -o cyclonedx-json -q > "$f"
+    else die "SBOM needs syft or Docker"; fi
+    info "SBOM: ${f#"$KIT_ROOT"/} ($(grep -o '"bom-ref"' "$f" | wc -l | tr -d ' ') components)"
+    if command -v jq >/dev/null 2>&1; then
+      copyleft="$(jq -r '[.components[]? | select(any(.licenses[]?; ((.license.id // .license.name // .expression // "") | test("GPL|AGPL|LGPL|SSPL|EUPL"; "i")))) | "\(.name)@\(.version)"] | .[]' "$f" 2>/dev/null || true)"
+      if [ -n "$copyleft" ]; then warn "copyleft licences need approval (.agent/rules/security/supply-chain.md):"; printf '   %s\n' $copyleft | head -n 20; fi
+    fi ;;
+  dast)
+    url="${2:-}"; [ -n "$url" ] || die "usage: kit-sec-scan dast <url of a running local/staging app>"
+    case "$url" in *localhost*|*127.0.0.1*|*host.docker.internal*|*staging*|*.local*) ;; *) die "refusing DAST against '$url' — only local or staging targets (ask a human for anything else)";; esac
+    target="$(printf '%s' "$url" | sed 's#//localhost#//host.docker.internal#; s#//127.0.0.1#//host.docker.internal#')"
+    have_docker || die "DAST needs Docker"
+    docker run --rm -v "$out:/zap/wrk:rw" -t "$ZAP_IMG" zap-baseline.py -t "$target" -r zap-baseline.html -I \
+      && info "ZAP baseline report: .agent/local/zap-baseline.html" ;;
+  *) sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

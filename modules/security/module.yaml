@@ -1,0 +1,3 @@
+title: Security (AppSec) — threat modelling (STRIDE on data-flow diagrams), ASVS level & security requirements as OpenSpec scenarios, authN/Z design, personal-data register (VN Law 91/2025/QH15 + Decree 356/2025), SBOM, DAST baseline
+default: true
+tools_optional: docker syft trivy

@@ -1,3 +1,4 @@
 cmd_up: docker compose up -d --build --wait
 cmd_down: docker compose down
 cmd_logs: docker compose logs --tail=200
+cmd_ops: .agent/scripts/kit-ops-lint

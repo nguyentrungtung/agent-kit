@@ -1,2 +1,2 @@
-title: Solution Architecture — options & trade-offs, C4 (context/container/deployment), arc42-lite SAD, NFR tactics, infra sizing & cost, ADRs
+title: Solution Architecture — integrator role: quality scenarios, architecture style guide (MVC+repository, HMVC, modular monolith, hexagonal, microservices, event-driven), options & ADRs, C4, integrations, logical data model; hands off to devops, security, data
 default: true

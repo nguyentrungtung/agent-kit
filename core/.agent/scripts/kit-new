@@ -6,13 +6,14 @@
 #   kit-new adr "<title>" [--task TASK-NNN]                            → docs/adr/NNNN-slug.md + index in DECISIONS.md
 #   kit-new usecase "<title>"                                          → docs/ba/use-cases/UC-NN-slug.md   (module ba)
 #   kit-new story "<title>" [--uc UC-NN]                               → docs/ba/stories/US-NN-slug.md     (module ba)
+#   kit-new runbook "<alert or operation>"                             → docs/platform/runbooks/<slug>.md (module devops)
 #   kit-new doc <path.md> "<title>"                                    → living document with front matter
 # Prints the created path. Never overwrites an existing file.
 source "$(dirname "$0")/lib.sh"
 cd "$KIT_ROOT"
 TPL="$KIT_DIR/templates"
 
-usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 slug() { ascii_slug "$1" 50; }
 esc() { printf '%s' "$1" | sed 's/[\/&|]/\\&/g'; }
 next_num() { # next_num <dir> <prefix-regex> <width>  → zero-padded next number
@@ -79,6 +80,11 @@ case "$kind" in
     [ -n "$title" ] || die 'usage: kit-new story "<title>" [--uc UC-NN]'
     num="$(next_num docs/ba/stories 'US-' 2)"
     render "$TPL/story.md" "$KIT_ROOT/docs/ba/stories/US-$num-$(slug "$title").md" NUM="$num" TITLE="$title" UC="$uc" DATE="$(today)"
+    ;;
+
+  runbook)
+    title="$*"; [ -n "$title" ] || die 'usage: kit-new runbook "<alert or operation>"'
+    render "$TPL/runbook.md" "$KIT_ROOT/docs/platform/runbooks/$(slug "$title").md" TITLE="$title" DATE="$(today)"
     ;;
 
   doc)

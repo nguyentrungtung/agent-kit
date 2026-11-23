@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# kit-ops-lint — lint infrastructure & delivery files that exist in this repo:
+#   Dockerfile*      → hadolint            .github/workflows → actionlint
+#   project *.sh     → shellcheck          compose*.yaml     → docker compose config
+#   *.tf             → terraform fmt/validate + tflint      k8s manifests (deploy/, k8s/) → kubeconform
+# Uses the local tool when installed, otherwise a pinned Docker image; skips (with a warning) when neither is available.
+# agent-kit's own scripts (.agent/, .githooks/) are not linted here.
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+
+HADOLINT_IMG=hadolint/hadolint:v2.12.0
+ACTIONLINT_IMG=rhysd/actionlint:1.7.7
+SHELLCHECK_IMG=koalaman/shellcheck:v0.10.0
+KUBECONFORM_IMG=ghcr.io/yannh/kubeconform:v0.6.7-alpine
+
+failed=(); ran=0; skipped=()
+have_docker() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
+files() { git ls-files -co --exclude-standard -- "$@" 2>/dev/null | grep -vE '(^|/)(node_modules|vendor|\.agent|\.githooks)/' || true; }
+run() { # run <name> <cmd...>
+  local name="$1"; shift; ran=$((ran+1))
+  printf '%s[run ]%s %s\n' "$c_grn" "$c_off" "$name"
+  if ! "$@"; then printf '%s[FAIL]%s %s\n' "$c_red" "$c_off" "$name"; failed+=("$name"); fi
+}
+skip() { skipped+=("$1"); printf '%s[skip]%s %s\n' "$c_dim" "$c_off" "$1"; }
+
+# Dockerfiles
+df="$(files 'Dockerfile' '*/Dockerfile' 'Dockerfile.*' '*/Dockerfile.*')"
+if [ -n "$df" ]; then
+  if command -v hadolint >/dev/null 2>&1; then run "hadolint" hadolint $df
+  elif have_docker; then run "hadolint (docker)" docker run --rm -v "$KIT_ROOT:/w" -w /w "$HADOLINT_IMG" hadolint $df
+  else skip "hadolint (install hadolint or Docker)"; fi
+fi
+
+# GitHub workflows
+if [ -n "$(files '.github/workflows/*.yml' '.github/workflows/*.yaml')" ]; then
+  if command -v actionlint >/dev/null 2>&1; then run "actionlint" actionlint
+  elif have_docker; then run "actionlint (docker)" docker run --rm -v "$KIT_ROOT:/repo" -w /repo "$ACTIONLINT_IMG" -color
+  else skip "actionlint (install actionlint or Docker)"; fi
+fi
+
+# Shell scripts of the project
+sh="$(files '*.sh')"
+if [ -n "$sh" ]; then
+  if command -v shellcheck >/dev/null 2>&1; then run "shellcheck" shellcheck $sh
+  elif have_docker; then run "shellcheck (docker)" docker run --rm -v "$KIT_ROOT:/mnt" -w /mnt "$SHELLCHECK_IMG" $sh
+  else skip "shellcheck (install shellcheck or Docker)"; fi
+fi
+
+# Compose
+for c in $(files 'compose.yaml' 'compose.yml' 'docker-compose.yml' 'docker-compose.yaml'); do
+  if have_docker; then run "compose config ($c)" docker compose -f "$c" config -q
+  else skip "compose config ($c) (Docker not available)"; fi
+done
+
+# Terraform
+tfdirs="$(files '*.tf' | xargs -n1 dirname 2>/dev/null | sort -u)"
+if [ -n "$tfdirs" ]; then
+  if command -v terraform >/dev/null 2>&1; then
+    run "terraform fmt" terraform fmt -check -recursive
+    for d in $tfdirs; do run "terraform validate ($d)" sh -c "cd '$d' && terraform init -backend=false -input=false >/dev/null && terraform validate"; done
+    if command -v tflint >/dev/null 2>&1; then for d in $tfdirs; do run "tflint ($d)" tflint --chdir="$d"; done; else skip "tflint (not installed)"; fi
+  else skip "terraform (not installed)"; fi
+fi
+
+# Kubernetes manifests
+k8s="$(files 'deploy/*.yaml' 'deploy/*.yml' 'k8s/*.yaml' 'k8s/*.yml' 'deploy/**/*.yaml' 'k8s/**/*.yaml' | xargs grep -l '^apiVersion:' 2>/dev/null || true)"
+if [ -n "$k8s" ]; then
+  if command -v kubeconform >/dev/null 2>&1; then run "kubeconform" kubeconform -strict -summary $k8s
+  elif have_docker; then run "kubeconform (docker)" docker run --rm -v "$KIT_ROOT:/w" -w /w "$KUBECONFORM_IMG" -strict -summary $k8s
+  else skip "kubeconform (install kubeconform or Docker)"; fi
+fi
+
+[ ${#failed[@]} -eq 0 ] || die "ops lint failed: ${failed[*]}"
+[ $ran -gt 0 ] || { info "ops lint: nothing to check"; exit 0; }
+info "ops lint OK ($ran check(s)${skipped[0]+, ${#skipped[@]} skipped})"

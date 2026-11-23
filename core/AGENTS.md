@@ -24,6 +24,7 @@
 | Changes in progress | `openspec/changes/<change>/` (proposal, spec deltas, design, tasks) |
 | Requirements (BA) | `docs/ba/` · Architecture: `docs/architecture/` · API: `docs/api/` · Plan & roadmap: `docs/plan/` |
 | Where each kind of document lives | `.agent/rules/core/documentation.md` · map: `docs/README.md` |
+| Who owns what (BA, SA, DevOps, AppSec, Data, Dev, QA) | `.agent/rules/core/roles.md` — stay in your role, hand off the rest |
 | Tasks | `.agent/tasks/` (one file per task) |
 | Playbooks (step-by-step procedures) | `.claude/skills/<name>/SKILL.md` |
 | Checklists | `.agent/checklists/` |
@@ -31,7 +32,7 @@
 
 ## 2. Workflow (never skip a step) — details: `.agent/rules/core/workflow.md`
 ```
-idea ─▶ kit-ba (UC/US/BR) ─▶ kit-sa (architecture, data) ─▶ kit-plan: OpenSpec change (proposal → specs → design → tasks) + kit tasks
+idea ─▶ kit-ba (UC/US/BR) ─▶ kit-sa (solution) ─▶ kit-devops · kit-appsec · kit-data ─▶ kit-plan: OpenSpec change (proposal → specs → design → tasks) + kit tasks
      ─▶ per task: kit-task start ─▶ 1 understand ─▶ 2 clarify (ask!) ─▶ 3 solution ─▶ 4 tests first (red) ─▶ 5 implement + checkpoint
      ─▶ 6 verify ─▶ 7 document (living docs) ─▶ 8 kit-task finish (gates, archive change → specs, PR) ─▶ human merge
                      ▲                                  │

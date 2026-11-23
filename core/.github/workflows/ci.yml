@@ -27,22 +27,28 @@ jobs:
         run: .agent/scripts/kit-secrets-scan --all
       - name: Secrets in PR history
         if: github.event_name == 'pull_request'
-        run: gitleaks detect --no-banner --redact --log-opts="origin/${{ github.base_ref }}..HEAD"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: gitleaks detect --no-banner --redact --log-opts="origin/$BASE_REF..HEAD"
       - name: Branch naming
         if: github.event_name == 'pull_request'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
         run: |
-          b="${{ github.head_ref }}"
+          b="$HEAD_REF"
           echo "$b" | grep -Eq '^(feature|fix|hotfix|refactor|chore|docs|test|release|revert)/' \
             || { echo "::error::branch '$b' must be <type>/TASK-NNN-slug"; exit 1; }
       - name: Conventional commits
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           types="$(sed -n 's/^commit_types:[[:space:]]*//p' .agent/project.yaml)"
           bad=0
           while IFS= read -r s; do
             case "$s" in Merge\ *|Revert\ *) continue ;; esac
             echo "$s" | grep -Eq "^(${types})(\([A-Za-z0-9._/-]+\))?!?: .{3,}" || { echo "::error::bad commit subject: $s"; bad=1; }
-          done < <(git log --format=%s "origin/${{ github.base_ref }}..HEAD")
+          done < <(git log --format=%s "origin/$BASE_REF..HEAD")
           exit $bad
 
   quality:
@@ -57,6 +63,8 @@ jobs:
       - run: .agent/scripts/kit-run arch
       - name: OpenSpec specs and changes valid
         run: .agent/scripts/kit-run specs
+      - name: Ops lint (Dockerfile, workflows, shell, compose, terraform, k8s)
+        run: .agent/scripts/kit-run ops
       - run: .agent/scripts/kit-run test
       - run: .agent/scripts/kit-run build
       - name: Diagrams render (docs)
@@ -80,3 +88,10 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: '1'
+      - name: SBOM (CycloneDX)
+        if: hashFiles('.agent/scripts/kit-sec-scan') != ''
+        run: .agent/scripts/kit-sec-scan sbom
+      - name: Upload SBOM
+        if: hashFiles('.agent/local/sbom.cdx.json') != ''
+        uses: actions/upload-artifact@v4
+        with: { name: sbom, path: .agent/local/sbom.cdx.json }

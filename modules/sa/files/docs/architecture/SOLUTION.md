@@ -1,5 +1,6 @@
 # Solution architecture — <system>
-<!-- arc42-lite. Filled by kit-sa. Keep each section short; link details. Decisions → docs/adr/. -->
+<!-- arc42-lite. Owned by the solution architect (kit-sa) as the MAP of the solution: short sections, links to the specialist docs
+     (docs/platform, docs/security, docs/data, docs/api). Decisions → docs/adr/. -->
 
 ## 1. Goals & constraints
 | Goal (from BA) | Constraint (tech, legal, budget, team, deadline) |
@@ -55,33 +56,17 @@ C4Container
 ## 7. Runtime scenarios
 <!-- sequence diagrams for the 2–3 most important / risky flows, incl. failure paths -->
 
-## 8. Deployment
-```mermaid
-C4Deployment
-  title Production
-  Deployment_Node(cloud, "Cloud / VPS", "region") {
-    Deployment_Node(lb, "Load balancer / Ingress") {
-      Container(proxy, "Reverse proxy", "Nginx/Traefik", "TLS termination")
-    }
-    Deployment_Node(app, "App nodes x2", "Docker") {
-      Container(api, "API", "container")
-    }
-    Deployment_Node(dbn, "Managed DB", "PostgreSQL HA") {
-      ContainerDb(db, "Database")
-    }
-  }
-  Rel(proxy, api, "HTTP")
-  Rel(api, db, "SQL/TLS")
-```
-| Env | Purpose | Hosting | Data | Deploy trigger |
-|---|---|---|---|---|
-| local | dev | docker compose | synthetic | — |
-| staging | QA/UAT | | anonymised | merge to develop |
-| prod | users | | real | release tag + approval |
+## 8. Platform (owned by DevOps → `docs/platform/PLATFORM.md`)
+<!-- 3 lines: hosting model, environments, deploy strategy, SLO headline. Details live in docs/platform/. -->
 
-## 9. Cross-cutting concepts
-Security (authN/Z, secrets, zones) · Observability (logs, metrics, traces, SLOs, alerts) · Data (backup, retention, migration) ·
-Resilience (timeouts, retries, circuit breakers, idempotency) · Configuration · i18n.
+## 9. Security (owned by AppSec → `docs/security/`) · Data (owned by Data → `docs/data/`)
+<!-- 3 lines each: ASVS level, auth approach, top risks / analytics architecture, key pipelines. -->
+
+## 9b. Cross-cutting decisions
+AuthN/Z approach · multitenancy · error model (RFC 9457) · configuration · i18n · ID strategy — each links its ADR.
+
+## 9c. Cost envelope
+<!-- Order of magnitude per month for the chosen style; detailed sizing by DevOps in docs/platform/sizing.md. -->
 
 ## 10. Decisions
 | ADR | Decision | Status |

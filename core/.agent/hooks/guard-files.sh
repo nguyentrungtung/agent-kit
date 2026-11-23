@@ -34,6 +34,9 @@ case "$tool" in
     if re '^openspec/specs/' "$rel"; then
       ask "editing a living spec directly — behaviour changes go through an OpenSpec change (openspec/changes/<name>/specs/); direct edits only for Purpose/typos"
     fi
+    if re '^(infra|deploy|k8s|helm|terraform)/' "$rel"; then
+      ask "editing infrastructure/deployment code '$rel' (a human will review and apply it)"
+    fi
     if re '^\.agent/rules/' "$rel"; then
       ask "editing project rules '$rel'"
     fi

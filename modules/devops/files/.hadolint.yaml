@@ -1,0 +1,9 @@
+# agent-kit: Dockerfile lint. Fix findings; ignore a rule only with a reason here (ADR for anything security-related).
+failure-threshold: warning
+ignored: []
+trustedRegistries:
+  - docker.io
+  - ghcr.io
+  - gcr.io
+  - mcr.microsoft.com
+  - quay.io

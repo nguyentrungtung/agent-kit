@@ -4,7 +4,7 @@
 - Validate every input at the boundary (type, length, range, format, allow-lists). Encode output for its context.
 - Parameterised queries only. No dynamic code execution, no shell with user input, no deserialisation of untrusted data.
 - AuthN via the framework's proven mechanism; AuthZ checked server-side on every request (deny by default, object-level checks — no IDOR).
-- Passwords: argon2id/bcrypt via the framework. Tokens: short-lived, signed, rotated; cookies `HttpOnly; Secure; SameSite`.
+- Passwords: argon2id or bcrypt via the framework. Access tokens are short-lived, signed and rotated; cookies are `HttpOnly; Secure; SameSite`.
 - Least privilege for DB users, service accounts, containers (non-root), CI tokens.
 - Dependencies: pinned + lockfile committed; audit in CI; no abandoned/unknown packages without an ADR.
 - Errors to clients are generic (no stack traces, SQL, paths); details go to logs with a correlation id.

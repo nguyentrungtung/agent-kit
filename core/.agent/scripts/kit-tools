@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# kit-tools [status]              which tools this project needs (by stack + modules) and whether they are installed
+# kit-tools install [--yes]       install ONLY the missing ones (asks per tool unless --yes); installed tools are used as-is
+# kit-tools ensure <tool> [--yes] make sure one tool is available (no-op when already installed)
+# Install method: brew → npm → go/cargo/pipx, whichever is available; otherwise prints the manual command.
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+
+# name | check command | brew pkg | npm pkg | other install command | needed by | required(1)/optional(0)
+REGISTRY='git|git --version|git|||core|1
+jq|jq --version|jq|||core (hooks, settings merge)|1
+gitleaks|gitleaks version|gitleaks|||core (secret scan)|0
+semgrep|semgrep --version|semgrep||pipx install semgrep|core (SAST, also in CI)|0
+gh|gh --version|gh|||core (PRs, sync-gh)|0
+gum|gum --version|gum|||kit init menus|0
+codegraph|codegraph --version||@colbymchenry/codegraph||module codegraph|1
+openspec|openspec --version||@fission-ai/openspec@{{OPENSPEC_VERSION}}||module openspec (or npx)|0
+node|node --version|node|||module openspec, stack node|0
+mmdc|mmdc --version||@mermaid-js/mermaid-cli||module ba (or Docker)|0
+docker|docker --version||||module devops (compose, dockerised linters)|0
+hadolint|hadolint --version|hadolint|||module devops (or Docker)|0
+actionlint|actionlint --version|actionlint||go install github.com/rhysd/actionlint/cmd/actionlint@latest|module devops (or Docker)|0
+shellcheck|shellcheck --version|shellcheck|||module devops (or Docker)|0
+syft|syft version|syft|||module security (or Docker)|0
+trivy|trivy --version|trivy|||module security (or Docker)|0
+uvx|uvx --version|uv|||module serena|1
+golangci-lint|golangci-lint --version|golangci-lint||go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest|stack go|1
+govulncheck|govulncheck -version|||go install golang.org/x/vuln/cmd/govulncheck@latest|stack go|1
+cargo-deny|cargo deny --version|cargo-deny||cargo install cargo-deny --locked|stack rust|1'
+
+needed_by_project() { # print registry lines relevant to this project
+  local mods stacks line need
+  mods=" $(cfg modules) "; stacks=" $(cfg components | tr ' ' '\n' | sed 's/^[^=]*=//; s/+.*//' | tr '\n' ' ') $(cfg stack) "
+  printf '%s\n' "$REGISTRY" | sed "s/{{OPENSPEC_VERSION}}/$(cfg openspec_version 2.1.1)/" | while IFS= read -r line; do
+    need="$(printf '%s' "$line" | cut -d'|' -f6)"
+    case "$need" in
+      core*|kit\ init*) echo "$line" ;;
+      module\ *) for m in $(printf '%s' "$need" | sed 's/module //g; s/,/ /g; s/(.*//'); do case "$mods" in *" $m "*) echo "$line"; break ;; esac; done ;;
+      stack\ *)  s="${need#stack }"; s="${s%% *}"; case "$stacks" in *" $s "*) echo "$line" ;; esac ;;
+    esac
+  done | awk '!seen[$0]++'
+}
+
+is_installed() { local chk="$1"; bash -c "$chk" >/dev/null 2>&1; }
+install_cmd() { # install_cmd "<line>" → command to install, or empty
+  local brew npm other
+  brew="$(printf '%s' "$1" | cut -d'|' -f3)"; npm="$(printf '%s' "$1" | cut -d'|' -f4)"; other="$(printf '%s' "$1" | cut -d'|' -f5)"
+  if [ -n "$brew" ] && command -v brew >/dev/null 2>&1; then echo "brew install $brew"; return; fi
+  if [ -n "$npm" ] && command -v npm >/dev/null 2>&1; then echo "npm install -g $npm"; return; fi
+  if [ -n "$other" ] && command -v "${other%% *}" >/dev/null 2>&1; then echo "$other"; return; fi
+  echo ""
+}
+manual_hint() {
+  local brew npm other; brew="$(printf '%s' "$1" | cut -d'|' -f3)"; npm="$(printf '%s' "$1" | cut -d'|' -f4)"; other="$(printf '%s' "$1" | cut -d'|' -f5)"
+  [ -n "$brew" ] && { echo "brew install $brew"; return; }; [ -n "$npm" ] && { echo "npm install -g $npm"; return; }; [ -n "$other" ] && { echo "$other"; return; }
+  echo "see the tool's website"
+}
+confirm() { [ "$YES" = 1 ] && return 0; [ -e /dev/tty ] || return 1; printf '%s [Y/n] ' "$1" >/dev/tty; local a; read -r a </dev/tty || return 1; case "$a" in ""|y|Y|yes) return 0 ;; esac; return 1; }
+
+ensure_line() { # ensure_line "<line>" → 0 if available afterwards
+  local line="$1" name chk cmd
+  name="$(printf '%s' "$line" | cut -d'|' -f1)"; chk="$(printf '%s' "$line" | cut -d'|' -f2)"
+  if is_installed "$chk"; then printf '  %s✓%s %-14s %s\n' "$c_grn" "$c_off" "$name" "$(bash -c "$chk" 2>/dev/null | head -n1 | cut -c1-60)"; return 0; fi
+  cmd="$(install_cmd "$line")"
+  if [ -z "$cmd" ]; then warn "$name missing — install manually: $(manual_hint "$line")"; return 1; fi
+  if confirm "Install $name with: $cmd ?"; then
+    info "installing $name: $cmd"
+    if bash -c "$cmd" && is_installed "$chk"; then printf '  %s✓%s %-14s installed\n' "$c_grn" "$c_off" "$name"; return 0; fi
+    warn "$name install failed — try manually: $cmd"; return 1
+  fi
+  warn "$name skipped — install later: $cmd"; return 1
+}
+
+YES=0; for a in "$@"; do [ "$a" = --yes ] && YES=1; done
+case "${1:-status}" in
+  status)
+    printf '%-14s %-10s %-9s %s\n' TOOL STATUS NEED "USED BY"
+    needed_by_project | while IFS='|' read -r name chk brew npm other need req; do
+      if is_installed "$chk"; then st=installed; else st=MISSING; fi
+      printf '%-14s %-10s %-9s %s\n' "$name" "$st" "$( [ "$req" = 1 ] && echo required || echo optional)" "$need"
+    done ;;
+  install)
+    miss=0
+    while IFS= read -r line; do ensure_line "$line" || miss=$((miss+1)); done < <(needed_by_project)
+    [ $miss -eq 0 ] && info "all tools available" || warn "$miss tool(s) still missing (optional ones have Docker/npx fallbacks)" ;;
+  ensure)
+    t="${2:-}"; [ -n "$t" ] || die "usage: kit-tools ensure <tool> [--yes]"
+    line="$(printf '%s\n' "$REGISTRY" | sed "s/{{OPENSPEC_VERSION}}/$(cfg openspec_version 2.1.1)/" | grep "^$t|" || true)"
+    [ -n "$line" ] || die "unknown tool '$t'"
+    ensure_line "$line" ;;
+  *) sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

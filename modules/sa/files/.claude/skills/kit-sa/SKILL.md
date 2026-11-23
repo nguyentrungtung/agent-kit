@@ -1,39 +1,51 @@
 ---
 name: kit-sa
-description: Solution architecture & infrastructure consulting — turn BA output and NFRs into 2–3 architecture options with trade-offs, pick one with an ADR, and document it arc42-lite in docs/architecture/ (C4 context/container/deployment diagrams, quality-attribute tactics, data & integration design, security zones, observability, infra sizing and cost, risks). Use when starting a project, before a big epic, or when asked "how should we architect / host / scale this".
+description: Solution architecture — own the overall solution and integrate the specialist roles. Turn BA output and NFRs into quality scenarios, choose the architecture style (layered MVC + repository, HMVC/modular, modular monolith, hexagonal, microservices, event-driven) and technology with trade-offs, define module/service boundaries, integrations and the logical data model, write ADRs and docs/architecture/SOLUTION.md, then hand off platform to DevOps, security design to AppSec and analytics/pipelines to Data. Use when starting a project, before a large epic, or when asked "how should we architect this".
 ---
-# kit-sa — Solution Architecture
+# kit-sa — solution architecture (integrator, not implementer)
 
-You advise; humans decide. Every significant choice ends as an ADR (`kit-adr`). Write in `docs_language`. Diagrams follow **kit-diagram**.
+You decide **what the system is made of and why**. Specialists decide **how it runs (DevOps), how it is protected (AppSec),
+how data flows for analytics (Data)**. You advise; humans decide. Every significant choice is an ADR (`kit-new adr`).
+Roles and hand-offs: `.agent/rules/core/roles.md`. Diagrams: kit-diagram. Write in `docs_language`.
 
-## 1. Inputs (read first)
-`docs/ba/` (goals, FR, **NFR numbers**, volumes, integrations), `.agent/context/PROJECT.md` (constraints, budget, team skills),
-`.agent/context/ARCHITECTURE.md` + code (existing system — use codegraph), `.agent/rules/stack/*` (chosen stacks).
-Missing numbers (users, RPS, data growth, RTO/RPO, budget, compliance, hosting constraints) → ask ONE batch (≤ 7) or write `ASSUMPTION:`.
+## 1. Inputs
+`docs/ba/` (goals, UC/US, BR, NFR numbers, volumes, integrations), `PROJECT.md` (constraints, budget, team skills, deadline),
+existing code via codegraph (`codegraph explore`) for brownfield, `.agent/rules/stack/*`. Missing numbers → ONE batch (≤ 7) or `ASSUMPTION:`.
 
-## 2. Architecturally significant requirements → `SOLUTION.md §2`
-Turn NFRs into **quality-attribute scenarios** (source, stimulus, environment, response, measure), ranked. These drive every decision.
+## 2. Quality scenarios → SOLUTION.md §2
+NFRs as scenarios (stimulus → response → measure), ranked. They drive every decision below.
 
-## 3. Options → `options/<topic>.md`
-For each big decision (style: modular monolith vs services; sync vs async; DB; hosting: VPS/Kubernetes/PaaS/serverless; auth; cache; messaging):
-2–3 realistic options, comparison table (fit to top scenarios, complexity, team skill, cost/month, lock-in, operability, risk), recommendation.
-Bias: **simplest thing that meets the scenarios** — modular monolith + one relational DB unless numbers say otherwise.
+## 3. Architecture style (ADR) → SOLUTION.md §4
+| Style | Choose when | Avoid when | Enforced by |
+|---|---|---|---|
+| **Layered MVC + service + repository** | CRUD-heavy, 1 small team, one domain, short life | many domains/teams, complex rules | arch test: controller → service → repository |
+| **HMVC / modular (Laravel modules, NestJS modules)** | several features with own MVC triads, shared runtime | modules need independent deploy | arch test per module |
+| **Modular monolith** (default for business systems) | several domains, 1–3 teams, need clean boundaries + simple ops | independent scaling/deploy truly required | Spring Modulith / deptrac / dependency-cruiser module rules |
+| **Hexagonal / clean (inside a module)** | rich domain rules, many integrations, long life | trivial CRUD (over-engineering) | arch test: domain has no framework imports |
+| **Microservices** | independent teams, independent scaling/deploy, mature DevOps/observability | small team, unclear boundaries, no platform | contracts (OpenAPI/AsyncAPI), per-service CI |
+| **Event-driven** (with any of the above) | async workflows, integration, audit, decoupling | strong consistency needed everywhere | outbox pattern, schema registry/contract tests |
+Default bias: **modular monolith + one relational DB**, split later along proven module boundaries.
 
-## 4. Design → `docs/architecture/SOLUTION.md` (arc42-lite template)
-- **C4 Context** (system + users + external systems) and **C4 Container** (apps, DBs, queues, caches, their tech and protocols).
-- Module/bounded-context map with allowed dependencies → feed `.agent/rules/project/modules.md` and the stack's arch test (ArchUnit/deptrac/dependency-cruiser…).
-- Key runtime scenarios as sequence diagrams (happy path + failure).
-- Data: ownership per module, consistency (transactions vs eventual + outbox), retention, backup.
-- Integration: API style, contracts (OpenAPI/AsyncAPI), idempotency, retries, timeouts.
-- **Deployment** (C4 Deployment): environments (local/dev/staging/prod), network zones, scaling, CI/CD flow.
-- Cross-cutting: authN/Z, secrets management, observability (logs/metrics/traces, SLOs), error handling, i18n, multitenancy.
-- **Security zones & threat model** link (`docs/security/THREAT-MODEL.md`, STRIDE on the container diagram).
-- **Sizing & cost** (`sizing.md`): estimate from volumes → CPU/RAM/storage/IOPS per container per env, monthly cost table, scaling triggers.
-- Risks & technical debt, with mitigation.
+## 4. Options per big decision → `docs/architecture/options/<topic>.md`
+2–3 options with weighted criteria (scenario fit, complexity/team skill, cost envelope, lock-in, operability, risk) → recommendation → ADR.
 
-## 5. Local runtime
-If the project has no runnable local environment, hand off to **kit-docker** with the container list (DB, cache, queue, auth, observability).
+## 5. Design → `docs/architecture/SOLUTION.md` (arc42-lite)
+- C4 **Context** + **Container**; module/bounded-context map with allowed dependencies → `.agent/rules/project/modules.md` + the stack's arch test.
+- **Integration**: API style, contracts (OpenAPI/AsyncAPI under docs/api/), sync vs async, idempotency, retries, timeouts.
+- **Logical data model**: entities and ownership per module, consistency (transaction vs eventual + outbox), ID strategy (ADR).
+- **Key runtime scenarios** as sequence diagrams (happy + failure).
+- **Cross-cutting decisions**: authN/Z approach, multitenancy, i18n, error model, configuration.
+- **Cost envelope**: order of magnitude per month for the chosen style (details by DevOps).
+- Risks & technical debt.
 
-## 6. Consistency
-Update `.agent/context/ARCHITECTURE.md` (short summary + links), write ADRs for each decision, add project rules for boundaries.
-Validate diagrams: `.agent/scripts/kit-run docs`. Summarise to the human: decision, why, cost, top risks, ADRs needing approval.
+## 6. Hand off (do NOT do their detailed work)
+| To | When | What you give them |
+|---|---|---|
+| **DevOps** (`kit-devops`, devops-engineer) | always, once containers are known | containers, NFR scenarios (availability, RTO/RPO, load), environments needed |
+| **AppSec** (`kit-appsec`, security-architect) | personal data, auth, payments, integrations, public APIs | context/container diagrams, data classes, actors, integrations |
+| **Data** (`kit-data`, data-engineer — module data, if installed) | reporting/analytics, pipelines, data products | sources, consumers, freshness/volume needs |
+Each specialist writes its own living doc (`docs/platform/`, `docs/security/`, `docs/data/`); SOLUTION.md keeps a 3-line summary + link per area.
+
+## 7. Close
+Update `.agent/context/ARCHITECTURE.md` (summary), ADRs, project module rules; validate diagrams (`kit-run docs`).
+Summarise: decision, why, cost envelope, top risks, hand-offs created, ADRs needing approval. Next: kit-plan.
