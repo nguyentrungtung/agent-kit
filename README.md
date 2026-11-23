@@ -58,6 +58,7 @@ Monorepo: mỗi component là `path=stack+framework`. Lệnh được ghép ki�
 | `security` | ✔ | `kit-appsec` + agent `security-architect`: threat model (DFD + STRIDE), chọn mức ASVS, yêu cầu bảo mật thành scenario OpenSpec, thiết kế authN/Z, sổ dữ liệu cá nhân theo **Luật 91/2025/QH15 + NĐ 356/2025/NĐ-CP**, SBOM (`kit-run sbom`), DAST baseline (ZAP, chỉ cho local/staging) |
 | `codegraph` | ✔ | `codegraph init` (index + MCP), rule `code-intelligence.md`, `.codegraph/` vào gitignore |
 | `openspec` | ✔ | [OpenSpec](https://github.com/Fission-AI/OpenSpec) 2.1.1 (ghim version, chạy qua `kit-openspec`, tắt telemetry) + schema **`kit-flow`**: proposal có Source/Clarifications, design có Impact & reuse/Data model/API/Test plan, tasks mỗi nhóm = 1 kit task, test trước. Cần Node ≥ 20.19 |
+| `eng-skills` | ✔ | 13 skill của [mattpocock/skills](https://github.com/mattpocock/skills) v1.3.2 (MIT, copy cố định, tiền tố `mp-`): `mp-grilling`/`mp-grill-with-docs` (hỏi rõ yêu cầu theo vòng), `mp-domain-modeling` (GLOSSARY + ADR), `mp-tdd`, `mp-diagnosing-bugs`, `mp-codebase-design`/`mp-improve-codebase-architecture` (module sâu), `mp-code-review` (2 chiều: chuẩn + spec), `mp-pr`, `mp-wizard` (script cho bước người làm), `mp-retro`, `mp-to-questionnaire`, `mp-writing-for-agents`. Đã gắn vào kit-task/kit-review/kit-ba/kit-sa/kit-devops/kit-handoff. Cập nhật: `scripts/vendor-mattpocock.py` |
 | `serena` | | thêm Serena (LSP qua MCP, chạy bằng uvx) vào `.mcp.json` |
 
 ### Preset và vai trò
@@ -121,7 +122,7 @@ UC/US (docs/ba) ─▶ OpenSpec change: proposal ─▶ specs ─▶ design ─�
 │    AGENTS.md (luật) · .agent/context/ (mục tiêu, kiến trúc, convention)      │
 │    .agent/memory/ (STATE, DECISIONS, LESSONS) · .agent/tasks/ (1 file/task)  │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ 2. QUY TRÌNH (playbook = .claude/skills/*/SKILL.md + 6 sub-agent)            │
+│ 2. QUY TRÌNH (playbook = .agents/skills/*/SKILL.md + sub-agent)              │
 │    onboard → BA → plan → task → testcases → review → security → handoff     │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ 3. HÀNG RÀO BẮT BUỘC (máy chặn, không phụ thuộc agent có "nghe lời" không)   │
@@ -203,13 +204,19 @@ UC/US (docs/ba) ─▶ OpenSpec change: proposal ─▶ specs ─▶ design ─�
 | `.agent/scripts/kit-daily [date\|--week]` | Báo cáo ngày / tuần |
 | `.agent/scripts/kit-secrets-scan [--staged\|--all\|--range a..b]` | Quét secret và file cấm |
 
-## 5. Dùng với từng harness
+## 5. Dùng với từng harness (Claude Code, Codex, Gemini CLI, Antigravity, dsh)
 
-- **Claude Code:** dùng được ngay. `CLAUDE.md` import `AGENTS.md`. Skills, sub-agents và hooks nằm trong `.claude/`.
-  Gõ: *"chạy playbook kit-onboard"*, *"kit-plan cho tính năng X"*, *"làm TASK-003"*.
-- **DeepSeek Harness / Codex / Cursor / OpenCode:** đọc `AGENTS.md`. Playbook là file Markdown, agent mở `.claude/skills/<tên>/SKILL.md` ra làm theo.
-  Đầu session, dán output của `.agent/scripts/kit-context` vào. Hook của Claude không chạy ở đây, nhưng **git hooks và CI vẫn chặn** được commit/push sai, secret và lỗi lint/test.
-- **Nhiều agent chạy song song:** mỗi agent một task, một nhánh. Có thể dùng `git worktree add ../app-TASK-007 feature/TASK-007-…`.
+Một nguồn duy nhất cho mọi harness: luật ở `AGENTS.md`, playbook ở **`.agents/skills/`** (chuẩn Agent Skills), rule theo stack ở `.agent/rules/`.
+
+| Harness | Luật | Playbook | Hook chặn của Claude |
+|---|---|---|---|
+| Claude Code | `CLAUDE.md` → `AGENTS.md`, `.claude/rules/` | `.claude/skills/` (symlink tới `.agents/skills/`), sub-agent `.claude/agents/` | ✅ |
+| Codex | `AGENTS.md` | `.agents/skills/` | ❌ → git hooks + CI |
+| Gemini CLI | `AGENTS.md` (qua `.gemini/settings.json` › `context.fileName`) | `.agents/skills/` (thư mục phải được `/trust`) | ❌ → git hooks + CI |
+| Antigravity | `AGENTS.md`, `.agents/rules/stack-*.md` (`trigger: glob`) | `.agents/skills/` | ❌ → git hooks + CI |
+| dsh / harness khác | `AGENTS.md` hoặc dán `kit-context` | `.agents/skills/` hoặc mở SKILL.md làm theo | ❌ → git hooks + CI |
+
+OpenSpec được init cho `claude, codex, gemini, antigravity, dsh`. Ở harness không có hook, lớp chặn cuối là **git hooks + CI + branch protection**: commit, push và PR sai vẫn bị chặn, nhưng việc đọc file hay chạy lệnh thì không.
 
 ## 5b. Chạy song song, board và GitHub Issues
 

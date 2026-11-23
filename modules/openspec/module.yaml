@@ -1,5 +1,5 @@
 title: OpenSpec — spec-driven development (living specs + change proposals) with the agent-kit "kit-flow" schema; needs Node ≥ 20.19
 default: true
 tools_optional: openspec node
-setup_desc: openspec init (skills for claude, codex, dsh) with the kit-flow schema
+setup_desc: openspec init (skills for claude, codex, gemini, antigravity, dsh) with the kit-flow schema
 install_hint: npm install -g @fission-ai/openspec@2.1.1   (or let kit use npx)
