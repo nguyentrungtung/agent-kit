@@ -7,4 +7,4 @@
 - Test public behaviour, not private methods or framework internals. Mock only what you own at process boundaries.
 - Never delete, skip or weaken a failing test to get green — fix the code or raise it with the human.
 - Coverage target `coverage_min` (project.yaml) is a floor, not a goal; critical domain logic aims higher.
-- Test cases are designed first in `docs/qa/TASK-NNN.md` (`kit-testcases`): happy path, boundaries, negative, security, concurrency.
+- Test cases are designed first in `docs/qa/TASK-NNN.md` (`kit-testcases`) covering the **Core 6 Test Matrix**: Happy path, Boundary values, Negative/Errors, Security/AuthZ, State transitions, and Resilience/Concurrency.

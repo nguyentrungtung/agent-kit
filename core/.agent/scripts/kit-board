@@ -28,9 +28,10 @@ for name in $(task_names_all); do
   pts="$(git tag -l "kit/$id/cp-*" | grep -c . || true)"
   wt="$(fmv "$c" worktree)"; dirty=""
   if [ -n "$wt" ] && [ -d "$KIT_ROOT/$wt" ]; then dirty="$(git -C "$KIT_ROOT/$wt" status --porcelain 2>/dev/null | grep -c . || true)"; else wt=""; fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$id" "$st" "$(fmv "$c" priority)" "$(fmv "$c" type)" "$(fmv "$c" title | tr '\t' ' ')" "$br" "$wt" "$(issue_of "$id" "$c")" \
-    "$(fmv "$c" goal_ref)" "$(fmv "$c" depends_on | tr -d '[] ')" "$(fmv "$c" started)" "$(fmv "$c" done)" "${pts:-0}" "$dirty" "$name" >> "$rows"
+    "$(fmv "$c" goal_ref)" "$(fmv "$c" depends_on | tr -d '[] ')" "$(fmv "$c" started)" "$(fmv "$c" done)" "${pts:-0}" "$dirty" "$name" \
+    "$(fmv "$c" tags | tr -d '[] ')" >> "$rows"
 done
 
 # keep only unmet dependencies (deps whose task is not done)
@@ -44,10 +45,10 @@ json() {
   awk -F'\t' -v name="$(cfg name "$(basename "$KIT_ROOT")")" -v repo="$repo" -v gen="$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
     function esc(s) { gsub(/\\/,"\\\\",s); gsub(/"/,"\\\"",s); return s }
     function str(s) { return (s=="") ? "null" : "\"" esc(s) "\"" }
-    function deps(s,  a,n,i,o) { if (s=="") return "[]"; n=split(s,a,","); o="["; for(i=1;i<=n;i++) o=o (i>1?",":"") "\"" esc(a[i]) "\""; return o "]" }
+    function deps(s,  a,n,i,o) { if (s=="") return "[]"; n=split(s,a,","); o="["; for(i=1;i<=n;i++) { gsub(/^[[:space:]]+|[[:space:]]+$/,"",a[i]); o=o (i>1?",":"") "\"" esc(a[i]) "\""; } return o "]" }
     BEGIN { printf "{\"project\":%s,\"repo\":%s,\"generated\":\"%s\",\"tasks\":[", str(name), str(repo), gen }
-    { printf "%s{\"id\":%s,\"status\":%s,\"priority\":%s,\"type\":%s,\"title\":%s,\"branch\":%s,\"worktree\":%s,\"issue\":%s,\"goal_ref\":%s,\"depends_on\":%s,\"started\":%s,\"done\":%s,\"checkpoints\":%d,\"dirty_files\":%s,\"file\":%s}",
-        (NR>1?",":""), str($1), str($2), str($3), str($4), str($5), str($6), str($7), ($8==""?"null":$8), str($9), deps($10), str($11), str($12), $13, ($14==""?"null":$14), str($15) }
+    { printf "%s{\"id\":%s,\"status\":%s,\"priority\":%s,\"type\":%s,\"tags\":%s,\"title\":%s,\"branch\":%s,\"worktree\":%s,\"issue\":%s,\"goal_ref\":%s,\"depends_on\":%s,\"started\":%s,\"done\":%s,\"checkpoints\":%d,\"dirty_files\":%s,\"file\":%s}",
+        (NR>1?",":""), str($1), str($2), str($3), str($4), deps($16), str($5), str($6), str($7), ($8==""?"null":$8), str($9), deps($10), str($11), str($12), $13, ($14==""?"null":$14), str($15) }
     END { print "]}" }' "$rows"
 }
 
@@ -61,6 +62,7 @@ case "$mode" in
         x = ""; if ($8 != "") x = x " #" $8
         if ($7 != "") { x = x " ⎇ " $7; if ($14 != "" && $14 > 0) x = x " (" $14 " dirty)" }
         if ($2 == "in-progress") x = x " cp:" $13
+        if ($16 != "") x = x " [" $16 "]"
         if ($10 != "" && $2 == "todo") x = x " ⟵ needs " $10
         printf "  %-9s %-3s %s%s%s%s\n", $1, $3, $5, dim, x, off }'
     done
@@ -107,6 +109,7 @@ function render(q){
       ts.map(t=>'<article class="card"><div class="top"><span>'+esc(t.id)+'</span><span>'+
         (t.issue&&D.repo?'<a href="'+esc(D.repo)+'/issues/'+t.issue+'">#'+t.issue+'</a>':(t.issue?'#'+t.issue:''))+'</span></div>'+
         '<div class="t">'+esc(t.title)+'</div><div class="tags">'+
+        (t.tags&&t.tags.length?t.tags.map(x=>'<span class="tag">#'+esc(x)+'</span>').join(''):'')+
         (t.priority?'<span class="tag '+esc(t.priority)+'">'+esc(t.priority)+'</span>':'')+(t.type?'<span class="tag">'+esc(t.type)+'</span>':'')+
         (t.goal_ref?'<span class="tag">'+esc(t.goal_ref)+'</span>':'')+(t.status==='in-progress'?'<span class="tag">cp '+t.checkpoints+'</span>':'')+
         (t.worktree?'<span class="tag" title="worktree">⎇ '+esc(t.worktree)+(t.dirty_files?' · '+t.dirty_files+' dirty':'')+'</span>':'')+

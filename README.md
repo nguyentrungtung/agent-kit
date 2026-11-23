@@ -232,14 +232,14 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 | `.agent/scripts/kit-board [--json\|--html\|--open]` | Bảng kanban đọc trạng thái thật từ từng nhánh task; JSON cho UI/orchestrator; HTML tự chứa ở `.agent/local/board.html` |
 | `.agent/scripts/kit-doctor [--run]` | Kiểm tra hook, rules, tool cần cho từng `cmd_*` theo từng component, tool của module |
 | `.agent/scripts/kit-diagrams check\|export` | Render mọi sơ đồ Mermaid/PlantUML trong docs (module `ba`) |
-| `.agent/scripts/kit-task new "<title>" [--type] [--priority]` | Tạo file task |
-| `kit-task start TASK-NNN` | Tạo nhánh + restore point `base` (gọi lại thì tiếp tục nhánh cũ) |
+| `.agent/scripts/kit-task new "<title>" [--type] [--priority] [--tags]` | Tạo file task (hỗ trợ gắn thẻ chủ đề như auth, api) |
+| `kit-task start TASK-NNN` | Tạo nhánh + restore point `base` (gọi lại thì tiếp tục nhánh cũ, tự nạp bài học liên quan) |
 | `kit-task checkpoint "<msg>"` | Commit + tag `cp-N` + push backup |
 | `kit-task points` / `rollback [--to cp-N\|base]` | Xem và quay về restore point (luôn giữ backup branch) |
 | `kit-task finish` | Quality gate + push + PR (`gh`) |
 | `kit-task merged TASK-NNN` / `revert TASK-NNN` | Đánh dấu merge commit / tạo PR revert |
 | `kit-task abandon` / `status` / `list` | Bỏ task (giữ backup) / trạng thái |
-| `.agent/scripts/kit-context [--brief] [TASK-NNN]` | In gói ngữ cảnh, dán được vào **bất kỳ harness nào** (dsh, Codex…) |
+| `.agent/scripts/kit-context [--brief] [--topic <chủ đề>] [TASK-NNN]` | In gói ngữ cảnh (lọc bài học, ADR theo topic), dán được vào **bất kỳ harness nào** (dsh, Codex…) |
 | `.agent/scripts/kit-daily [date\|--week]` | Báo cáo ngày / tuần |
 | `.agent/scripts/kit-secrets-scan [--staged\|--all\|--range a..b]` | Quét secret và file cấm |
 
