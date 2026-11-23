@@ -18,6 +18,7 @@ To maximize AI velocity while keeping context small and safe:
 | `status` | `todo` `in-progress` `review` `done` `abandoned` | kit-task start/finish, sync |
 | `type` | `feature fix hotfix refactor chore docs test` | kit-task new |
 | `priority` | `P1` `P2` `P3` | kit-task new / kit-plan |
+| `tags` | `[topic1, topic2]` e.g. `[auth, api]` | kit-task new --tags "auth, api" |
 | `goal_ref` | `G1`… (PROJECT.md goal) | kit-plan |
 | `depends_on` | `[TASK-001, …]` | kit-plan |
 | `assignee` | agent/session or person | human / orchestrator |
@@ -28,3 +29,12 @@ To maximize AI velocity while keeping context small and safe:
 
 The *effective* status shown on the board is read from the task's own branch (where `start` / `finish` record it);
 a `review` task whose branch is merged into develop/main is shown as `done`.
+
+## Topic-based Long-Term Memory (Zero Dependencies)
+Tasks can be tagged with domain topics (`--tags "auth, api"`).
+When starting a task (`kit-task start TASK-NNN`), relevant past lessons from `.agent/memory/LESSONS.md` matching those tags are automatically displayed to warn the agent before coding starts.
+Agents and humans can also query context by topic anytime:
+```bash
+# Query lessons and ADRs for a specific topic
+.agent/scripts/kit-context --topic auth
+```

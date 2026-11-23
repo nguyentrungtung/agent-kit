@@ -4,6 +4,7 @@ title: {{TITLE}}
 status: todo
 type: {{TYPE}}
 priority: {{PRIORITY}}
+tags: {{TAGS}}
 goal_ref: G?
 change: {{CHANGE}}
 depends_on: []

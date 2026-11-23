@@ -76,18 +76,19 @@ sync_done() {
 }
 
 cmd_new() {
-  local title="" type=feature prio=P2 change=""
+  local title="" type=feature prio=P2 change="" tags="[]"
   while [ $# -gt 0 ]; do case "$1" in
-    --type) type="$2"; shift 2 ;; --priority) prio="$2"; shift 2 ;; --change) change="$2"; shift 2 ;; *) title="${title:+$title }$1"; shift ;;
+    --type) type="$2"; shift 2 ;; --priority) prio="$2"; shift 2 ;; --change) change="$2"; shift 2 ;; --tags) tags="$2"; shift 2 ;; *) title="${title:+$title }$1"; shift ;;
   esac; done
-  [ -n "$title" ] || die 'usage: kit-task new "<title>" [--type feature] [--priority P2] [--change <openspec-change>]'
+  [ -n "$title" ] || die 'usage: kit-task new "<title>" [--type feature] [--priority P2] [--change <openspec-change>] [--tags <tags>]'
   if [ -n "$change" ] && [ ! -d "$(change_dir "$change")" ]; then warn "OpenSpec change '$change' not found under openspec/changes/ (create it: kit-new change $change)"; fi
   local last n id f
   last="$(task_names_all | xargs -n1 basename 2>/dev/null | grep -oE '^TASK-[0-9]+' | sed 's/TASK-//' | sort -n | tail -n1 || true)"
   n=$(( 10#${last:-0} + 1 )); id="$(printf 'TASK-%03d' "$n")"
   f="$KIT_TASKS/$id-$(slugify "$title").md"
   local t_esc; t_esc="$(printf '%s' "$title" | sed 's/[\/&|]/\\&/g')"
-  sed -e "s/{{ID}}/$id/g" -e "s/{{TITLE}}/$t_esc/g" -e "s/{{TYPE}}/$type/g" -e "s/{{PRIORITY}}/$prio/g" -e "s/{{DATE}}/$(today)/g" -e "s/{{CHANGE}}/$change/g" \
+  case "$tags" in \[*\]) ;; *) tags="[$tags]" ;; esac
+  sed -e "s/{{ID}}/$id/g" -e "s/{{TITLE}}/$t_esc/g" -e "s/{{TYPE}}/$type/g" -e "s/{{PRIORITY}}/$prio/g" -e "s/{{DATE}}/$(today)/g" -e "s/{{CHANGE}}/$change/g" -e "s/{{TAGS}}/$tags/g" \
     "$KIT_TASKS/_TEMPLATE.md" > "$f"
   info "created $f"
   echo "$id"
@@ -124,6 +125,13 @@ cmd_start() {
   info "on $br — restore point kit/$id/base created"
   local ch; ch="$(fm_get "$f" change)"
   [ -n "$ch" ] && info "OpenSpec change: openspec/changes/$ch/ (proposal, specs, design, tasks) — read it before coding"
+  local tags; tags="$(fm_get "$f" tags | tr -d '[] ' | tr ',' '|')"
+  if [ -n "$tags" ] && [ -f "$KIT_DIR/memory/LESSONS.md" ]; then
+    if grep -iE "\[($tags)\]" "$KIT_DIR/memory/LESSONS.md" >/dev/null 2>&1; then
+      info "Relevant lessons for [$tags] (.agent/memory/LESSONS.md):"
+      grep -iE "\[($tags)\]" "$KIT_DIR/memory/LESSONS.md" | head -n 5 | sed 's/^/  • /' || true
+    fi
+  fi
   return 0
 }
 

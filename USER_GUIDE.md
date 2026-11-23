@@ -213,6 +213,29 @@ Tất cả tài liệu kỹ thuật trong dự án tuân thủ nghiêm ngặt ti
 * **Định dạng Markdown:** Duy nhất 1 thẻ H1, không nhảy cóc cấp tiêu đề, code block luôn có cú pháp ngôn ngữ, sơ đồ Mermaid được kiểm tra bằng `.agent/scripts/kit-run docs`.
 * **Thông báo chuẩn GitHub:** Sử dụng `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`.
 
+### 4. Quản lý Bộ nhớ Dài hạn bằng Thẻ chủ đề (Topic-based Long-Term Memory)
+Thay vì sử dụng các cơ sở dữ liệu Vector DB cồng kềnh hay cài đặt thêm công cụ phức tạp, `agent-kit` sử dụng cơ chế **Zero Dependencies** thuần POSIX Shell và Markdown quy chuẩn:
+
+* **Định dạng ghi nhớ bài học (`.agent/memory/LESSONS.md`):**
+  Mỗi bài học hoặc sai lầm cần tránh được ghi trên 1 dòng duy nhất có gắn thẻ chủ đề `[topic]`:
+  ```markdown
+  - 2026-11-20 [auth] Storing JWT in localStorage is vulnerable to XSS → use HttpOnly Secure SameSite Cookie
+  - 2026-11-21 [ci] sed -i '' fails on Linux GNU sed → use portable sed -i.bak ... && rm -f ...bak
+  ```
+  Các tag chuẩn gợi ý: `[auth]`, `[database]`, `[api]`, `[security]`, `[performance]`, `[docker]`, `[ci]`, `[test]`, `[frontend]`, `[data]`, `[architecture]`.
+
+* **Gán thẻ khi tạo task mới:**
+  ```bash
+  .agent/scripts/kit-task new "Xây dựng JWT refresh token" --tags "auth, api"
+  ```
+* **Tự động cảnh báo trước khi viết code:**
+  Khi chạy `.agent/scripts/kit-task start TASK-NNN`, script tự động đọc thẻ `tags` trong task, quét nhanh file `LESSONS.md` và in ra các bài học liên quan ngay trên terminal trước khi AI bắt tay vào code.
+* **Tra cứu ngữ cảnh và quyết định theo chủ đề bất kỳ lúc nào:**
+  ```bash
+  .agent/scripts/kit-context --topic auth
+  ```
+  Lệnh này tự động tổng hợp: các bài học kinh nghiệm `[auth]` từ `LESSONS.md`, các quyết định thiết kế từ `docs/adr/`, và các task đang mở liên quan.
+
 ---
 
 ## 6. Quản trị & Khôi phục an toàn (Rollback)
@@ -250,8 +273,8 @@ Nếu trong quá trình làm việc AI đi sai hướng hoặc sinh code lỗi:
 ### Quản lý Vòng đời Task (`kit-task`)
 | Lệnh | Ý nghĩa |
 |---|---|
-| `.agent/scripts/kit-task new "<tiêu đề>"` | Tạo một task mới |
-| `.agent/scripts/kit-task start TASK-NNN` | Bắt đầu làm task (tạo nhánh git riêng) |
+| `.agent/scripts/kit-task new "<tiêu đề>" [--tags "tag1, tag2"]` | Tạo một task mới (hỗ trợ gắn thẻ chủ đề như auth, api) |
+| `.agent/scripts/kit-task start TASK-NNN` | Bắt đầu làm task (tạo nhánh git riêng, tự nạp bài học liên quan) |
 | `.agent/scripts/kit-task start TASK-NNN --worktree` | Mở task trong một thư mục git worktree chạy song song |
 | `.agent/scripts/kit-task checkpoint "<ghi chú>"` | Lưu mốc tiến độ (tự commit và tag backup) |
 | `.agent/scripts/kit-task rollback` | Quay lui về checkpoint trước đó |
@@ -262,6 +285,7 @@ Nếu trong quá trình làm việc AI đi sai hướng hoặc sinh code lỗi:
 ### Theo dõi & Báo cáo
 | Lệnh | Ý nghĩa |
 |---|---|
+| `.agent/scripts/kit-context --topic <chủ đề>` | Tra cứu ngữ cảnh nén, bài học kinh nghiệm và ADR theo chủ đề |
 | `.agent/scripts/kit-board` | Xem bảng Kanban các task ngay trên Terminal |
 | `.agent/scripts/kit-board --html` | Mở bảng Kanban trực quan trên trình duyệt Web |
 | `.agent/scripts/kit-daily` | Tự động tổng kết báo cáo công việc trong ngày từ git commit |

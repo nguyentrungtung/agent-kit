@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
-# kit-context [--brief] [TASK-ID]
+# kit-context [--brief] [--topic <topic>] [TASK-ID]
 # Print a compact context pack for ANY agent harness (Claude Code, DeepSeek Harness, Codex, ...).
 # --brief : what a new session must know (used by the SessionStart hook), ~60 lines max.
-# default : brief + full task file + recent lessons + ADR index — paste into a fresh session.
+# --topic <topic> : topic-based context (relevant lessons, ADRs matching topic/tag).
+# default : brief + full task file + relevant/recent lessons + ADR index — paste into a fresh session.
 source "$(dirname "$0")/lib.sh"
 cd "$KIT_ROOT"
 
-brief=0; id=""
-for a in "$@"; do case "$a" in --brief) brief=1 ;; TASK-*) id="$a" ;; esac; done
+brief=0; id=""; topic=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --brief) brief=1; shift ;;
+    --topic) topic="$2"; shift 2 ;;
+    TASK-*) id="$1"; shift ;;
+    *) shift ;;
+  esac
+done
 [ -n "$id" ] || id="$(task_from_branch)"
 
 section() { printf '\n### %s\n' "$1"; }
@@ -20,18 +28,32 @@ is_protected "$(current_branch)" && echo "⚠ You are on a PROTECTED branch. Sta
 section "STATE (.agent/memory/STATE.md)"
 clip "$KIT_DIR/memory/STATE.md" 40
 
+task_tags=""
 if [ -n "$id" ]; then
   f="$(task_file "$id")"
   if [ -f "$f" ]; then
     section "ACTIVE TASK $id (${f#"$KIT_ROOT"/})"
     ch="$(fm_get "$f" change)"
     [ -n "$ch" ] && echo "OpenSpec change: openspec/changes/$ch/ (proposal, specs, design, tasks)"
+    task_tags="$(fm_get "$f" tags 2>/dev/null | tr -d '[] ' | tr ',' '|')"
     if [ $brief -eq 1 ]; then
       perl -0pe 's/<!--.*?-->//gs' "$f" | sed -n '/^## 1\. Understand/,/^## 3\. Solution/p' | grep -v '^[[:space:]]*$' | head -n 25
       echo "… (read the full task file before working)"
     else
       cat "$f"
     fi
+  fi
+fi
+
+query_tags="${topic:-$task_tags}"
+if [ -n "$query_tags" ] && [ -f "$KIT_DIR/memory/LESSONS.md" ]; then
+  matched_lessons="$(grep -iE "\[($query_tags)\]" "$KIT_DIR/memory/LESSONS.md" 2>/dev/null || true)"
+  if [ -n "$matched_lessons" ]; then
+    section "TOPIC LESSONS (tags: [$query_tags] in .agent/memory/LESSONS.md)"
+    echo "$matched_lessons" | head -n 10
+  elif [ -n "$topic" ]; then
+    section "TOPIC LESSONS ([$topic])"
+    echo "No specific lessons recorded for [$topic]."
   fi
 fi
 
@@ -44,8 +66,17 @@ for t in "$KIT_TASKS"/TASK-*.md; do
 done | head -n 15 || true
 
 if [ $brief -eq 0 ]; then
+  if [ -n "$query_tags" ] && [ -d "$KIT_ROOT/docs/adr" ]; then
+    matched_adrs="$(find "$KIT_ROOT/docs/adr" -name "*[0-9]*.md" 2>/dev/null | grep -iE "($query_tags)" || true)"
+    if [ -n "$matched_adrs" ]; then
+      section "TOPIC DECISIONS (matching [$query_tags] in docs/adr/)"
+      echo "$matched_adrs" | while read -r a; do echo "- $(basename "$a")"; done
+    fi
+  fi
+
   section "RECENT LESSONS (tail of .agent/memory/LESSONS.md)"
   tail -n 15 "$KIT_DIR/memory/LESSONS.md" 2>/dev/null || true
+
   section "DECISIONS (docs/adr)"
   for a in "$KIT_ROOT"/docs/adr/[0-9]*.md; do
     [ -f "$a" ] || continue; case "$a" in *0000-*) continue ;; esac; echo "- $(basename "$a")"

@@ -5,14 +5,14 @@ If a step has no source to trace to, stop and ask.
 
 | # | Step | Output (where) | Gate |
 |---|---|---|---|
-| 1 | **Understand** — read the task, its OpenSpec change, linked UC/US/BR, the current spec (`openspec/specs/`), relevant rules | Task §1 in your own words | §1 not empty |
+| 1 | **Understand** — read the task (including `tags`), its OpenSpec change, linked UC/US/BR, check topic lessons in `.agent/memory/LESSONS.md` (`kit-context --topic <tag>`), current spec (`openspec/specs/`), relevant rules | Task §1 in your own words | §1 not empty |
 | 2 | **Clarify** — run the ambiguity checklist below; ask the human ONE batch; never guess a business fact | Task §2 Q&A table (or "None"); change proposal › Clarifications | blocking questions answered |
 | 3 | **Solution** — `codegraph explore/impact` (reuse first), approach + rejected alternatives, data/API changes | Task §3; change `design.md`; ADR for project-wide choices | §3 not empty |
 | 4 | **Tests first** — test cases from every AC/scenario (`kit-new testplan`), write them, see them FAIL for the right reason | `docs/qa/TASK-NNN.md` + test code | every AC in the test plan |
 | 5 | **Implement** — smallest change that passes; follow `.agent/rules/`; checkpoint each green step | code + `kit-task checkpoint` | `kit-run check` green |
 | 6 | **Verify** — all tests pass, review (`kit-review`), security (`kit-security`) when relevant, DoD checklist | ticked ACs | `kit-task verify` |
 | 7 | **Document** — update living docs in the same PR: OpenSpec specs (via the change), `docs/api`, `docs/architecture`, README; fill Result | Task §7 | §7 not empty, change valid |
-| 8 | **Finish** — `kit-task finish` (gates + checks + archive change if last + PR) → human merges | PR | CI green, human approval |
+| 8 | **Finish** — `kit-task finish` (gates + checks + archive change if last + PR) → human merges; if unexpected issues occurred, add 1 lesson to `.agent/memory/LESSONS.md` (`- YYYY-MM-DD [topic] what went wrong → what to do instead`) | PR | CI green, human approval |
 
 ## Ambiguity checklist (step 2)
 - Who exactly: actor, role, permission? What if unauthorized?
