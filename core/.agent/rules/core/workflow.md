@@ -27,5 +27,6 @@ Unclear and blocking → ask. Unclear but low-risk → `ASSUMPTION:` line, confi
 
 ## Never
 - Start coding before steps 1–3 are written down, or write tests after the code "to make coverage".
+- Split tasks horizontally into micro-tasks (entity-only, DTO-only); always deliver vertical slices (Size M) using `kit-task checkpoint` for intermediate progress.
 - Change behaviour without updating the spec in the same PR.
 - Read old task files / archived changes to learn how the system works — read `openspec/specs/` and `docs/architecture/`.

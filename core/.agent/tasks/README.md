@@ -1,7 +1,14 @@
 # Tasks
 One file per task: `TASK-NNN-slug.md` (create with `.agent/scripts/kit-task new "<title>"`).
-A task must fit in **one agent session** (~≤ 300 changed lines). Bigger → split in kit-plan.
 Status flow: `todo → in-progress → review → done` (or `abandoned`). Board: `.agent/scripts/kit-board`.
+
+## Sizing & Execution Discipline (Sweet Spot)
+To maximize AI velocity while keeping context small and safe:
+- **Do NOT create micro-tasks** (e.g. separate tasks for Entity, DTO, Service, Controller).
+- **Size M is the sweet spot** (~150–350 changed lines): 1 complete vertical slice (schema + logic + API/UI + tests).
+- **Use internal checkpoints**: Within a Size M task, run `kit-task checkpoint "<step>"` at each green milestone instead of creating new tasks. Run `kit-task finish` once when all ACs are satisfied.
+- **Size L (> 350 lines)**: Too large for a single context session; split into smaller vertical slices in `kit-plan`.
+- **Parallel work**: Independent tasks run concurrently via `kit-task start TASK-NNN --worktree`.
 
 ## Front matter schema (stable — read by kit-board, kit-task sync-gh and any future UI)
 | Key | Values | Set by |

@@ -104,6 +104,15 @@ UC/US (docs/ba) ─▶ OpenSpec change: proposal ─▶ specs ─▶ design ─�
 - Tài liệu kế hoạch (BA, ADR, change) viết trên `develop` được `kit-task start` mang sang nhánh task. Code chưa commit thì vẫn bị chặn.
 - Task done được chuyển vào `.agent/tasks/archive/YYYY-MM/` để agent không đọc lịch sử như sự thật hiện tại.
 
+### Kích cỡ Task & Tối ưu tốc độ AI (Bộ ba 3-in-1: Sweet Spot · Checkpoint · Worktree)
+Để tránh tình trạng **task quá to** (làm AI quá tải context, ảo giác) hoặc **task quá vụn** (làm chậm tiến độ, tốn công review):
+1. **Phân rã theo Lát cắt dọc (Vertical Slice - Size M: 150–350 dòng code):**  
+   `kit-plan` (role Planner) không chia task vụn theo từng tầng kỹ thuật (cấm chia riêng task Entity, task DTO, task Controller). Thay vào đó, mỗi task giải quyết trọn vẹn 1 tính năng/endpoint gồm: DB + Logic + API/UI + Test tự động.
+2. **Dùng Checkpoint bên trong Task (`kit-task checkpoint`):**  
+   Trong một task cỡ M, AI hoàn thành từng bước nhỏ (schema $\to$ service $\to$ controller $\to$ test) thì tạo ngay checkpoint để giữ an toàn. Chỉ chạy `kit-task finish` và mở PR **một lần duy nhất** khi toàn bộ Acceptance Criteria đã đạt.
+3. **Chạy song song bằng Worktree (`kit-task start --worktree`):**  
+   Các task độc lập (không phụ thuộc nhau trong `docs/plan/ROADMAP.md`) được giao cho nhiều agent chạy song song trên các worktree riêng biệt (`../<repo>-TASK-NNN`), nhân đôi/nhân ba tốc độ phát triển.
+
 ### Thiết kế: data model và skeleton kiến trúc
 - `kit-datamodel` (module sa): entity/aggregate, quan hệ 1-1/1-n/n-n, chuẩn hoá và khi nào phi chuẩn hoá, **quy tắc chọn ID** (BIGINT / UUIDv7 / public_id), constraint, index, multi-tenancy, migration expand → migrate → contract → `docs/architecture/data-model.md`.
 - `kit-new module <tên> [--style layered|modular]`: sinh khung thư mục một module theo `arch_style` (ADR) cho Laravel, PHP, Spring (Modulith: `<base>/<module>/internal/{api,application,domain,infrastructure}`, cần `base_package`), NestJS/TypeScript, FastAPI. Mỗi thư mục có README ghi trách nhiệm của lớp. Cấu hình arch test tương ứng nằm ở `.agent/stack/<stack>/skeletons/`.

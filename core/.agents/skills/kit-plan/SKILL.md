@@ -20,10 +20,27 @@ For each Must story group: `.agent/scripts/kit-new change <kebab-name> "<one lin
 - **tasks** — `## N.` groups = one kit task each (≤ ~300 changed lines, one concern), tests first in every group.
 Validate: `.agent/scripts/kit-openspec validate <name> --strict`.
 
-## 4. Kit tasks
+## 4. Kit tasks & Sizing Guide (Sweet Spot)
+Avoid splitting by horizontal layers (e.g. do NOT create separate tasks for Entity, DTO, Service, Controller — this creates micro-tasks and high overhead).
+Split by **vertical slices** (a cohesive slice through all layers: DB + logic + API/UI + tests).
+
+### Task Sizing Matrix
+| Size | Scope (Lines changed) | Granularity | Execution Strategy |
+|---|---|---|---|
+| **S** | 50–150 lines | Bugfix, standalone utility, schema migration | Single session, direct verify & finish |
+| **M** | 150–350 lines | **SWEET SPOT**: 1 complete vertical feature / endpoint | Single session; use **internal checkpoints** (`kit-task checkpoint`) at each green step; finish once |
+| **L** | > 350 lines | **TOO BIG**: spans multiple aggregates or screens | **Split** into smaller vertical slices (e.g. read flow vs write flow) before coding |
+
 For each tasks.md group: `.agent/scripts/kit-task new "<group title>" --change <name> --type feature --priority P1|P2|P3`
 → put the TASK id into the group heading and the proposal's *Kit tasks*; copy the group's AC into the task; set `depends_on`.
 Order: foundations (schema, contracts, skeleton) → features → hardening (security, performance, observability).
+
+### Parallel Execution (Boost Velocity)
+Tasks with no shared dependencies (`depends_on: []`) can run **in parallel** by separate agents using worktrees:
+```bash
+.agent/scripts/kit-task start TASK-001 --worktree   # Agent A in ../<repo>-TASK-001
+.agent/scripts/kit-task start TASK-002 --worktree   # Agent B in ../<repo>-TASK-002
+```
 
 ## 5. Roadmap
 `docs/plan/ROADMAP.md`: milestones, change → tasks table, mermaid dependency graph, risks & mitigations.
