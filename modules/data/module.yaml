@@ -1,0 +1,3 @@
+title: Data engineering — analytics architecture (batch/stream, medallion/dbt layers, dimensional modelling), pipelines, data contracts, data quality, lineage, PII governance; OpenSpec "data-flow" schema
+default: false
+tools_optional: dbt sqlfluff

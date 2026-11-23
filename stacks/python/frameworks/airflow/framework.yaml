@@ -1,0 +1,3 @@
+title: Apache Airflow — idempotent DAGs, TaskFlow API, DAG integrity tests
+detect: requirements.txt~apache-airflow pyproject.toml~apache-airflow
+dev_deps_add: pip install pytest

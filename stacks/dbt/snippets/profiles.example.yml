@@ -1,0 +1,19 @@
+# agent-kit: example profiles — real credentials come from env vars, never from the repo.
+# Target `ci` runs everything on a local DuckDB file so CI and agents need no warehouse access.
+my_project:
+  target: dev
+  outputs:
+    ci:
+      type: duckdb
+      path: ci.duckdb
+      threads: 4
+    dev:
+      type: postgres            # or bigquery / snowflake / clickhouse …
+      host: "{{ env_var('DBT_HOST') }}"
+      user: "{{ env_var('DBT_USER') }}"
+      password: "{{ env_var('DBT_PASSWORD') }}"
+      port: 5432
+      dbname: "{{ env_var('DBT_DBNAME') }}"
+      schema: "dbt_{{ env_var('USER', 'dev') }}"
+      threads: 4
+    # prod: defined only in the scheduler/CI secret store — agents never run against prod

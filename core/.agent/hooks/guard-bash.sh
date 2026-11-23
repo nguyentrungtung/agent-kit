@@ -61,7 +61,11 @@ re '\bchmod\s+(-R\s+)?777\b' "$c" && deny "chmod 777 is insecure"
 
 # 5) Deploy / publish / infra changes → a human must approve
 deploy='\b(terraform\s+(apply|destroy|import|state\s+rm)|kubectl\s+(apply|delete|scale|rollout|patch|edit|create|replace|drain)|helm\s+(install|upgrade|uninstall|rollback)|docker\s+push|npm\s+publish|yarn\s+publish|pnpm\s+publish|mvn\s+\S*\s*deploy|gradlew?\s+\S*publish|cargo\s+publish|twine\s+upload|gh\s+release\s+create|vercel\s+.*--prod|netlify\s+deploy\s+.*--prod|firebase\s+deploy|fly(ctl)?\s+deploy|serverless\s+deploy|aws\s+\S+\s+(delete|terminate|put-secret|update-secret|rm)|gcloud\s+.*\s(delete|deploy)|az\s+.*\s(delete|deploy)|psql\s+.*(prod|production)|DROP\s+(TABLE|DATABASE)|TRUNCATE\s+TABLE)'
-# 6) Local docker is fine via kit-run up/down; destroying data or images needs a human
+# 6) Data: production targets/warehouses need a human
+re '(--target[= ]+(prod|production)\b|\b(dbt|sqlmesh)\b.*\bprod(uction)?\b|airflow\s+(dags\s+(trigger|backfill|delete)|tasks\s+clear))' "$c" \
+  && ask "data command against production / scheduler state: $cmd"
+
+# 7) Local docker is fine via kit-run up/down; destroying data or images needs a human
 re '\bdocker(-compose|\s+compose)?\s+.*\bdown\b.*\s(-v|--volumes)\b|\bdocker\s+(volume\s+(rm|prune)|system\s+prune|image\s+prune|rmi)\b' "$c" \
   && ask "destroys local Docker data/images: $cmd"
 extra="$(cfg_hook ask_commands_extra)"

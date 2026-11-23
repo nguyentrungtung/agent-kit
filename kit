@@ -3,7 +3,7 @@
 #
 #   kit init [dir] [options]      interactive picker (gum if installed, plain prompts otherwise)
 #       --stack <spec>            stack[:path[:framework]][,…]   e.g. php::laravel  or  java-maven:backend:spring,node:frontend:react
-#       --preset app|platform|minimal   module bundle (default app); --modules overrides it
+#       --preset app|data|platform|minimal   module bundle (default app); --modules overrides it
 #       --modules <list|default|all|none>   e.g. ba,sa,devops,security,openspec  (docker = alias of devops)
 #       --services <list>         docker catalog services, e.g. postgres,redis   (needs module devops)
 #       --name <n> --lang vi|en   --yes (accept defaults, install dev deps, run module setup)
@@ -19,7 +19,7 @@ KIT_SRC="$(cd "$(dirname "$0")" && pwd)"
 CORE="$KIT_SRC/core"; STACKS="$KIT_SRC/stacks"; MODULES="$KIT_SRC/modules"
 VERSION="$(cat "$KIT_SRC/VERSION" 2>/dev/null || echo dev)"
 STEPS="install format format_check lint typecheck arch test build audit"
-DETECT_ORDER="java-maven java-gradle php python go rust dotnet node"
+DETECT_ORDER="java-maven java-gradle php dbt python go rust dotnet node"
 
 if [ -t 2 ]; then G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; B=$'\033[1m'; D=$'\033[2m'; N=$'\033[0m'; else G=; Y=; R=; B=; D=; N=; fi
 say()  { printf '%s[kit]%s %s\n' "$G" "$N" "$*" >&2; }
@@ -46,18 +46,19 @@ fw_list() { yget "$(stack_yaml "$1")" frameworks; }
 all_stacks() { local d; for d in "$STACKS"/*/; do basename "$d"; done; }
 all_modules() { local d; for d in "$MODULES"/*/; do basename "$d"; done; }
 default_modules() { local m o=""; for m in $(all_modules); do [ "$(yget "$MODULES/$m/module.yaml" default)" = true ] && o="$o $m"; done; echo $o; }
-PRESETS="app platform minimal"
+PRESETS="app data platform minimal"
 preset_modules() { # preset_modules <preset> → module list (only modules that exist)
   local want m o=""
   case "$1" in
     app)      want="ba sa devops security openspec eng-skills codegraph" ;;
+    data)     want="ba sa data devops security openspec eng-skills codegraph" ;;
     platform) want="devops security openspec eng-skills codegraph" ;;
     minimal)  want="openspec eng-skills codegraph" ;;
-    *) die "unknown preset '$1' (app, platform, minimal)" ;;
+    *) die "unknown preset '$1' (app, data, platform, minimal)" ;;
   esac
   for m in $want; do [ -d "$MODULES/$m" ] && o="$o $m"; done; echo $o
 }
-preset_title() { case "$1" in app) echo "Web/API application — BA, SA, DevOps, Security, OpenSpec, engineering skills, CodeGraph";; platform) echo "Infrastructure / platform repo — DevOps, Security, OpenSpec, CodeGraph";; minimal) echo "Minimal — gates + OpenSpec + CodeGraph only";; esac; }
+preset_title() { case "$1" in app) echo "Web/API application — BA, SA, DevOps, Security, OpenSpec, engineering skills, CodeGraph";; data) echo "Data engineering — BA, SA, Data (dbt/Airflow/PySpark), DevOps, Security, OpenSpec data-flow";; platform) echo "Infrastructure / platform repo — DevOps, Security, OpenSpec, CodeGraph";; minimal) echo "Minimal — gates + OpenSpec + CodeGraph only";; esac; }
 all_services() { local f; for f in "$MODULES"/devops/catalog/*.yml; do basename "$f" .yml; done; }
 svc_meta() { sed -n "s/^# $2:[[:space:]]*//p" "$MODULES/devops/catalog/$1.yml" | head -n1; }
 

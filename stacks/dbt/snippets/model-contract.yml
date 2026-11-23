@@ -1,0 +1,33 @@
+# agent-kit: example mart with an enforced contract + tests (models/marts/<domain>/_<domain>__models.yml)
+version: 2
+models:
+  - name: fct_orders
+    description: One row per order (grain = order_id). Source of truth for revenue reporting.
+    config:
+      contract: { enforced: true }
+      materialized: incremental
+      unique_key: order_id
+      on_schema_change: fail
+    columns:
+      - name: order_id
+        data_type: bigint
+        description: Order identifier (natural key from the shop system).
+        constraints: [{ type: not_null }, { type: primary_key }]
+        data_tests: [unique, not_null]
+      - name: customer_id
+        data_type: bigint
+        data_tests:
+          - not_null
+          - relationships: { to: ref('dim_customers'), field: customer_id }
+      - name: status
+        data_type: varchar
+        data_tests:
+          - accepted_values: { values: ['placed', 'paid', 'shipped', 'cancelled'] }
+      - name: amount_vnd
+        data_type: numeric(18, 0)
+        data_tests:
+          - dbt_utils.accepted_range: { min_value: 0 }
+      - name: ordered_at
+        data_type: timestamp
+    data_tests:
+      - dbt_utils.recency: { datepart: hour, field: ordered_at, interval: 26 }

@@ -1,0 +1,3 @@
+title: PySpark — DataFrame API, explicit schemas, partition-aware jobs, local SparkSession tests
+detect: requirements.txt~pyspark pyproject.toml~pyspark
+dev_deps_add: pip install pytest chispa

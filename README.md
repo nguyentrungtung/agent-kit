@@ -41,10 +41,11 @@ agent-kit/
 | `php` | PSR-1, PSR-4, **PER-CS 2.0** (thay PSR-12) | PHP-CS-Fixer `@PER-CS2.0` | PHPStan lv 8 + strict-rules, `composer validate` | deptrac | `laravel` (Pint, Larastan), `symfony` (`@Symfony`, phpstan-symfony) |
 | `java-maven` / `java-gradle` | Google Java Style, Effective Java | Spotless + google-java-format | Checkstyle `google_checks` | ArchUnit `ArchitectureTest` | `spring` (constructor injection, layering, Flyway, ProblemDetail) |
 | `node` | TS strict | Prettier | ESLint `strict-type-checked`, `tsc --noEmit` | dependency-cruiser | `react`, `nestjs` |
-| `python` | PEP 8 / 257 / 484 | Ruff format | Ruff (E,F,I,N,D,B,S,…), mypy `--strict` | import-linter | `fastapi`, `django` |
+| `python` | PEP 8 / 257 / 484 | Ruff format | Ruff (E,F,I,N,D,B,S,…), mypy `--strict` | import-linter | `fastapi`, `django`, **`airflow`** (DAG idempotent, test DAG integrity), **`pyspark`** (schema tường minh, partition, chispa) |
 | `go` | Effective Go, Code Review Comments | gofmt, gofumpt, goimports | golangci-lint v2, `go vet`, `-race` | depguard (snippet) | — |
 | `rust` | Rust API Guidelines | rustfmt | clippy `-D warnings` + `[lints]` | — | — |
 | `dotnet` | .NET coding conventions | `dotnet format` + `.editorconfig` | Roslyn analyzers, warnings-as-errors | NetArchTest (snippet) | — |
+| `dbt` | dbt Labs style guide, Kimball | SQLFluff (`templater = jinja` + dbt builtins, không cần kết nối) | `dbt parse`, `dbt build --target ci` (DuckDB) | **dbt_project_evaluator** (best-practice DAG) | contract `enforced` trên mart |
 | `generic` | — | — | — | — | điền trong kit-onboard |
 
 Monorepo: mỗi component là `path=stack+framework`. Lệnh được ghép kiểu `(cd backend && …) && (cd frontend && …)`, nên `kit-run lint` chạy cho tất cả. Kit tự nhận theo lockfile: pnpm/yarn/npm, uv, có `mvnw`/`gradlew` hay không.
@@ -58,16 +59,17 @@ Monorepo: mỗi component là `path=stack+framework`. Lệnh được ghép ki�
 | `security` | ✔ | `kit-appsec` + agent `security-architect`: threat model (DFD + STRIDE), chọn mức ASVS, yêu cầu bảo mật thành scenario OpenSpec, thiết kế authN/Z, sổ dữ liệu cá nhân theo **Luật 91/2025/QH15 + NĐ 356/2025/NĐ-CP**, SBOM (`kit-run sbom`), DAST baseline (ZAP, chỉ cho local/staging) |
 | `codegraph` | ✔ | `codegraph init` (index + MCP), rule `code-intelligence.md`, `.codegraph/` vào gitignore |
 | `openspec` | ✔ | [OpenSpec](https://github.com/Fission-AI/OpenSpec) 2.1.1 (ghim version, chạy qua `kit-openspec`, tắt telemetry) + schema **`kit-flow`**: proposal có Source/Clarifications, design có Impact & reuse/Data model/API/Test plan, tasks mỗi nhóm = 1 kit task, test trước. Cần Node ≥ 20.19 |
+| `data` | preset `data` | `kit-data` + agent `data-engineer`: kiến trúc dữ liệu (batch/stream, warehouse/lakehouse, medallion / staging→marts), mô hình Kimball (grain, SCD), **data contract** (`kit-new contract`), chất lượng dữ liệu viết test trước, lineage, backfill idempotent, PII; schema OpenSpec **`data-flow`** (`kit-new change <tên> --schema data-flow`); rule `.agent/rules/data/`; hook hỏi trước khi chạy vào prod (`--target prod`, `airflow dags backfill`) |
 | `eng-skills` | ✔ | 13 skill của [mattpocock/skills](https://github.com/mattpocock/skills) v1.3.2 (MIT, copy cố định, tiền tố `mp-`): `mp-grilling`/`mp-grill-with-docs` (hỏi rõ yêu cầu theo vòng), `mp-domain-modeling` (GLOSSARY + ADR), `mp-tdd`, `mp-diagnosing-bugs`, `mp-codebase-design`/`mp-improve-codebase-architecture` (module sâu), `mp-code-review` (2 chiều: chuẩn + spec), `mp-pr`, `mp-wizard` (script cho bước người làm), `mp-retro`, `mp-to-questionnaire`, `mp-writing-for-agents`. Đã gắn vào kit-task/kit-review/kit-ba/kit-sa/kit-devops/kit-handoff. Cập nhật: `scripts/vendor-mattpocock.py` |
 | `serena` | | thêm Serena (LSP qua MCP, chạy bằng uvx) vào `.mcp.json` |
 
 ### Preset và vai trò
-`kit init --preset app|platform|minimal` chọn sẵn bộ module (xem `kit list`); `--modules` để chỉnh tay. Ai làm gì, bàn giao thế nào: `.agent/rules/core/roles.md` (RACI).
+`kit init --preset app|data|platform|minimal` chọn sẵn bộ module (xem `kit list`); `--modules` để chỉnh tay. Ai làm gì, bàn giao thế nào: `.agent/rules/core/roles.md` (RACI).
 
 ```
 kit-ba ─▶ kit-sa (giải pháp tổng thể) ─┬─▶ kit-devops (hạ tầng, CI/CD, vận hành)  → docs/platform/
                                         ├─▶ kit-appsec (thiết kế bảo mật, PII)     → docs/security/
-                                        └─▶ kit-data   (dữ liệu phân tích, Phase 7) → docs/data/
+                                        └─▶ kit-data   (dữ liệu phân tích)        → docs/data/
                                                     ─▶ kit-plan ─▶ kit-task …
 ```
 

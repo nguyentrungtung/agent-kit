@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # kit-new <kind> … — create documents from the templates in .agent/templates (never let an agent invent the skeleton)
 #   kit-new task "<title>" [--type …] [--priority …] [--change <c>]   → .agent/tasks/TASK-NNN-slug.md (kit-task new)
-#   kit-new change <kebab-name> ["<description>"]                     → openspec/changes/<name>/ (schema kit-flow)
+#   kit-new change <kebab-name> ["<description>"] [--schema data-flow] → openspec/changes/<name>/ (default schema kit-flow)
+#   kit-new contract "<dataset>"                                       → docs/data/contracts/<slug>.md (module data)
 #   kit-new testplan TASK-NNN                                          → docs/qa/TASK-NNN.md, one row per acceptance criterion
 #   kit-new adr "<title>" [--task TASK-NNN]                            → docs/adr/NNNN-slug.md + index in DECISIONS.md
 #   kit-new usecase "<title>"                                          → docs/ba/use-cases/UC-NN-slug.md   (module ba)
@@ -13,7 +14,7 @@ source "$(dirname "$0")/lib.sh"
 cd "$KIT_ROOT"
 TPL="$KIT_DIR/templates"
 
-usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 slug() { ascii_slug "$1" 50; }
 esc() { printf '%s' "$1" | sed 's/[\/&|]/\\&/g'; }
 next_num() { # next_num <dir> <prefix-regex> <width>  → zero-padded next number
@@ -36,10 +37,13 @@ case "$kind" in
   task) exec "$KIT_DIR/scripts/kit-task" new "$@" ;;
 
   change)
-    name="${1:-}"; [ -n "$name" ] || die 'usage: kit-new change <kebab-name> ["<description>"]'
+    name=""; desc=""; schema=kit-flow
+    while [ $# -gt 0 ]; do case "$1" in --schema) schema="$2"; shift 2 ;; *) if [ -z "$name" ]; then name="$1"; else desc="${desc:+$desc }$1"; fi; shift ;; esac; done
+    [ -n "$name" ] || die 'usage: kit-new change <kebab-name> ["<description>"] [--schema data-flow]'
     printf '%s' "$name" | grep -qE '^[a-z0-9]+(-[a-z0-9]+)*$' || die "change name must be kebab-case (e.g. add-order-export)"
     has_openspec || die "OpenSpec module not installed (kit add openspec)"
-    "$KIT_DIR/scripts/kit-openspec" new change "$name" --schema kit-flow ${2:+--description "$2"} >/dev/null || die "openspec new change failed"
+    [ -d "$KIT_ROOT/openspec/schemas/$schema" ] || die "schema '$schema' not installed (data-flow comes with module data)"
+    "$KIT_DIR/scripts/kit-openspec" new change "$name" --schema "$schema" ${desc:+--description "$desc"} >/dev/null || die "openspec new change failed"
     echo "openspec/changes/$name/"
     info "next: write proposal → specs → design → tasks (Claude Code: /openspec-propose $name, or: .agent/scripts/kit-openspec instructions proposal --change $name)"
     ;;
@@ -80,6 +84,11 @@ case "$kind" in
     [ -n "$title" ] || die 'usage: kit-new story "<title>" [--uc UC-NN]'
     num="$(next_num docs/ba/stories 'US-' 2)"
     render "$TPL/story.md" "$KIT_ROOT/docs/ba/stories/US-$num-$(slug "$title").md" NUM="$num" TITLE="$title" UC="$uc" DATE="$(today)"
+    ;;
+
+  contract)
+    title="$*"; [ -n "$title" ] || die 'usage: kit-new contract "<dataset>"'
+    render "$TPL/data-contract.md" "$KIT_ROOT/docs/data/contracts/$(slug "$title").md" TITLE="$title" DATE="$(today)"
     ;;
 
   runbook)

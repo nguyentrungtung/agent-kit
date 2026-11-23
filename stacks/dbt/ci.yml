@@ -1,0 +1,4 @@
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install dbt-core dbt-duckdb sqlfluff
+      - run: mkdir -p ~/.dbt && cp .agent/stack/dbt/snippets/profiles.example.yml ~/.dbt/profiles.yml

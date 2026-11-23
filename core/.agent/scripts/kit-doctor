@@ -88,6 +88,8 @@ for m in $mods; do
                  v="$(openspec --version 2>/dev/null)"; [ "$v" = "$(cfg openspec_version)" ] && ok "openspec $v (pinned)" || meh "openspec $v installed, project pins $(cfg openspec_version) — kit-openspec will use npx"
                elif command -v npx >/dev/null 2>&1; then ok "openspec via npx (pinned $(cfg openspec_version))"
                else bad "OpenSpec needs Node.js ≥ 20.19 (no openspec/npx found)"; fi ;;
+    data)      for t in dbt sqlfluff; do command -v $t >/dev/null 2>&1 && ok "$t available" || meh "$t not installed — pip install dbt-core dbt-duckdb sqlfluff (in a venv)"; done
+               [ -d openspec/schemas/data-flow ] && ok "OpenSpec data-flow schema present" ;;
     security)  for t in syft trivy; do command -v $t >/dev/null 2>&1 && ok "$t available" || meh "$t not installed — kit-sec-scan uses Docker images"; done ;;
     serena)    if command -v uvx >/dev/null 2>&1; then ok "uvx available (serena)"; else meh "uvx missing — brew install uv"; fi ;;
   esac

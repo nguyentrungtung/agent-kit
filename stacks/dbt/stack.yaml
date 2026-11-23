@@ -1,0 +1,16 @@
+title: dbt (SQL transformations) — dbt best-practice layers (staging → intermediate → marts), model contracts, dbt tests, SQLFluff, dbt_project_evaluator
+detect: dbt_project.yml
+globs: models/**/*.sql models/**/*.yml macros/**/*.sql snapshots/**/*.sql tests/**/*.sql
+app_port: 8080
+tools: dbt sqlfluff
+dev_deps: pip install dbt-core dbt-duckdb sqlfluff
+cmd_install: dbt deps
+cmd_format: sqlfluff fix .
+cmd_format_check: sqlfluff lint . --rules LT,CP
+cmd_lint: sqlfluff lint .
+cmd_typecheck: dbt parse --target ci
+cmd_arch: dbt build --target ci --select package:dbt_project_evaluator
+cmd_test: dbt build --target ci --exclude package:dbt_project_evaluator
+cmd_build: dbt docs generate --target ci
+cmd_audit:
+post_note: copy .agent/stack/dbt/snippets/profiles.example.yml into your dbt profiles (target ci = DuckDB, no warehouse needed in CI), add packages.yml from the snippets, then kit-run install.
