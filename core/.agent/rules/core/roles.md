@@ -5,25 +5,34 @@ A role never silently does another role's job — it hands off (and the hand-off
 
 | Role | Playbook / agent | Owns (living docs) | Module |
 |---|---|---|---|
-| Business analyst | `kit-ba` / ba-analyst | `docs/ba/` | ba |
-| Solution architect (integrator) | `kit-sa` / solution-architect | `docs/architecture/SOLUTION.md`, options, ADRs | sa |
+| Business analyst | `kit-ba` / ba-analyst | `docs/ba/` (requirements, user flows, UI wireframes & 4 states: empty/loading/error/success) | ba |
+| Solution architect (integrator) | `kit-sa` / solution-architect | `docs/architecture/SOLUTION.md`, options, ADRs, UI Design System (`docs/architecture/ui-design-system.md`) | sa |
 | DevOps / platform | `kit-devops`, `kit-docker` / devops-engineer | `docs/platform/`, Dockerfiles, compose, `infra/`, `deploy/`, workflows | devops |
 | Application security | `kit-appsec` / security-architect (design) · `kit-security` / security-reviewer (per change) | `docs/security/` | security (+ core) |
 | Data engineer | `kit-data` / data-engineer | `docs/data/`, pipelines, data contracts | data |
 | Planner | `kit-plan` / planner | `openspec/changes/`, tasks, `docs/plan/` | core + openspec |
-| Developer | `kit-task` | code, tests, living-doc updates in the same PR | core |
-| QA | `kit-testcases` / qa-engineer | `docs/qa/` | core |
+| Full-stack Developer | `kit-task` | code (vertical slice: DB + logic + API + UI component), tests, living-doc updates in the same PR | core |
+| QA | `kit-testcases` / qa-engineer | `docs/qa/` (Core 6 test matrix, incl. UI responsiveness & a11y) | core |
 | Reviewer | `kit-review` / code-reviewer | review findings | core |
 
+## Why Full-stack Developer (Vertical Slices) instead of separate FE / BE / Design roles?
+To maximize AI velocity, avoid token explosion, and eliminate interface mismatch:
+- **No separate FE/BE roles:** An agent implementing a vertical slice owns both the backend API and the frontend UI component for that slice. Contracts never drift, mock data isn't needed, and changes are verified end-to-end.
+- **No separate Design role:** BA provides the wireframes & UI state requirements (WHAT to see); SA defines the Design System & tokens (HOW it looks & behaves); Full-stack Developer implements them directly.
+
 ## RACI for the main decisions (R responsible · A accountable · C consulted · I informed)
-| Decision | BA | SA | DevOps | AppSec | Data | Human lead |
-|---|---|---|---|---|---|---|
-| Scope, requirements, NFR numbers | R | C | C | C | C | A |
-| Architecture style, boundaries, technologies | C | R | C | C | C | A |
-| Hosting, environments, CI/CD, SLOs, DR | I | C | R | C | I | A |
-| Threat model, ASVS level, auth design, PII | C | C | C | R | C | A |
-| Analytics architecture, pipelines, data contracts | C | C | C | C | R | A |
-| Task breakdown and order | C | C | C | C | C | A (planner R) |
+| Decision | BA | SA | DevOps | AppSec | Data | Full-stack Dev | Human lead |
+|---|---|---|---|---|---|---|---|
+| Scope, requirements, NFR numbers | R | C | C | C | C | I | A |
+| Architecture style, boundaries, technologies | C | R | C | C | C | C | A |
+| UI Wireframes, User Flows & Screen States | R | C | I | I | I | C | A |
+| Frontend Architecture & Living Design System | C | R | I | C | I | C | A |
+| Hosting, environments, CI/CD, SLOs, DR | I | C | R | C | I | I | A |
+| Threat model, ASVS level, auth design, PII | C | C | C | R | C | I | A |
+| Analytics architecture, pipelines, data contracts | C | C | C | C | R | I | A |
+| Task breakdown and order | C | C | C | C | C | C | A (planner R) |
+| Full-stack Vertical Slice Implementation (BE + FE) | I | C | I | I | I | R | A |
+| Quality verification & Test matrix | C | C | I | C | I | C | A (QA R) |
 
 ## Hand-off flow
 ```

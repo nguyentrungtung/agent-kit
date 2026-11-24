@@ -24,7 +24,7 @@
 | Changes in progress | `openspec/changes/<change>/` (proposal, spec deltas, design, tasks) |
 | Requirements (BA) | `docs/ba/` · Architecture: `docs/architecture/` · API: `docs/api/` · Plan & roadmap: `docs/plan/` |
 | Where each kind of document lives | `.agent/rules/core/documentation.md` · map: `docs/README.md` |
-| Who owns what (BA, SA, DevOps, AppSec, Data, Dev, QA) | `.agent/rules/core/roles.md` — stay in your role, hand off the rest |
+| Who owns what (BA, SA, DevOps, AppSec, Data, Full-stack Dev, QA) | `.agent/rules/core/roles.md` — stay in your role, hand off the rest |
 | Tasks | `.agent/tasks/` (one file per task) |
 | Playbooks (step-by-step procedures) | `.agents/skills/<name>/SKILL.md` |
 | Checklists | `.agent/checklists/` |
@@ -43,6 +43,7 @@ idea ─▶ kit-ba (UC/US/BR) ─▶ kit-sa (solution) ─▶ kit-devops · kit-
 - Work **only on a task branch** (`<type>/TASK-NNN-slug`). `main`, `develop`, `release/*`, `hotfix/*` are protected.
 - Create documents with `.agent/scripts/kit-new <task|change|testplan|adr|usecase|story|doc>` — never invent the skeleton.
 - Small steps: change → `kit-run check` → `kit-task checkpoint "<what is now working>"`. Same error 3× → rollback, LESSONS.md, re-plan.
+- **Full-stack Developer on Vertical Slices (Size M: 150–350 LOC)**: One agent implements DB + Logic + API + Frontend UI Component + Tests for a feature. Never split tasks horizontally into FE-only or BE-only.
 - Done = `kit-task verify` passes + `.agent/checklists/definition-of-done.md`. Then `kit-task finish`.
 
 ## 3. Hard rules (also enforced by hooks / git hooks / CI)

@@ -95,20 +95,21 @@ Khi bạn đưa ra một yêu cầu mới (ví dụ: *"làm tính năng đăng n
 * Phương thức gì? (Email/Password, OTP SMS, hay Google/Apple OAuth2).
 * Chính sách bảo mật & Điều kiện biên? (Khóa khi sai 5 lần, thời hạn phiên, 2FA).
 
-Sau đó, BA chuẩn hóa yêu cầu theo **cú pháp EARS** (Event-driven, State-driven, Unwanted behavior) và xuất ra gói **Architecture Hand-off Packet** cho SA.
+Sau đó, BA chuẩn hóa yêu cầu theo **cú pháp EARS** (Event-driven, State-driven, Unwanted behavior), **phác thảo Wireframe (khung giao diện) & 4 trạng thái UI then chốt** (Empty, Loading, Error, Success), và xuất ra gói **Architecture Hand-off Packet** cho SA.
 ```bash
 # Tạo tài liệu Use Case
 .agent/scripts/kit-new usecase "Dang ky nguoi dung"
 
-# Tạo User Story kèm Acceptance Criteria (Given-When-Then chuẩn EARS)
+# Tạo User Story kèm Wireframe, 4 trạng thái UI và Acceptance Criteria (Given-When-Then chuẩn EARS)
 .agent/scripts/kit-new story "Dang ky bang Email va Mat khau" --uc UC-01
 ```
 
-#### 1.2. SA thiết kế giải pháp & Sơ đồ kết nối (Sequence Diagram & ADR)
+#### 1.2. SA thiết kế giải pháp & Sơ đồ kết nối (Sequence Diagram, ADR & Design System)
 Sau khi có đầu vào từ BA, Solution Architect (role `sa`) sẽ giải quyết câu hỏi **HOW**:
 * Nếu ứng dụng chỉ chạy trên Web: Chọn **Session Cookie (HttpOnly)** để chống tấn công XSS.
 * Nếu có Mobile App hoặc SPA: Chọn **OAuth2 PKCE + JWT Token** (Access token ngắn hạn + Refresh token xoay vòng).
 * Vẽ **Sơ đồ Sequence (Mermaid)** mô tả cách Client $\leftrightarrow$ API Gateway $\leftrightarrow$ Auth Service $\leftrightarrow$ DB/Redis tương tác với nhau.
+* Thiết lập **Frontend Architecture & Living Design System (`docs/architecture/ui-design-system.md`)**: Thư viện component (Tailwind CSS, shadcn/ui), Design Tokens (bảng màu, font chữ, dark mode), Responsive (<640px, <1024px, ≥1024px) và Accessibility (WCAG 2.1 AA).
 * Ghi quyết định vào **ADR** (`.agent/scripts/kit-new adr "Chon co che Authentication"`).
 
 #### 1.3. Lập kế hoạch OpenSpec & Chia Task (`kit-plan`)
@@ -119,11 +120,13 @@ Gói toàn bộ đặc tả vào OpenSpec và chia thành các Task cỡ vừa (
 
 ---
 
-### Giai đoạn 2: Tạo Task và Bắt đầu làm việc
-Mỗi tính năng được phân rã thành các Task vừa vặn (Size M: 150–350 dòng code):
+### Giai đoạn 2: Tạo Task và Bắt đầu làm việc (Vai trò Full-stack Developer)
+Mỗi tính năng được phân rã thành các Task vừa vặn (Size M: 150–350 dòng code) do **Full-stack Developer** thực hiện:
+* **Lát cắt dọc trọn vẹn (Vertical Slice):** 1 Developer agent chịu trách nhiệm triển khai từ Database $\to$ Backend Logic $\to$ API Endpoint $\to$ Frontend UI Component $\to$ Automated Test.
+* **Không tách riêng BE và FE:** Loại bỏ hoàn toàn tình trạng lệch hợp đồng API, không cần mock data tạm thời, tiết kiệm ~65% token và không gây tắc nghẽn giữa các agent.
 ```bash
-# 1. Tạo Task mới gắn với đề xuất thay đổi
-.agent/scripts/kit-task new "Xay dung API dang ky tai khoan" --change register-flow --priority P1
+# 1. Tạo Task mới gắn với đề xuất thay đổi (gắn thẻ topic để nạp bài học LTM)
+.agent/scripts/kit-task new "Xay dung API va UI dang ky tai khoan" --change register-flow --priority P1 --tags "auth, ui"
 
 # 2. Bắt đầu Task (Hệ thống tự động tạo nhánh git: feature/TASK-001-...)
 .agent/scripts/kit-task start TASK-001
@@ -142,6 +145,7 @@ Trước khi viết mã nguồn, QA Engineer / AI phải tạo tài liệu kiể
 4. **TC-04 (Security & Access Control - Phân quyền):** Chưa đăng nhập (401), không đủ quyền (403), cố tình sửa dữ liệu của user khác (IDOR).
 5. **TC-05 (State Transition & Business Rules - Trạng thái & Nghiệp vụ):** Tài khoản bị khóa mà cố đăng nhập, đơn hàng đã hủy mà cố thanh toán.
 6. **TC-06 (Resilience & Concurrency - Bất biến & Ngoại lệ):** Gửi 2 request trùng nhau cùng lúc (Idempotency key), mạng timeout.
+7. **UI & Accessibility (dành cho tính năng có màn hình):** Kiểm tra hiển thị responsive (Mobile vs Desktop), 4 trạng thái UI (Empty, Loading, Error, Success), điều hướng phím Tab và nhãn `aria-*` (chuẩn WCAG 2.1 AA).
 
 #### 3.2. Cấu trúc bảng Test Case đúng chuẩn:
 ```markdown
@@ -191,13 +195,17 @@ Sau khi Pull Request được review và merge vào nhánh `develop`:
 
 Để AI làm việc với tốc độ nhanh nhất mà không gặp lỗi:
 
-### 1. Quy tắc kích thước Task (Sweet Spot)
-* **Tuyệt đối không chia vụn (Horizontal):** Không chia riêng task viết Entity, task viết DTO, task viết Controller.
-* **Chia theo lát cắt dọc (Vertical Slice - Size M: 150–350 LOC):** 1 task giải quyết trọn vẹn 1 endpoint gồm cả Database + Service + Controller + Test.
+### 1. Quy tắc kích thước Task (Sweet Spot) & Vai trò Full-stack Developer
+* **Tuyệt đối không chia vụn theo tầng kỹ thuật (Horizontal):** Không chia riêng task Entity, task DTO, task Controller, hay tách riêng task Backend và task Frontend.
+* **Chia theo lát cắt dọc (Vertical Slice - Size M: 150–350 LOC):** 1 task giải quyết trọn vẹn 1 tính năng/endpoint gồm cả Database Migration + Logic Nghiệp vụ + API Endpoint + UI Component + Test tự động.
+* **Tại sao không nên tạo role FE và Design riêng biệt?**
+  * Tách riêng role FE/Design gây ra hiện tượng **Agent Churn & Token Bloat** (tốn 60-70% token chỉ để bàn giao và tóm tắt lại ngữ cảnh cho nhau).
+  * Gây ra lỗi **Lệch Interface (Contract Drift)** giữa BE và FE do 2 agent tự suy đoán khác nhau.
+  * **Giải pháp chuẩn:** BA cung cấp Wireframe & 4 trạng thái UI $\to$ SA thiết lập Living Design System $\to$ **Full-stack Developer** tự code cả 2 đầu trong 1 task. Code khớp 100%, test ngay lập tức và tiết kiệm tối đa token.
 * Dùng **`kit-task checkpoint`** để lưu các bước nhỏ bên trong task thay vì tạo nhiều task lặt vặt.
 
 ### 2. Chạy nhiều Agent song song bằng Git Worktrees
-Khi có các task độc lập không phụ thuộc nhau (ví dụ: Task 1 làm API Backend, Task 2 làm Giao diện Frontend):
+Khi có các task độc lập không phụ thuộc nhau (ví dụ: Task 1 làm Luồng Đăng nhập, Task 2 làm Luồng Xem Hồ sơ Người dùng):
 ```bash
 # Terminal 1: Giao Task 1 cho Agent A trong thư mục riêng
 .agent/scripts/kit-task start TASK-001 --worktree

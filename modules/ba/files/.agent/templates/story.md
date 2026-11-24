@@ -21,8 +21,26 @@ updated: {{DATE}}
 ## Business rules
 <!-- BR ids only; rule text lives in REQUIREMENTS.md -->
 
-## UI / data notes
-<!-- Screens, fields + validation, sample data. -->
+## UI & Screen Specification
+<!-- For UI features: wireframe layout, user flow, and key states so Full-stack Dev can implement FE cleanly without guessing -->
+### Wireframe / Layout
+<!-- Low-fi layout: ASCII box, Markdown table, or Mermaid diagram -->
+```
++-------------------------------------------------------------+
+| [Header / Screen Title]                                     |
+| [Input Fields / Controls]                                   |
+| [Button: Primary Action]    [Button: Cancel/Secondary]      |
++-------------------------------------------------------------+
+```
+
+### UI States Checklist
+- [ ] **Empty State:** Visual when zero data / first-time user.
+- [ ] **Loading State:** Spinner / skeleton / disabled button during submission.
+- [ ] **Error State:** Field error messages, alert banner for failure.
+- [ ] **Success State:** Toast notification, redirect, or view update.
+
+## Data notes
+<!-- Fields, types, validations, defaults, sample payload. -->
 
 ## INVEST check
 - [ ] Independent  - [ ] Negotiable  - [ ] Valuable  - [ ] Estimable  - [ ] Small  - [ ] Testable

@@ -73,7 +73,7 @@ Monorepo: mỗi component là `path=stack+framework`. Lệnh được ghép ki�
 kit-ba ─▶ kit-sa (giải pháp tổng thể) ─┬─▶ kit-devops (hạ tầng, CI/CD, vận hành)  → docs/platform/
                                         ├─▶ kit-appsec (thiết kế bảo mật, PII)     → docs/security/
                                         └─▶ kit-data   (dữ liệu phân tích)        → docs/data/
-                                                    ─▶ kit-plan ─▶ kit-task …
+                                                    ─▶ kit-plan ─▶ kit-task (Full-stack Dev) …
 ```
 
 ### Tool trên máy: có thì dùng, thiếu mới cài
@@ -108,8 +108,8 @@ UC/US (docs/ba) ─▶ OpenSpec change: proposal ─▶ specs ─▶ design ─�
 
 ### Kích cỡ Task & Tối ưu tốc độ AI (Bộ ba 3-in-1: Sweet Spot · Checkpoint · Worktree)
 Để tránh tình trạng **task quá to** (làm AI quá tải context, ảo giác) hoặc **task quá vụn** (làm chậm tiến độ, tốn công review):
-1. **Phân rã theo Lát cắt dọc (Vertical Slice - Size M: 150–350 dòng code):**  
-   `kit-plan` (role Planner) không chia task vụn theo từng tầng kỹ thuật (cấm chia riêng task Entity, task DTO, task Controller). Thay vào đó, mỗi task giải quyết trọn vẹn 1 tính năng/endpoint gồm: DB + Logic + API/UI + Test tự động.
+1. **Phân rã theo Lát cắt dọc (Vertical Slice - Size M: 150–350 dòng code) - Vai trò Full-stack Developer:**  
+   `kit-plan` (role Planner) không chia task vụn theo từng tầng kỹ thuật (cấm chia riêng task Entity, task DTO, task Controller, cấm tách riêng BE và FE). Thay vào đó, một **Full-stack Developer** giải quyết trọn vẹn 1 tính năng/endpoint gồm: DB + Logic + API Endpoint + UI Component + Test tự động.
 2. **Dùng Checkpoint bên trong Task (`kit-task checkpoint`):**  
    Trong một task cỡ M, AI hoàn thành từng bước nhỏ (schema $\to$ service $\to$ controller $\to$ test) thì tạo ngay checkpoint để giữ an toàn. Chỉ chạy `kit-task finish` và mở PR **một lần duy nhất** khi toàn bộ Acceptance Criteria đã đạt.
 3. **Chạy song song bằng Worktree (`kit-task start --worktree`):**  

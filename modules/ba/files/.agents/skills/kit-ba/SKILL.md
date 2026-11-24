@@ -52,7 +52,16 @@ Stakeholder list with interest/influence, RACI for decisions, user roles/persona
 - **Business rules `BR-NN`** (calculations, validations, permissions) — referenced from stories, never duplicated.
 - **Data**: entities + fields + validation in a **data dictionary**, **ERD** (template `data-model.md`); lifecycle → **state diagram**.
 - **Interactions across components/external systems** → **sequence diagrams** (template `sequence.md`), include error/timeout paths.
-- **UI-heavy**: low-fi wireframe (ASCII or simple HTML) + screen → story mapping.
+- **UI & Screen Specification (Crucial for Full-stack Dev & Frontend)**:
+  For any user-facing feature, specify in the story (`docs/ba/stories/US-NN-*.md`):
+  1. **User Flow & Navigation:** Entry point, triggers, navigation paths.
+  2. **Screen Wireframe / Layout:** Low-fi layout using ASCII art, Markdown tables, or Mermaid layout diagrams.
+  3. **The 4 Essential UI States:**
+     - *Empty State:* Display when zero data exists / initial load.
+     - *Loading State:* Skeletons, spinners, disabled action buttons.
+     - *Error State:* Field-level validation messages, banner alerts for 4xx/5xx failures.
+     - *Success State:* Toast notification, feedback message, or view transition.
+  This gives the Full-stack Developer unambiguous visual and interactive specifications to implement the frontend cleanly.
 
 ## 6. Traceability → `RTM.md` (template `RTM.md`)
 Goal → FR/NFR → US → AC → (TASK, Test case filled later by kit-plan / kit-testcases). No orphan FR, no story without a goal.

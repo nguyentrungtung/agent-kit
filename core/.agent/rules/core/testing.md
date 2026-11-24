@@ -8,3 +8,4 @@
 - Never delete, skip or weaken a failing test to get green — fix the code or raise it with the human.
 - Coverage target `coverage_min` (project.yaml) is a floor, not a goal; critical domain logic aims higher.
 - Test cases are designed first in `docs/qa/TASK-NNN.md` (`kit-testcases`) covering the **Core 6 Test Matrix**: Happy path, Boundary values, Negative/Errors, Security/AuthZ, State transitions, and Resilience/Concurrency.
+- For UI components: verify responsive viewports (mobile/desktop), the 4 UI states (empty, loading, error, success), and Accessibility (a11y: WCAG AA, keyboard navigation, aria attributes).

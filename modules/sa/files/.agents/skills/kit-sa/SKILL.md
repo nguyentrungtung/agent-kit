@@ -40,6 +40,13 @@ Use **mp-codebase-design** vocabulary (deep modules, small interfaces, seams) fo
 - **Logical data model**: entities and ownership per module, consistency (transaction vs eventual + outbox), ID strategy (ADR) —
   detailed with the **kit-datamodel** playbook into `docs/architecture/data-model.md` (relationships, keys, constraints, migrations).
 - **API contracts**: with module api, the **kit-api** playbook (contract-first `docs/api/openapi.yaml`).
+- **Frontend Architecture & Living Design System (`docs/architecture/ui-design-system.md`)**:
+  When the application has a user interface (Web SPA/SSR, Mobile):
+  - UI framework and state management strategy.
+  - **Design Tokens**: Color palette (primary, secondary, danger, background, neutral), typography scale, spacing system, dark mode tokens.
+  - **Component Library**: Guidelines for components (e.g. Tailwind CSS, shadcn/ui, MUI), form handling, and validation feedback.
+  - **Responsive Breakpoints**: Mobile (<640px), Tablet (<1024px), Desktop (≥1024px).
+  - **Accessibility (a11y)**: Standards based on WCAG 2.1 AA (color contrast ≥ 4.5:1, keyboard focus outlines, semantic HTML, aria roles).
 - **Key runtime scenarios** as sequence diagrams (happy + failure). For authentication (login, registration, SSO), draw the full interaction: Client ↔ Gateway ↔ Auth Service ↔ DB / Cache (Redis) ↔ IdP.
 - **Cross-cutting decisions & ADRs**:
   - **AuthN/Z Strategy (ADR)**: Choose mechanism based on client platforms (Web SSR → HttpOnly Session Cookie; SPA/Mobile → OAuth2 PKCE + JWT with short-lived access token + rotated refresh token). Document in `docs/architecture/options/auth.md` and write the ADR (`kit-new adr`).

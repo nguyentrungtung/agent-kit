@@ -14,6 +14,8 @@ For any feature or task, derive test cases covering at least the **Core 6 Test M
 5. State transition & business rules (Invalid state, business rule rejection)
 6. Resilience & concurrency (Idempotency, duplicate requests, timeouts)
 
+For user-facing UI: verify responsive behavior across viewports, the 4 UI states (Empty, Loading, Error, Success), and Accessibility (a11y: semantic HTML, keyboard focus, aria attributes).
+
 Write tests BEFORE code implementation (TDD Red-to-Green). Every AC must map to an automated test in `docs/qa/TASK-NNN.md`.
 Use the project's existing test framework and style. Never weaken or delete existing tests to make them pass.
 Return: test case table summary, test files changed, `kit-run test` result, ACs without automated coverage.
