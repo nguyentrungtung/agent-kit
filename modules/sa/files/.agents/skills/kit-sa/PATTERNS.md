@@ -37,7 +37,7 @@ correctness argument, how it is tested (property-based / table tests / golden fi
 | Routing / shortest path / dependency order | Dijkstra / A*; topological sort (Kahn) for task/approval dependencies | Detect cycles → error |
 | Inventory / stock reservation under concurrency | Atomic conditional update (`UPDATE … WHERE qty >= n`) or row lock; reservation with TTL | No read-modify-write in app code |
 | Unique sequential numbers (invoice no.) | DB sequence per series / gap-free table with lock if law requires no gaps | Never `max()+1` |
-| Idempotent processing (payments, webhooks) | Idempotency key table with unique constraint + stored response | Exactly-once effect, at-least-once delivery |
+| Idempotent processing (payments, webhooks) | Inside one DB: idempotency-key table (unique constraint) + stored response, in the same transaction as the effect. External effects (charging a card): send the key to the provider (provider-side idempotency) + reconciliation job for "sent but outcome unknown" | A local table alone cannot make a remote call exactly-once — design the recovery path |
 | Rate limiting / quotas | Token bucket / sliding window (Redis) | Per key; return 429 + Retry-After |
 | Search, autocomplete, fuzzy match | DB full-text (Postgres `tsvector`, trigram) first; search engine only if NFR demands | Vietnamese: unaccent + normalisation |
 | Deduplication / matching records | Normalise → blocking key → similarity (Levenshtein/Jaro-Winkler) → threshold + human review | Report precision/recall |

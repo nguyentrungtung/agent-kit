@@ -1,3 +1,10 @@
+---
+title: UI design system
+category: reference
+status: draft
+owner:
+updated:
+---
 # UI design system — <system>
 <!-- Owned by kit-sa (§5) when the product has a UI. BA defines WHAT each screen shows (wireframes + 4 states in the stories);
      this file defines HOW it looks and behaves. The Full-stack Developer uses only these tokens/components — no ad-hoc colours,

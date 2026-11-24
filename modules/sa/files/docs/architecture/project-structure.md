@@ -1,6 +1,13 @@
+---
+title: Project structure — backend + frontend + contracts
+category: reference
+status: draft
+owner:
+updated:
+---
 # Project structure — backend + frontend + contracts
 <!-- Owned by kit-sa (§5). The Full-stack Developer places every file by THIS document; a new top-level folder needs an update here.
-     Fill it from the architecture style ADR and the stack skeletons (.agent/stack/<stack>/skeletons/<style>.txt);
+     Fill it from the architecture style ADR and the stack skeletons (.agent/stack/<stack>/skeletons/[<framework>/]<style>.txt);
      `kit-new module <name> --component <path>` creates a module's folders from the same skeleton. -->
 
 ## 1. Repository layout

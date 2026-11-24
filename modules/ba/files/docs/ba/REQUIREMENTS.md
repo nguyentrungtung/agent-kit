@@ -10,8 +10,8 @@ Mọi yêu cầu chức năng viết theo chuẩn EARS (Easy Approach to Require
 -->
 | ID | Requirement (EARS) | Pattern | Priority (MoSCoW) | Goal | Stories |
 |---|---|---|---|---|---|
-| FR-01 | WHEN <trigger>, the system SHALL <response>. | Event-driven | Must | G1 | <US-NN> |
-| FR-02 | IF <unwanted condition>, THEN the system SHALL <safe response>. | Unwanted | Must | G1 | <US-NN> |
+| FR-01 | WHEN `<trigger>`, the system SHALL `<response>`. | Event-driven | Must | G1 | `<US-NN>` |
+| FR-02 | IF `<unwanted condition>`, THEN the system SHALL `<safe response>`. | Unwanted | Must | G1 | `<US-NN>` |
 
 ## Non-functional requirements
 | ID | Category | Requirement | Measure |
@@ -21,7 +21,7 @@ Mọi yêu cầu chức năng viết theo chuẩn EARS (Easy Approach to Require
 | NFR-03 | Availability | | |
 
 ## User stories
-### US-NN — <title>
+### US-NN — `<title>`
 **As a** … **I want** … **so that** …
 **Acceptance criteria**
 - Given … When … Then …

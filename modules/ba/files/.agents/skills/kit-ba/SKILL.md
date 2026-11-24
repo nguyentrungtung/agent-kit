@@ -17,8 +17,9 @@ Write in `docs_language` (`.agent/project.yaml`). Diagrams follow the **kit-diag
 For an existing system, derive the **as-is** behaviour from code before asking.
 
 ## 2. Elicitation interview — MANDATORY before writing any requirement
-Never assume business facts. **Do not generate BA documents until a clarification round has been answered** — a document built
-on guesses is the main source of "the AI built the wrong thing". Technique: with module eng-skills use **mp-grill-with-docs**
+Never assume business facts. **Ask the clarification round before writing BA documents** — a document built on guesses is the
+main source of "the AI built the wrong thing". Documents may be drafted on answers, or on provisional `ASSUMPTION:` lines when no
+human is available (step 5) — never on silent guesses. Technique: with module eng-skills use **mp-grill-with-docs**
 (grill against existing docs) or **mp-to-questionnaire** (one numbered questionnaire); otherwise follow the protocol below.
 
 **Protocol (every new project / epic / vague request):**
@@ -28,8 +29,9 @@ on guesses is the main source of "the AI built the wrong thing". Technique: with
 3. Each question: numbered, **closed** (options a/b/c or a number), with **your recommended answer** and why in ≤ 1 line —
    the human may reply "1a 2 ok 3c". Open questions only for goals.
 4. Record every Q and A in `docs/ba/BRIEF.md` › *Clarifications Q&A* (who, date). Unanswered + blocking → stop and wait.
-5. No human available → write each unknown as `ASSUMPTION: <your recommended answer>` and continue. `kit-trace` lists them and
-   `kit-task finish` blocks on them until a human rewrites each as `CONFIRMED: <answer> (who, date)`.
+5. No human available → write each unknown as `ASSUMPTION: <your recommended answer>` in BRIEF.md and continue drafting (status
+   stays `draft`). `kit-trace assumptions` lists them; `kit-task verify`/`finish` scans `docs/ba/BRIEF.md` and blocks every task
+   until a human rewrites each one as `CONFIRMED: <answer> (who, date)`.
 6. Repeat a round after modelling (step 4) if new unknowns appear (exceptions, states, rules).
 
 | Dim | Ask about | Example questions (adapt to the domain — do not copy) |
@@ -86,7 +88,8 @@ Run `.agent/scripts/kit-run docs` (renders every Mermaid/PlantUML block; fails o
 (every UC/US/BR/FR id referenced exists; warns on stories without UC/AC/negative AC, FRs without stories). Fix until green.
 
 ## 8. Quality gate (all true before kit-plan)
-- [ ] Clarification round answered (≥ 3 questions covering dimensions A, B, C) and recorded in BRIEF.md; open `ASSUMPTION:` lines listed for the human (`kit-trace assumptions`).
+- [ ] Clarification round asked (≥ 3 questions covering dimensions A, B, C) and recorded in BRIEF.md — each one answered, or an
+      `ASSUMPTION:` shown to the human (`kit-trace assumptions`). kit-plan may start on assumptions only when none of them changes scope.
 - [ ] `kit-trace` has 0 errors.
 - [ ] Every goal measurable; scope and out-of-scope explicit.
 - [ ] Every FR traces to a goal and to ≥1 story; every story has testable AC incl. a negative case.

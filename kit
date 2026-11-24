@@ -323,17 +323,13 @@ install_component() { # install_component <idx>
   [ -n "$fd" ] && [ -f "$fd/rules.md" ] && copy_file "$fd/rules.md" "$TARGET/.agent/rules/stack/$f.md"
   src="$(stack_asset "$s" snippets)"; [ -n "$src" ] && copy_tree "$src" "$TARGET/.agent/stack/$s/snippets"
   [ -n "$fd" ] && [ -d "$fd/snippets" ] && copy_tree "$fd/snippets" "$TARGET/.agent/stack/$s/snippets"
-  # architecture skeletons (kit-new module): framework definitions win over the stack's; they are also kept per framework
-  # (skeletons/<framework>/) so two components of one stack (e.g. node+nestjs backend, node+react frontend) never collide
-  if [ -n "$fd" ] && [ -d "$fd/skeletons" ]; then
-    copy_tree "$fd/skeletons" "$TARGET/.agent/stack/$s/skeletons"
-    copy_tree "$fd/skeletons" "$TARGET/.agent/stack/$s/skeletons/$f"
-  fi
+  # architecture skeletons (kit-new module): the stack's own in skeletons/, each framework's in skeletons/<framework>/,
+  # so two components of one stack (node+nestjs backend, node+react frontend, plain node) never overwrite each other
+  if [ -n "$fd" ] && [ -d "$fd/skeletons" ]; then copy_tree "$fd/skeletons" "$TARGET/.agent/stack/$s/skeletons/$f"; fi
   src="$(stack_asset "$s" skeletons)"
   if [ -n "$src" ]; then
     for rel in "$src"/*; do
       [ -f "$rel" ] || continue
-      [ -n "$fd" ] && [ -f "$fd/skeletons/$(basename "$rel")" ] && continue
       copy_file "$rel" "$TARGET/.agent/stack/$s/skeletons/$(basename "$rel")"
     done
   fi
@@ -389,7 +385,8 @@ apply_project_add() { # put module cmd_* lines into project.yaml (fill empty key
     [ -f "$MODULES/$m/project.add" ] || continue
     while IFS= read -r l; do
       k="${l%%:*}"; [ -z "$k" ] && continue
-      if grep -q "^$k:[[:space:]]*$" "$cfg"; then sed -i.bak "s#^$k:[[:space:]]*\$#$l#" "$cfg" && rm -f "$cfg.bak"
+      if grep -q "^$k:[[:space:]]*$" "$cfg"; then   # literal replacement: the line may contain # & / \ (comments, URLs)
+        K="$k" L="$l" perl -i -pe 's/^\Q$ENV{K}\E:[ \t]*$/$ENV{L}/' "$cfg"
       elif ! grep -q "^$k:" "$cfg"; then echo "$l" >> "$add"; fi
     done < "$MODULES/$m/project.add"
   done

@@ -102,8 +102,15 @@ case "$kind" in
       p="${e%%=*}"; if [ -z "$comp" ] || [ "$p" = "$comp" ] || [ "$p" = "${comp%/}" ]; then entry="$e"; break; fi; done
     [ -n "$entry" ] || die "component '$comp' not found in project.yaml components"
     cpath="${entry%%=*}"; rest="${entry#*=}"; stack="${rest%%+*}"; fw=""; [ "${rest#*+}" != "$rest" ] && fw="${rest#*+}"
-    skel="$KIT_DIR/stack/$stack/skeletons/$style.txt"
-    [ -n "$fw" ] && [ -f "$KIT_DIR/stack/$stack/skeletons/$fw/$style.txt" ] && skel="$KIT_DIR/stack/$stack/skeletons/$fw/$style.txt"
+    shared="$KIT_DIR/stack/$stack/skeletons/$style.txt"; skel="$shared"
+    if [ -n "$fw" ] && [ -f "$KIT_DIR/stack/$stack/skeletons/$fw/$style.txt" ]; then
+      skel="$KIT_DIR/stack/$stack/skeletons/$fw/$style.txt"
+      # upgraded from < 0.11 with a customised shared skeleton (kit upgrade kept it and wrote .kit-new): keep using the user's edits
+      if [ -f "$shared" ] && [ -f "$shared.kit-new" ]; then
+        warn "using your customised ${shared#"$KIT_ROOT"/} — kit now ships ${skel#"$KIT_ROOT"/}; move your edits there and delete the .kit-new"
+        skel="$shared"
+      fi
+    fi
     [ -f "$skel" ] || die "no '$style' skeleton for stack $stack${fw:++$fw} (available: $(ls "$KIT_DIR/stack/$stack/skeletons" 2>/dev/null | grep '\.txt$' | sed 's/\.txt$//' | tr '\n' ' '))"
     kebab="$(ascii_slug "$name" 40)"; snake="$(printf '%s' "$kebab" | tr '-' '_')"; flat="$(printf '%s' "$kebab" | tr -d '-')"
     pascal="$(printf '%s' "$kebab" | awk -F- '{for(i=1;i<=NF;i++) printf "%s%s", toupper(substr($i,1,1)), substr($i,2)}')"

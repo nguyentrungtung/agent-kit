@@ -77,15 +77,30 @@ jobs:
             feature/*|fix/*|hotfix/*|refactor/*)
               [ -n "$id" ] || { echo "::error::code branch '$HEAD_REF' has no TASK-NNN — every code change needs a task (kit-task new / start)"; exit 1; } ;;
           esac
-          [ -n "$id" ] || { echo "no task on this branch — skipped"; exit 0; }
           git fetch -q origin "$BASE_REF"
-          KIT_BASE_REF="origin/$BASE_REF" .agent/scripts/kit-task verify "$id"
+          # also every task file this PR marks as finished (review/done) — a chore/docs branch cannot close a task unverified
+          # (release/revert PRs only carry tasks already verified in their own PRs)
+          ids="$id"
+          case "$HEAD_REF" in release/*|revert/*) changed_tasks="" ;; *) changed_tasks="$(git diff --name-only "origin/$BASE_REF...HEAD" -- '.agent/tasks/TASK-*.md' '.agent/tasks/archive/*/TASK-*.md')" ;; esac
+          for f in $changed_tasks; do
+            [ -f "$f" ] || continue
+            case "$(sed -n 's/^status:[[:space:]]*//p' "$f" | head -n1)" in review|done) ids="$ids $(basename "$f" | grep -oE '^TASK-[0-9]+')" ;; esac
+          done
+          ids="$(printf '%s\n' $ids | sort -u | tr '\n' ' ')"
+          [ -n "${ids// /}" ] || { echo "no task on this branch and no task marked finished — skipped"; exit 0; }
+          bad=0
+          for t in $ids; do echo "== $t"; KIT_BASE_REF="origin/$BASE_REF" .agent/scripts/kit-task verify "$t" || bad=1; done
+          exit $bad
       - name: API contract lint (Spectral)
         if: hashFiles('docs/api/openapi.yaml') != ''
         run: .agent/scripts/kit-run api
       - name: Generated API client/types up to date with docs/api/openapi.yaml (cmd_apigen)
         if: hashFiles('docs/api/openapi.yaml') != ''
         run: |
+          if ! grep -qE '^cmd_apigen:[[:space:]]*[^#[:space:]]' .agent/project.yaml; then
+            echo "::notice::cmd_apigen is not set — frontend types are not checked against docs/api/openapi.yaml (set it when a frontend consumes the API, kit-api §3b)"
+            exit 0
+          fi
           before="$(git status --porcelain)"
           .agent/scripts/kit-run apigen
           [ "$before" = "$(git status --porcelain)" ] || { git status --short; echo "::error::generated API client is stale — run .agent/scripts/kit-run apigen and commit"; exit 1; }

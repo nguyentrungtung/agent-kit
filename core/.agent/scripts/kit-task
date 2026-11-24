@@ -271,8 +271,8 @@ cmd_verify() {
   [ -n "$s1" ] && gate ok "1 Understand filled" || gate no "1 Understand is empty — restate the problem and link its source (change / UC / US)"
   case "$type" in
     feature|fix|hotfix|refactor)
-      if [ -n "$change" ] || printf '%s\n' "$s1" | grep -qE '(UC|US|BR|FR)-[0-9]+|[Ss]ource:'; then gate ok "1 source linked (change / UC / US / BR / Source:)"
-      else gate no "1 Understand links no source — set 'change:' in the front matter, cite a UC/US/BR/FR id, or add 'Source: <issue / request, who, date>'"; fi ;;
+      if [ -n "$change" ] || printf '%s\n' "$s1" | grep -qE '(UC|US|BR|FR)-[0-9]+|[Ss]ource:|openspec/specs/[a-z0-9]'; then gate ok "1 source linked (change / UC / US / BR / spec / Source:)"
+      else gate no "1 Understand links no source — set 'change:' in the front matter, cite a UC/US/BR/FR id or an openspec/specs/<capability> link, or add 'Source: <issue / request, who, date>'"; fi ;;
   esac
   # 2 Clarify: the ambiguity checklist must be walked (every box ticked) and every asked question answered — "None" alone is not enough
   s2="$(section_body "$f" '^## 2\. Clarifications')"
@@ -280,13 +280,15 @@ cmd_verify() {
   open_box="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*- \[ \]' || true)"
   if [ "${ticks:-0}" -ge 8 ] && [ "${open_box:-0}" -eq 0 ]; then gate ok "2 ambiguity checklist walked ($ticks/8)"
   else gate no "2 Clarifications: tick every item of the ambiguity checklist ($ticks ticked, $open_box open) — write n/a where it does not apply (template: .agent/tasks/_TEMPLATE.md)"; fi
-  unanswered="$(printf '%s\n' "$s2" | awk -F'|' '/^\|[[:space:]]*[0-9]+[[:space:]]*\|/ { q=$3; a=$4; gsub(/[[:space:]]/,"",q); gsub(/[[:space:]]/,"",a); n=$2; gsub(/[[:space:]]/,"",n); if (q!="" && a=="") printf " #%s", n }')"
+  unanswered="$(printf '%s\n' "$s2" | sed 's/\\|/¦/g' | awk -F'|' '/^\|[[:space:]]*[0-9]+[[:space:]]*\|/ { q=$3; a=$4; gsub(/[[:space:]]/,"",q); gsub(/[[:space:]]/,"",a); n=$2; gsub(/[[:space:]]/,"",n); if (q!="" && a=="") printf " #%s", n }')"
   [ -z "$unanswered" ] && gate ok "2 every question answered" || gate no "2 questions without an answer:$unanswered — a blocking question stops the task (kit-handoff), never guess"
   [ -n "$(section_body "$f" '^## 3\. Solution')" ] && gate ok "3 Solution filled" || gate no "3 Solution is empty — approach, reuse found, files touched"
   # assumptions written by the agent must be confirmed by a human before the work is finished
   if [ -x "$KIT_DIR/scripts/kit-trace" ]; then
     local scope=("$f") asm
     [ -n "$change" ] && [ -d "$(change_dir "$change")" ] && scope+=("$(change_dir "$change")")
+    # project-level BA / SA assumptions (scope, architecture) block every finish until a human confirms them
+    local pdoc; for pdoc in docs/ba/BRIEF.md docs/architecture/SOLUTION.md; do [ -f "$KIT_ROOT/$pdoc" ] && scope+=("$KIT_ROOT/$pdoc"); done
     if asm="$("$KIT_DIR/scripts/kit-trace" assumptions "${scope[@]}" 2>&1)"; then gate ok "no unconfirmed ASSUMPTION in the task / change"
     else gate no "unconfirmed assumptions — the human answers each one; the answer is rewritten as 'CONFIRMED: <answer> (who, date)':
 $(printf '%s\n' "$asm" | head -n 10 | sed 's/^/    /')"; fi
@@ -320,7 +322,8 @@ $(printf '%s\n' "$bad_ref" | sed 's/^/      /' | head -n 10)"
     if [ -n "$base" ]; then
       changed="$( { git diff --name-only "$base" 2>/dev/null; git ls-files --others --exclude-standard; } | sort -u)"
       code="$(printf '%s\n' "$changed" | grep -vE "$PLANNING_RE"'|\.md$|(^|/)(tests?|__tests__|spec|e2e)/|\.(test|spec)\.[a-z]+$|_test\.[a-z]+$' | grep . || true)"
-      docs="$(printf '%s\n' "$changed" | grep -E '^(openspec/(specs|changes)/|docs/(api|architecture|data|platform|security)/|README\.md$)' || true)"
+      # spec deltas count, an OpenSpec change's tasks.md / proposal.md checklist does not
+      docs="$(printf '%s\n' "$changed" | grep -E '^(openspec/specs/|openspec/changes/[^/]+/(specs/|design\.md$)|docs/(api|architecture|data|platform|security)/|README\.md$)' || true)"
       if [ -z "$code" ] || [ -n "$docs" ] || printf '%s\n' "$s7" | grep -qiE '^[^a-z]*docs?:[[:space:]]*(none|n/?a|no |không)'; then gate ok "living docs updated with the code (or 'Docs: none — <why>' in §7)"
       else gate no "code changed but no spec / living doc did (openspec change, docs/api, docs/architecture, README) — update them, or write 'Docs: none — <why>' in §7"; fi
     fi

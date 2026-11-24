@@ -123,8 +123,8 @@ s=s.replace("| 1 | Tên rỗng? | \"Xin chào, bạn\" | PO |","| 1 | Tên rỗn
 open(p,'w').write(s)
 EOF
 step "verify must FAIL while an ASSUMPTION is unconfirmed"
-vout="$($T verify 2>&1 || true)"
-if printf '%s\n' "$vout" | grep -q 'unconfirmed assumptions'; then echo "ok: blocked (assumption)"; else echo "UNEXPECTED: open ASSUMPTION not reported"; exit 1; fi
+vrc=0; vout="$($T verify 2>&1)" || vrc=$?
+if [ "$vrc" -ne 0 ] && printf '%s\n' "$vout" | grep -q 'unconfirmed assumptions'; then echo "ok: blocked (assumption)"; else echo "UNEXPECTED: open ASSUMPTION not reported"; exit 1; fi
 sed -i.bak 's/^ASSUMPTION: tên tối đa 50 ký tự/CONFIRMED: tên tối đa 50 ký tự (PO, e2e)/' "$F" && rm -f "$F.bak"
 $N testplan TASK-001 >/dev/null
 printf "import { greet } from './greeting.js';\n\nexport const cases: [string, string][] = [\n  ['An', greet('An')],\n  ['', greet('')],\n];\n" > src/greeting.test.ts

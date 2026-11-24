@@ -28,11 +28,12 @@ use strict; use warnings; use File::Find;
 my $mode = $ENV{KIT_TRACE_MODE}; my $root = $ENV{KIT_ROOT};
 my @out;
 sub rd { my $f = shift; open(my $fh, '<', $f) or return ''; local $/; my $s = <$fh>; close $fh; return $s // '' }
-# blank out HTML comments and fenced code blocks, keeping line numbers
+# blank out HTML comments (nocomments) and also fenced code blocks (blank), keeping line numbers.
+# Fences may be indented up to 3 spaces (CommonMark); the closing fence uses the same character and is at least as long.
+sub nocomments { my $s = shift; $s =~ s{<!--(.*?)-->}{"\n" x ($1 =~ tr/\n//)}gse; return $s }
 sub blank {
-  my $s = shift;
-  $s =~ s{<!--(.*?)-->}{"\n" x ($1 =~ tr/\n//)}gse;
-  $s =~ s{^(```|~~~)[^\n]*\n(.*?)^\1[^\n]*$}{"\n" x (1 + ($2 =~ tr/\n//))}gmse;
+  my $s = nocomments(shift);
+  $s =~ s{^ {0,3}((`{3,})|(~{3,}))[^\n]*\n(.*?)^ {0,3}(?(2)\2`*|\3~*)[ \t]*$}{"\n" x (1 + ($4 =~ tr/\n//))}gmse;
   return $s;
 }
 sub norm { my ($p, $n) = @_; $n += 0; return $p eq 'ADR' ? sprintf('ADR-%04d', $n) : "$p-$n" }
@@ -95,7 +96,7 @@ for my $f (md_under('docs/ba', qr{^docs/ba/_templates/})) {
     my $s = rd($f); if ($s =~ /^stories:\s*\[?([^\]\n]*)/m) { $uc_has_story{$id} = 1 if $1 =~ /US-\d+/ }
   }
   next unless $f =~ m{/stories/} && $b =~ /^US-\d+/;
-  my $raw = rd($f); my $s = blank($raw);
+  my $raw = rd($f); my $s = nocomments($raw);   # keep fenced gherkin: it is real acceptance criteria
   my ($uc) = $raw =~ /^use_case:[ \t]*([^\n]*)/m; $uc //= '';
   if ($uc =~ /(UC)-(\d+)/) { $uc_has_story{norm($1, $2)} = 1 } else { emit('W', $f, 'story has no use case (front matter use_case: UC-NN)') }
   my ($acs) = $s =~ /^##\s+Acceptance criteria\s*\n(.*?)(?=^##\s|\z)/ms; $acs //= '';
@@ -124,7 +125,7 @@ if (-f $mm) {
     next if $p eq '' || $p =~ /[<…]|^path$|^-+$/i || $p !~ m{/};
     $declared{$p} = 1; (my $par = $p) =~ s{/[^/]+$}{}; $parents{$par} = 1;
   }
-  for my $p (sort keys %declared) { (my $par = $p) =~ s{/[^/]+$}{}; emit('W', $mm, "module path '$p' is declared but missing on disk") if -d $par && !-d $p }
+  for my $p (sort keys %declared) { emit('W', $mm, "module path '$p' is declared but missing on disk (create it: kit-new module, or fix the row)") unless -d $p }
   for my $par (sort keys %parents) {
     next unless -d $par; opendir(my $d, $par) or next;
     for my $e (sort readdir $d) { next if $e =~ /^[._]/ || !-d "$par/$e"; emit('W', "$par/$e", "folder is not declared in $mm (add a row or move the code)") unless $declared{"$par/$e"} }
