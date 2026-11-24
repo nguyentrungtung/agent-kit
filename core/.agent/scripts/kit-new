@@ -124,7 +124,7 @@ case "$kind" in
       fi
       echo "${cpath#.}${cpath:+/}${path}" | sed 's#^\./##; s#^/##'; made=$((made+1))
     done < "$skel"
-    info "module $pascal ($style, $stack): $made folder(s). Next: kit-task for its first use case; architecture rules: .agent/stack/$stack/skeletons/"
+    info "module $pascal ($style, $stack): $made folder(s). Next: kit-task for its first use case; architecture rules: ${skel#"$KIT_ROOT"/}"
     ;;
 
   runbook)

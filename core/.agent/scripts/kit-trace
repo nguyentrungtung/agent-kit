@@ -6,8 +6,8 @@
 # Errors   (E)  an id is referenced but defined nowhere: UC-NN, US-NN, BR-NN, FR-NN, NFR-NN, ADR-NNNN  (= invented facts)
 # Warnings (W)  story without use case / acceptance criteria / negative AC · use case without story · FR without story
 #               · module drift between .agent/rules/project/modules.md and folders on disk · unconfirmed ASSUMPTION: lines
-# Where ids are defined: docs/ba/**/use-cases/UC-NN-*.md, docs/ba/**/stories/US-NN-*.md, a table row "| BR-NN |" /
-# "| FR-NN |" / "| NFR-NN |" or a heading "### US-NN …" anywhere under docs/ba/, docs/adr/NNNN-*.md.
+# Where ids are defined: docs/ba/**/use-cases/UC-NN-*.md, docs/ba/**/stories/US-NN-*.md, a heading "### US-NN …" or a filled
+# table row "| BR-NN | text |" anywhere under docs/ba/ (a template row with a `<placeholder>` cell or empty cells defines nothing), docs/adr/NNNN-*.md.
 # A human confirms an assumption by rewriting it as `CONFIRMED: <answer> (who, date)`.
 source "$(dirname "$0")/lib.sh"
 cd "$KIT_ROOT"
@@ -18,7 +18,7 @@ while [ $# -gt 0 ]; do
     assumptions) mode=assumptions; shift ;;
     check) shift ;;
     --strict) strict=1; shift ;;
-    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) paths+=("$1"); shift ;;
   esac
 done
@@ -35,6 +35,16 @@ sub blank {
   my $s = nocomments(shift);
   $s =~ s{^ {0,3}((`{3,})|(~{3,}))[^\n]*\n(.*?)^ {0,3}(?(2)\2`*|\3~*)[ \t]*$}{"\n" x (1 + ($4 =~ tr/\n//))}gmse;
   return $s;
+}
+# a template row: after blanking `<placeholder>` cells (the kit's templates write placeholders in backticks), the first cell
+# after the id is empty, or fewer cells are filled than min(2, number of cells). A filled row may still have a placeholder in
+# another column (e.g. Stories `<US-NN>` before a story exists); plain text such as List<Order> or "..." is content.
+sub placeholder_row {
+  my $row = shift; $row =~ s/\\\|//g; my @c = split /\|/, $row, -1; shift @c; shift @c; pop @c if @c && $c[-1] =~ /^\s*$/;
+  s/`<[^`>]*>`//g for @c;                                   # a `<placeholder>` cell counts as empty
+  return 1 if ($c[0] // '') !~ /[[:alnum:]]/;
+  my $filled = grep { /[[:alnum:]]/ } @c; my $need = @c < 2 ? scalar(@c) : 2;
+  return $filled < $need;
 }
 sub norm { my ($p, $n) = @_; $n += 0; return $p eq 'ADR' ? sprintf('ADR-%04d', $n) : "$p-$n" }
 sub rel { my $f = shift; $f =~ s{^\Q$root\E/}{}; $f =~ s{^\./}{}; return $f }
@@ -71,7 +81,13 @@ for my $f (md_under('docs/ba', qr{^docs/ba/_templates/})) {
   $def{norm($1, $2)} = $f if $f =~ m{/use-cases/} && $b =~ /^(UC)-(\d+)/;
   $def{norm($1, $2)} = $f if $f =~ m{/stories/}   && $b =~ /^(US)-(\d+)/;
   my $s = blank(rd($f));
-  while ($s =~ /^(?:\|\s*\**|#{1,6}\s+)(UC|US|BR|FR|NFR)-(\d+)\b/mg) { $def{norm($1, $2)} //= $f }
+  # a heading "### US-NN …" defines an id; a table row "| BR-NN | text |" only when its next cell has real text (not an empty
+  # or placeholder row of a template, so an invented id cannot hide behind "| BR-01 | |" or "| FR-01 | WHEN `<trigger>` … |")
+  while ($s =~ /^#{1,6}\s+(UC|US|BR|FR|NFR)-(\d+)\b/mg) { $def{norm($1, $2)} //= $f }
+  for my $row ($s =~ /^(\|\s*\**(?:UC|US|BR|FR|NFR)-\d+\b[^\n]*)$/mg) {
+    my ($p, $n) = $row =~ /^\|\s*\**(UC|US|BR|FR|NFR)-(\d+)/;
+    $def{norm($p, $n)} //= $f unless placeholder_row($row);
+  }
 }
 if (opendir(my $d, 'docs/adr')) { for (readdir $d) { $def{norm('ADR', $1)} = "docs/adr/$_" if /^(\d{4})-.*\.md$/ } closedir $d }
 
@@ -80,7 +96,10 @@ for my $f (@scan) {
   my $n = 0; my %seen;
   for my $l (split /\n/, blank(rd($f)), -1) {
     $n++;
+    # under docs/ba/ the id that starts a table row is that row's definition, not a reference (elsewhere it is a reference)
+    my $lead = ($f =~ m{^docs/ba/} && $l =~ /^\|\s*\**((?:UC|US|BR|FR|NFR)-\d+)\b/) ? $1 : '';
     while ($l =~ /(?<![A-Za-z0-9_-])(UC|US|BR|FR|NFR|ADR)-(\d+)(?![0-9])/g) {
+      next if "$1-$2" eq $lead && pos($l) <= length($lead) + 6;
       my $id = norm($1, $2); next if $def{$id} || $seen{$id}++;
       emit('E', "$f:$n", "$1-$2 is referenced but not defined (create it with kit-new / add it to docs/ba, or fix the id)");
     }
@@ -101,7 +120,10 @@ for my $f (md_under('docs/ba', qr{^docs/ba/_templates/})) {
   if ($uc =~ /(UC)-(\d+)/) { $uc_has_story{norm($1, $2)} = 1 } else { emit('W', $f, 'story has no use case (front matter use_case: UC-NN)') }
   my ($acs) = $s =~ /^##\s+Acceptance criteria\s*\n(.*?)(?=^##\s|\z)/ms; $acs //= '';
   if ($acs !~ /\b(Given|AC\d+)\b/) { emit('W', $f, 'story has no acceptance criteria (Given/When/Then)') }
-  elsif ($acs !~ /negative|\bIF\b|invalid|reject|denied|fail|error|lỗi|không hợp lệ|từ chối|thất bại/i) {
+  # negative path = EARS "IF", a criterion that starts with "If", or failure words (any case). A lone lower-case "if" in a
+  # sentence ("shows if data exists") is not a negative path.
+  elsif ($acs !~ /\bIF\b|(?:^|[-*]\s+|AC\d+\s*(?:\x{2014}|\xe2\x80\x94|:|-)\s*|Given\s+)If\b/m
+      && $acs !~ /negative|invalid|reject|declin|denied|forbidden|unauthori[sz]ed|expired|timeout|cannot|unable|\bfail(?:s|ed|ure|ing)?\b|\berrors?\b|lỗi|không hợp lệ|từ chối|thất bại|hết hạn/i) {
     emit('W', $f, 'story has no negative-path acceptance criterion (mark one "(negative)")') }
 }
 for my $u (@ucs) { emit('W', $u->[1], "$u->[2] has no user story (kit-new story \"…\" --uc $u->[2])") unless $uc_has_story{$u->[0]} }
@@ -135,7 +157,9 @@ if (-f $mm) {
 print "$_\n" for @out;
 PERL
 
-out="$(KIT_TRACE_MODE="$mode" KIT_ROOT="$KIT_ROOT" perl -e "$PL" "${paths[@]+"${paths[@]}"}")" || { [ "$mode" = assumptions ] && { printf '%s\n' "$out" | awk -F'\t' 'NF{printf "  %s  %s\n", $2, $3}'; exit 1; }; die "kit-trace failed"; }
+rc=0; out="$(KIT_TRACE_MODE="$mode" KIT_ROOT="$KIT_ROOT" perl -e "$PL" "${paths[@]+"${paths[@]}"}")" || rc=$?
+[ $rc -le 1 ] || die "kit-trace crashed (perl exit $rc) — not a traceability result; fix the error above"
+[ $rc -eq 0 ] || { [ "$mode" = assumptions ] && { printf '%s\n' "$out" | awk -F'\t' 'NF{printf "  %s  %s\n", $2, $3}'; exit 1; }; die "kit-trace failed"; }
 
 if [ "$mode" = assumptions ]; then exit 0; fi
 

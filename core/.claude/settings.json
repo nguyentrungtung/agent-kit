@@ -19,6 +19,7 @@
       "Bash(.agent/scripts/kit-doctor:*)",
       "Bash(.agent/scripts/kit-task points)",
       "Bash(.agent/scripts/kit-task checkpoint:*)",
+      "Bash(.agent/scripts/kit-task review:*)",
       "Bash(.agent/scripts/kit-context:*)",
       "Bash(.agent/scripts/kit-trace:*)",
       "Bash(.agent/scripts/kit-daily:*)",

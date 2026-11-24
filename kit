@@ -325,19 +325,31 @@ install_component() { # install_component <idx>
   [ -n "$fd" ] && [ -d "$fd/snippets" ] && copy_tree "$fd/snippets" "$TARGET/.agent/stack/$s/snippets"
   # architecture skeletons (kit-new module): the stack's own in skeletons/, each framework's in skeletons/<framework>/,
   # so two components of one stack (node+nestjs backend, node+react frontend, plain node) never overwrite each other
-  # Upgrade from < 0.11 (skeletons/<framework>/ does not exist yet): if the user edited the shared skeleton the framework used
-  # to live in (sha256 ≠ manifest), carry THAT file into skeletons/<framework>/ instead of the shipped one — never silently drop edits.
+  # Upgrade from < 0.11 (skeletons/<framework>/ does not exist yet): the framework's skeleton used to live in the shared folder.
+  # If the shared file WAS this framework's (its manifest baseline is one of the framework's shipped versions, listed in
+  # stacks/skeleton-hashes.txt) and the user edited it, carry the edit into skeletons/<framework>/ (kit's file → .kit-new) and give
+  # the shared folder back to the stack's own skeleton. A shared file that came from the stack or another framework is not moved.
   if [ -n "$fd" ] && [ -d "$fd/skeletons" ]; then
-    local sk shd sbd mh
+    local sk nm shd sbd mh stk fkey
+    fkey="$(printf '%s' "${fd#"$STACKS"/}" | sed 's#/frameworks/#/#')"   # owning stack/framework (java-gradle reuses java-maven/spring)
     for sk in "$fd/skeletons"/*; do
       [ -f "$sk" ] || continue
-      shd="$TARGET/.agent/stack/$s/skeletons/$(basename "$sk")"; sbd="$TARGET/.agent/stack/$s/skeletons/$f/$(basename "$sk")"
-      if [ $UPGRADE -eq 1 ] && [ ! -e "$sbd" ] && [ -f "$shd" ] && mh="$(manifest_hash "${shd#"$TARGET"/}")" && [ -n "$mh" ] && [ "$mh" != "$(sha "$shd")" ]; then
+      nm="$(basename "$sk")"; shd="$TARGET/.agent/stack/$s/skeletons/$nm"; sbd="$TARGET/.agent/stack/$s/skeletons/$f/$nm"
+      stk="$(stack_asset "$s" skeletons)"; [ -n "$stk" ] && stk="$stk/$nm"
+      mh=""; [ $UPGRADE -eq 1 ] && [ ! -e "$sbd" ] && [ -f "$shd" ] && mh="$(manifest_hash "${shd#"$TARGET"/}")"
+      if [ -n "$mh" ] && [ "$mh" != "$(sha "$shd")" ] && { [ "$mh" = "$(sha "$sk")" ] || grep -qx "$mh  $fkey/$nm" "${KIT_SKELETON_HASHES:-$KIT_SRC/stacks/skeleton-hashes.txt}" 2>/dev/null; }; then
         mkdir -p "$(dirname "$sbd")"; cp "$shd" "$sbd"; cp "$sk" "$sbd.kit-new"
         BASELINES="$BASELINES
 $(sha "$sk")  ${sbd#"$TARGET"/}"; CONFLICTS="$CONFLICTS ${sbd#"$TARGET"/}"   # baseline = kit's file, so later upgrades see the edit
-        note "kept your customised skeleton: ${shd#"$TARGET"/} → ${sbd#"$TARGET"/} (kit's version: $(basename "$sbd").kit-new)"
+        if [ -n "$stk" ] && [ -f "$stk" ]; then cp "$stk" "$shd"; else rm -f "$shd"; fi   # shared slot back to the stack (recorded below)
+        # another component of this stack may already have kept the edited shared file as a conflict: that is resolved now
+        rm -f "$shd.kit-new"; KEPT="$(printf '%s\n' "$KEPT" | grep -vxF "${shd#"$TARGET"/}" || true)"
+        CONFLICTS="$(printf '%s' " $CONFLICTS " | sed "s# ${shd#"$TARGET"/} # #g")"
+        note "kept your customised skeleton: ${shd#"$TARGET"/} → ${sbd#"$TARGET"/} (kit's version: $nm.kit-new)"
       else
+        if [ -n "$mh" ] && [ "$mh" != "$(sha "$shd")" ] && ! { [ -n "$stk" ] && [ -f "$stk" ] && cmp -s "$stk" "$shd"; }; then
+          note "your edited ${shd#"$TARGET"/} is not $f's skeleton — $f now uses ${sbd#"$TARGET"/}; compare and port your edits if they were meant for $f"
+        fi
         copy_file "$sk" "$sbd"
       fi
     done

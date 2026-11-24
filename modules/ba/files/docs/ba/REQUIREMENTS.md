@@ -16,9 +16,9 @@ Mọi yêu cầu chức năng viết theo chuẩn EARS (Easy Approach to Require
 ## Non-functional requirements
 | ID | Category | Requirement | Measure |
 |---|---|---|---|
-| NFR-01 | Performance | | p95 < … ms |
-| NFR-02 | Security | | |
-| NFR-03 | Availability | | |
+| NFR-01 | Performance | `<requirement>` | `<p95 < … ms>` |
+| NFR-02 | Security | `<requirement>` | `<measure>` |
+| NFR-03 | Availability | `<requirement>` | `<measure>` |
 
 ## User stories
 ### US-NN — `<title>`
@@ -29,7 +29,7 @@ Mọi yêu cầu chức năng viết theo chuẩn EARS (Easy Approach to Require
 ## Business rules
 | ID | Rule |
 |---|---|
-| BR-01 | |
+| BR-01 | `<rule>` |
 
 ## Traceability
 Goal → FR → US → TASK → Test case (cập nhật bởi kit-plan / kit-testcases)

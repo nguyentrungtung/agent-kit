@@ -9,7 +9,7 @@
 source "$(dirname "$0")/lib.sh"
 cd "$KIT_ROOT"
 
-usage() { sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 [ $# -ge 1 ] || usage
 
 tc() { if [ -n "$(cfg cmd_coverage)" ]; then echo coverage; else echo test; fi; }   # testcov resolution

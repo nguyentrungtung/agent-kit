@@ -28,7 +28,8 @@ updated:
 **Single app (server-rendered UI: Laravel Blade / Next.js full-stack / Django templates)** — UI lives inside each module.
 
 ## 2. Backend module layout
-<!-- Paste the skeleton of the chosen style and stack (e.g. .agent/stack/node/skeletons/modular.txt) and adapt. -->
+<!-- Paste the skeleton of the chosen style: .agent/stack/<stack>/skeletons/<framework>/<style>.txt for a framework component
+     (e.g. .agent/stack/php/skeletons/laravel/modular.txt), .agent/stack/<stack>/skeletons/<style>.txt for a plain stack. -->
 ```
 backend/src/modules/<module>/
   api/              # controllers / routes + request/response DTOs (generated from or checked against openapi.yaml)

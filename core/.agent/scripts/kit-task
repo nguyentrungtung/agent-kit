@@ -11,6 +11,8 @@
 #   kit-task sync-gh [TASK-ID|--all]  create/update GitHub issues from task files (labels, close when done)
 #   kit-task pull-gh <issue#>         create a task file from a GitHub issue
 #   kit-task checkpoint "<msg>"       commit all work + tag kit/<id>/cp-N  (a restore point)
+#   kit-task review "<summary>"       record the code review in the Progress log (verify needs it), e.g.
+#                                     "BLOCKER 0 · MAJOR 1 fixed · MINOR 2 → TASK-031 — by code-reviewer"
 #   kit-task rollback [--to base|cp-N] reset current task branch to a restore point (backup branch kept)
 #   kit-task points                   list restore points of the current task
 #   kit-task finish                   run checks, push, open PR to develop (or main for hotfix)
@@ -91,6 +93,13 @@ cmd_new() {
   case "$tags" in \[*\]) ;; *) tags="[$tags]" ;; esac
   sed -e "s/{{ID}}/$id/g" -e "s/{{TITLE}}/$t_esc/g" -e "s/{{TYPE}}/$type/g" -e "s/{{PRIORITY}}/$prio/g" -e "s/{{DATE}}/$(today)/g" -e "s/{{CHANGE}}/$change/g" -e "s/{{TAGS}}/$tags/g" \
     "$KIT_TASKS/_TEMPLATE.md" > "$f"
+  # a project that customised _TEMPLATE.md before 0.11 keeps its file on upgrade — new tasks still get the 0.11 gates
+  if ! grep -q '^template:' "$f"; then
+    fm_set "$f" template 2
+    grep -qE '^- \[ \] Actor' "$f" || perl -0pi -e 's/^(## 2\. Clarifications\n(?:<!--.*?-->\n)?)/$1- [ ] Actor & permission — who, which role, what if unauthorized\n- [ ] Data & validation — fields, types, required, limits, uniqueness, defaults\n- [ ] Edge cases — empty, max size, duplicates, concurrency, partial failure, retries\/idempotency\n- [ ] Errors — what the user\/caller sees for each failure (status, message)\n- [ ] Numbers — volumes, latency, timeouts, page sizes, retention\n- [ ] State — allowed states and transitions\n- [ ] Integrations — who calls whom, contract owner, other side down\n- [ ] Scope — what is explicitly NOT part of this task\n\n/ms' "$f"
+    if grep -qE '^- \[ \] Actor' "$f"; then warn "your .agent/tasks/_TEMPLATE.md predates 0.11 — merge .agent/tasks/_TEMPLATE.md.kit-new into it (checklist added to $id for now)"
+    else warn "your .agent/tasks/_TEMPLATE.md predates 0.11 and $id has no '## 2. Clarifications' heading the checklist could go under — copy the 8 items from _TEMPLATE.md.kit-new by hand"; fi
+  fi
   info "created $f"
   echo "$id"
 }
@@ -233,8 +242,12 @@ cmd_rollback() {
 
 task_base_commit() { # task_base_commit <id> <type> → commit the task branch started from (CI: KIT_BASE_REF=origin/<base>)
   if [ -n "${KIT_BASE_REF:-}" ]; then git merge-base HEAD "$KIT_BASE_REF" 2>/dev/null || true; return; fi
-  git rev-parse -q --verify "refs/tags/kit/$1/base^{commit}" 2>/dev/null && return
-  git merge-base HEAD "$(base_for_type "${2:-feature}")" 2>/dev/null || true
+  # the later of: the start tag, the merge-base with the base branch (remote-tracking if known). After a rebase/merge of the
+  # base branch the merge-base is newer; a worktree started from origin/<base> while local <base> lags keeps the tag.
+  local b mb tag; b="$(base_for_type "${2:-feature}")"
+  mb="$(git merge-base HEAD "$(remote)/$b" 2>/dev/null || git merge-base HEAD "$b" 2>/dev/null || true)"
+  tag="$(git rev-parse -q --verify "refs/tags/kit/$1/base^{commit}" 2>/dev/null || true)"
+  if [ -n "$tag" ] && { [ -z "$mb" ] || git merge-base --is-ancestor "$mb" "$tag" 2>/dev/null; }; then echo "$tag"; else echo "$mb"; fi
 }
 
 section_body() { # section_body <file> <heading-regex> → meaningful lines of that ## section (comments, blanks, table chrome removed)
@@ -259,41 +272,89 @@ unresolved_test_refs() { # unresolved_test_refs <docs/qa/TASK-NNN.md> → one li
   return 0
 }
 
+task_predates_upgrade() { # task_predates_upgrade <task file> — first commit of the file is older than the kit ≥ 0.11 upgrade
+  local rel added up
+  rel="${1#"$KIT_ROOT"/}"
+  added="$(git log --diff-filter=A --format=%H -- "$rel" ".agent/tasks/$(basename "$1")" 2>/dev/null | tail -n1)"
+  [ -n "$added" ] || return 1
+  up="$(git log --reverse --format=%H -G'^kit_version:[[:space:]]*(0\.(1[1-9]|[2-9][0-9])|[1-9])' -- .agent/project.yaml 2>/dev/null | head -n1)"
+  [ -n "$up" ] || return 0                                     # project never recorded a ≥ 0.11 version: everything is legacy
+  [ "$added" != "$up" ] && git merge-base --is-ancestor "$added" "$up" 2>/dev/null
+}
+
+code_fingerprint() { # content hash of every code file in the working tree (docs, specs, tasks, memory and *.md excluded)
+  local list
+  list="$(git -c core.quotePath=false ls-files -co --exclude-standard | grep -vE "$PLANNING_RE"'|\.md$' | while IFS= read -r p; do [ -f "$p" ] && printf '%s\n' "$p"; done | sort || true)"
+  [ -n "$list" ] || { echo none; return 0; }
+  paste -d' ' <(printf '%s\n' "$list" | git hash-object --stdin-paths) <(printf '%s\n' "$list") | git hash-object --stdin | cut -c1-12
+}
+
+cmd_review() { # cmd_review "<summary>" — log the latest code review; the summary must give BLOCKER and MAJOR counts
+  local id; id="$(require_task_branch)"; local msg="$*"
+  [ -n "$msg" ] || die 'usage: kit-task review "BLOCKER 0 · MAJOR 1 fixed · MINOR 2 → TASK-031 — by <reviewer>"'
+  local sev n
+  for sev in BLOCKER MAJOR; do   # "<SEV> <n>" required; a non-zero count must say whether it is fixed or still open
+    n="$(printf '%s' "$msg" | grep -oE "$sev [0-9]+" | head -n1 | grep -oE '[0-9]+' || true)"
+    [ -n "$n" ] || die "the summary must state '$sev <count>' (e.g. \"BLOCKER 0 · MAJOR 1 fixed · MINOR 2\")"
+    [ "$n" -eq 0 ] || printf '%s' "$msg" | grep -qE "$sev $n (fixed|open)([^A-Za-z]|$)" \
+      || die "'$sev $n' must be followed by 'fixed' or 'open' (e.g. \"$sev $n fixed\")"
+  done
+  log_progress "$(task_file "$id")" "Review: $msg [code $(code_fingerprint)]"   # verify: code changed after the review → stale
+  info "review recorded in $(basename "$(task_file "$id")")"
+}
+
 cmd_verify() {
   local id="${1:-}"; [ -n "$id" ] || id="$(require_task_branch)"
   local f; f="$(task_file "$id")"; [ -f "$f" ] || die "task file for $id not found"
-  local type change bad=0 ac qa
+  local type change bad=0 ac qa tpl
   type="$(fm_get "$f" type)"; change="$(fm_get "$f" change)"
+  # template: 2 = task file from kit ≥ 0.11. The 0.11 gates (source link, checklist, answered Q&A, assumptions, review record,
+  # living docs) apply only to it, so tasks already in flight when a project upgrades keep the rules they were written under.
+  tpl="$(fm_get "$f" template)"; tpl="${tpl%%[^0-9]*}"; tpl="${tpl:-1}"
+  # "legacy" is decided by git history, not by the file an agent can edit: only a task file first committed BEFORE the project
+  # moved to kit ≥ 0.11 may skip the 0.11 gates. Hand-written files, deleted 'template:' lines and uncommitted files get 2.
+  if [ "$tpl" -lt 2 ] && ! task_predates_upgrade "$f"; then
+    tpl=2; warn "$id: no 'template: 2' in the task file, but it was not created before the kit 0.11 upgrade — the 0.11 gates apply"
+  fi
   gate() { if [ "$1" = ok ]; then printf '  %s✓%s %s\n' "$c_grn" "$c_off" "$2"; else printf '  %s✗%s %s\n' "$c_red" "$c_off" "$2"; bad=1; fi; }
   echo "workflow gates for $id ($type)"
   local s1 s2 ticks open_box unanswered
   s1="$(section_body "$f" '^## 1\. Understand')"
   [ -n "$s1" ] && gate ok "1 Understand filled" || gate no "1 Understand is empty — restate the problem and link its source (change / UC / US)"
-  case "$type" in
+  [ "$tpl" -ge 2 ] && case "$type" in
     feature|fix|hotfix|refactor)
       if [ -n "$change" ] || printf '%s\n' "$s1" | grep -qE '(UC|US|BR|FR)-[0-9]+|[Ss]ource:|openspec/specs/[a-z0-9]'; then gate ok "1 source linked (change / UC / US / BR / spec / Source:)"
       else gate no "1 Understand links no source — set 'change:' in the front matter, cite a UC/US/BR/FR id or an openspec/specs/<capability> link, or add 'Source: <issue / request, who, date>'"; fi ;;
   esac
-  # 2 Clarify: the ambiguity checklist must be walked (every box ticked) and every asked question answered — "None" alone is not enough
+  # 2 Clarify: the ambiguity checklist must be walked (every box ticked, n/a items too) and every asked question answered
   s2="$(section_body "$f" '^## 2\. Clarifications')"
-  ticks="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*- \[[xX]\]' || true)"
-  open_box="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*- \[ \]' || true)"
-  if [ "${ticks:-0}" -ge 8 ] && [ "${open_box:-0}" -eq 0 ]; then gate ok "2 ambiguity checklist walked ($ticks/8)"
-  else gate no "2 Clarifications: tick every item of the ambiguity checklist ($ticks ticked, $open_box open) — write n/a where it does not apply (template: .agent/tasks/_TEMPLATE.md)"; fi
-  unanswered="$(printf '%s\n' "$s2" | sed 's/\\|/¦/g' | awk -F'|' '/^\|[[:space:]]*[0-9]+[[:space:]]*\|/ { q=$3; a=$4; gsub(/[[:space:]]/,"",q); gsub(/[[:space:]]/,"",a); n=$2; gsub(/[[:space:]]/,"",n); if (q!="" && a=="") printf " #%s", n }')"
-  [ -z "$unanswered" ] && gate ok "2 every question answered" || gate no "2 questions without an answer:$unanswered — a blocking question stops the task (kit-handoff), never guess"
+  if [ "$tpl" -ge 2 ]; then
+    ticks="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*- \[[xX]\]' || true)"
+    open_box="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*- \[ \]' || true)"
+    if [ "${ticks:-0}" -ge 8 ] && [ "${open_box:-0}" -eq 0 ]; then gate ok "2 ambiguity checklist walked ($ticks/8)"
+    else gate no "2 Clarifications: tick every item of the ambiguity checklist ($ticks ticked, $open_box open) — an item that does not apply is ticked too, with 'n/a: <why>' after it"; fi
+  else
+    [ -n "$s2" ] && gate ok "2 Clarifications recorded (legacy task file without checklist — template < 2)" \
+      || gate no "2 Clarifications empty — record the Q&A (legacy task file; new ones use the 8-item checklist)"
+  fi
+  [ "$tpl" -ge 2 ] && unanswered="$(printf '%s\n' "$s2" | sed 's/\\|/¦/g' | awk -F'|' '/^\|[[:space:]]*[0-9]+[[:space:]]*\|/ { q=$3; a=$4; gsub(/[[:space:]]/,"",q); gsub(/[[:space:]]/,"",a); n=$2; gsub(/[[:space:]]/,"",n); if (q!="" && a=="") printf " #%s", n }')"
+  [ "$tpl" -lt 2 ] || { [ -z "$unanswered" ] && gate ok "2 every question answered"; } || gate no "2 questions without an answer:$unanswered — a blocking question stops the task (kit-handoff), never guess"
   [ -n "$(section_body "$f" '^## 3\. Solution')" ] && gate ok "3 Solution filled" || gate no "3 Solution is empty — approach, reuse found, files touched"
   # assumptions written by the agent must be confirmed by a human before the work is finished
   if [ -x "$KIT_DIR/scripts/kit-trace" ]; then
     local scope=("$f") asm
-    [ -n "$change" ] && [ -d "$(change_dir "$change")" ] && scope+=("$(change_dir "$change")")
+    [ "$tpl" -ge 2 ] && [ -n "$change" ] && [ -d "$(change_dir "$change")" ] && scope+=("$(change_dir "$change")")
     # project-level BA / SA assumptions (scope, architecture) block every finish until a human confirms them
     local pdoc; for pdoc in docs/ba/BRIEF.md docs/architecture/SOLUTION.md; do [ -f "$KIT_ROOT/$pdoc" ] && scope+=("$KIT_ROOT/$pdoc"); done
-    if asm="$("$KIT_DIR/scripts/kit-trace" assumptions "${scope[@]}" 2>&1)"; then gate ok "no unconfirmed ASSUMPTION in the task / change"
+    if [ "$tpl" -lt 2 ]; then :   # legacy task: its ASSUMPTION lines followed the old "confirm later" rule
+    elif asm="$("$KIT_DIR/scripts/kit-trace" assumptions "${scope[@]}" 2>&1)"; then gate ok "no unconfirmed ASSUMPTION in the task / change / BRIEF.md / SOLUTION.md"
     else gate no "unconfirmed assumptions — the human answers each one; the answer is rewritten as 'CONFIRMED: <answer> (who, date)':
 $(printf '%s\n' "$asm" | head -n 10 | sed 's/^/    /')"; fi
-    if "$KIT_DIR/scripts/kit-trace" >/dev/null 2>&1; then gate ok "traceability: every UC/US/BR/FR/NFR/ADR id referenced exists"
-    else gate no "traceability errors (ids referenced but not defined) — run: .agent/scripts/kit-trace"; fi
+    local tr
+    if [ "$tpl" -lt 2 ]; then :   # legacy task: repo-wide traceability is still checked by CI (guard job), not per old task
+    elif tr="$("$KIT_DIR/scripts/kit-trace" 2>&1)"; then gate ok "traceability: every UC/US/BR/FR/NFR/ADR id referenced exists"
+    else gate no "traceability errors (ids referenced but not defined) — fix them (CI keeps develop clean, so they come from this branch):
+$(printf '%s\n' "$tr" | grep -E '^[[:space:]]+[^ ]*E[^ ]*[[:space:]]' | head -n 10 | sed 's/^[[:space:]]*/    /')"; fi
   fi
   ac="$(section_body "$f" '^## Acceptance criteria')"
   if printf '%s\n' "$ac" | grep -qE '^- \[[xX]\]' && ! printf '%s\n' "$ac" | grep -qE '^- \[ \]'; then gate ok "all acceptance criteria ticked"
@@ -313,18 +374,39 @@ $(printf '%s\n' "$asm" | head -n 10 | sed 's/^/    /')"; fi
 $(printf '%s\n' "$bad_ref" | sed 's/^/      /' | head -n 10)"
       else gate no "missing docs/qa/$id.md — create it: .agent/scripts/kit-new testplan $id"; fi ;;
   esac
+  # 6 Verify: a code review must have run and been recorded (kit-review writes the line); open BLOCKER/MAJOR block the finish
+  case "$type" in
+    feature|fix|hotfix|refactor)
+      if [ "$tpl" -ge 2 ]; then
+        # only lines written by `kit-task review` count (log_progress: "- YYYY-MM-DD HH:MM — Review: …"); newest first
+        local rv; rv="$(section_body "$f" '^## Progress log' | grep -E '^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} — Review: ' | head -n1 || true)"
+        if [ -z "$rv" ]; then gate no "6 no code review recorded — run kit-review, fix BLOCKER/MAJOR, then log: .agent/scripts/kit-task review \"BLOCKER 0 · MAJOR 0 · MINOR n — <what was fixed>\""
+        elif ! printf '%s\n' "$rv" | grep -qE 'BLOCKER [0-9]+' || ! printf '%s\n' "$rv" | grep -qE 'MAJOR [0-9]+'; then
+          gate no "6 review line has no BLOCKER/MAJOR counts — record it with: .agent/scripts/kit-task review \"BLOCKER n · MAJOR n …\""
+        elif printf '%s\n' "$rv" | grep -qE '(BLOCKER|MAJOR) [0-9]+ open([^A-Za-z]|$)'; then gate no "6 latest review still has open BLOCKER/MAJOR findings: $rv"
+        else
+          # locally the review must cover the code as it is now (CI checks out a merge commit, so it checks presence only)
+          local fp; fp="$(printf '%s\n' "$rv" | sed -n 's/.*\[code \([0-9a-z]*\)\].*/\1/p')"
+          if [ -z "${KIT_BASE_REF:-}" ] && [ "$(task_from_branch)" = "$id" ] && [ -z "$fp" ]; then
+            gate no "6 review line was not written by 'kit-task review' (no [code …] fingerprint) — record it with the command"
+          elif [ -z "${KIT_BASE_REF:-}" ] && [ "$(task_from_branch)" = "$id" ] && [ "$fp" != "$(code_fingerprint)" ]; then
+            gate no "6 code changed after the last review — review the new changes, then record it again (kit-task review \"…\")"
+          else gate ok "6 code review recorded"; fi
+        fi
+      fi ;;
+  esac
   local s7; s7="$(section_body "$f" '^## 7\. Result')"
   [ -n "$s7" ] && gate ok "7 Result filled" || gate no "7 Result is empty — what changed, how verified, docs updated"
   # living docs: a feature that changes code must change a spec / living doc in the same branch (or say why not)
-  if [ "$type" = feature ]; then
+  if [ "$type" = feature ] && [ "$tpl" -ge 2 ]; then
     local base changed code docs
     base="$(task_base_commit "$id" "$type")"
     if [ -n "$base" ]; then
-      changed="$( { git diff --name-only "$base" 2>/dev/null; git ls-files --others --exclude-standard; } | sort -u)"
+      changed="$( { git -c core.quotePath=false diff --name-only "$base" 2>/dev/null; git -c core.quotePath=false ls-files --others --exclude-standard; } | sort -u)"
       code="$(printf '%s\n' "$changed" | grep -vE "$PLANNING_RE"'|\.md$|(^|/)(tests?|__tests__|spec|e2e)/|\.(test|spec)\.[a-z]+$|_test\.[a-z]+$' | grep . || true)"
       # spec deltas count, an OpenSpec change's tasks.md / proposal.md checklist does not
       docs="$(printf '%s\n' "$changed" | grep -E '^(openspec/specs/|openspec/changes/[^/]+/(specs/|design\.md$)|docs/(api|architecture|data|platform|security)/|README\.md$)' || true)"
-      if [ -z "$code" ] || [ -n "$docs" ] || printf '%s\n' "$s7" | grep -qiE '^[^a-z]*docs?:[[:space:]]*(none|n/?a|no |không)'; then gate ok "living docs updated with the code (or 'Docs: none — <why>' in §7)"
+      if [ -z "$code" ] || [ -n "$docs" ] || printf '%s\n' "$s7" | grep -qiE '(^|[^a-z])docs?[*_]*:[*_]*[[:space:]]*(none|n/?a|no[[:space:]]|không)'; then gate ok "living docs updated with the code (or 'Docs: none — <why>' in §7)"
       else gate no "code changed but no spec / living doc did (openspec change, docs/api, docs/architecture, README) — update them, or write 'Docs: none — <why>' in §7"; fi
     fi
   fi
@@ -516,8 +598,8 @@ cmd_list() {
 
 sub="${1:-status}"; shift || true
 case "$sub" in
-  new|start|checkpoint|points|rollback|finish|merged|revert|abandon|status|list|worktrees|cleanup|verify) "cmd_$sub" "$@" ;;
+  new|start|checkpoint|points|rollback|finish|merged|revert|abandon|status|list|worktrees|cleanup|verify|review) "cmd_$sub" "$@" ;;
   sync-gh) cmd_sync_gh "$@" ;;
   pull-gh) cmd_pull_gh "$@" ;;
-  *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
