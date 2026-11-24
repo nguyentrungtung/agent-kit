@@ -84,7 +84,11 @@ jobs:
           case "$HEAD_REF" in release/*|revert/*) changed_tasks="" ;; *) changed_tasks="$(git diff --name-only "origin/$BASE_REF...HEAD" -- '.agent/tasks/TASK-*.md' '.agent/tasks/archive/*/TASK-*.md')" ;; esac
           for f in $changed_tasks; do
             [ -f "$f" ] || continue
-            case "$(sed -n 's/^status:[[:space:]]*//p' "$f" | head -n1)" in review|done) ids="$ids $(basename "$f" | grep -oE '^TASK-[0-9]+')" ;; esac
+            case "$(sed -n 's/^status:[[:space:]]*//p' "$f" | head -n1)" in review|done) ;; *) continue ;; esac
+            # already review/done on the base branch (e.g. kit-task start archiving merged tasks) = verified in its own PR → skip
+            base_st="$( { git show "origin/$BASE_REF:$f" 2>/dev/null || git show "origin/$BASE_REF:.agent/tasks/$(basename "$f")" 2>/dev/null; } | sed -n 's/^status:[[:space:]]*//p' | head -n1)"
+            case "$base_st" in review|done) continue ;; esac
+            ids="$ids $(basename "$f" | grep -oE '^TASK-[0-9]+')"
           done
           ids="$(printf '%s\n' $ids | sort -u | tr '\n' ' ')"
           [ -n "${ids// /}" ] || { echo "no task on this branch and no task marked finished — skipped"; exit 0; }
