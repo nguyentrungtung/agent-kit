@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# kit-trace — traceability & consistency check of the planning artefacts (the "analyze" step). Offline, bash + perl.
+#   kit-trace [--strict]               check everything; exit 1 on errors (--strict: on warnings too)
+#   kit-trace assumptions [path…]      list unconfirmed `ASSUMPTION:` lines; exit 1 if any
+#                                      (default paths: docs/, openspec/specs, openspec/changes, active tasks)
+# Errors   (E)  an id is referenced but defined nowhere: UC-NN, US-NN, BR-NN, FR-NN, NFR-NN, ADR-NNNN  (= invented facts)
+# Warnings (W)  story without use case / acceptance criteria / negative AC · use case without story · FR without story
+#               · module drift between .agent/rules/project/modules.md and folders on disk · unconfirmed ASSUMPTION: lines
+# Where ids are defined: docs/ba/**/use-cases/UC-NN-*.md, docs/ba/**/stories/US-NN-*.md, a table row "| BR-NN |" /
+# "| FR-NN |" / "| NFR-NN |" or a heading "### US-NN …" anywhere under docs/ba/, docs/adr/NNNN-*.md.
+# A human confirms an assumption by rewriting it as `CONFIRMED: <answer> (who, date)`.
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+
+mode=check; strict=0; paths=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    assumptions) mode=assumptions; shift ;;
+    check) shift ;;
+    --strict) strict=1; shift ;;
+    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) paths+=("$1"); shift ;;
+  esac
+done
+
+IFS= read -r -d '' PL <<'PERL' || true
+use strict; use warnings; use File::Find;
+my $mode = $ENV{KIT_TRACE_MODE}; my $root = $ENV{KIT_ROOT};
+my @out;
+sub rd { my $f = shift; open(my $fh, '<', $f) or return ''; local $/; my $s = <$fh>; close $fh; return $s // '' }
+# blank out HTML comments and fenced code blocks, keeping line numbers
+sub blank {
+  my $s = shift;
+  $s =~ s{<!--(.*?)-->}{"\n" x ($1 =~ tr/\n//)}gse;
+  $s =~ s{^(```|~~~)[^\n]*\n(.*?)^\1[^\n]*$}{"\n" x (1 + ($2 =~ tr/\n//))}gmse;
+  return $s;
+}
+sub norm { my ($p, $n) = @_; $n += 0; return $p eq 'ADR' ? sprintf('ADR-%04d', $n) : "$p-$n" }
+sub rel { my $f = shift; $f =~ s{^\Q$root\E/}{}; $f =~ s{^\./}{}; return $f }
+sub md_under {
+  my ($dir, $skip) = @_; my @f; return () unless -d $dir;
+  find({ no_chdir => 1, wanted => sub { my $n = rel($File::Find::name);
+    push @f, $n if -f $File::Find::name && $n =~ /\.md$/ && !($skip && $n =~ $skip) } }, $dir);
+  return sort @f;
+}
+sub emit { my ($lvl, $where, $msg) = @_; push @out, "$lvl\t$where\t$msg" }
+
+my @scan;
+if (@ARGV) { for my $p (@ARGV) { if (-d $p) { push @scan, md_under($p) } elsif (-f $p) { push @scan, rel($p) } } }
+else {
+  @scan = (md_under('docs', qr{^docs/(ba/_templates|daily)/}), md_under('openspec/specs'),
+           md_under('openspec/changes', qr{/archive/}), sort map { rel($_) } glob('.agent/tasks/TASK-*.md'));
+}
+
+# ---- unconfirmed assumptions ----
+my $asm = 0;
+for my $f (@scan) {
+  my $n = 0;
+  for my $l (split /\n/, blank(rd($f)), -1) {
+    $n++;
+    if ($l =~ /(?:^|[^`A-Za-z])ASSUMPTION:\s*(.*)$/) { $asm++; my $t = $1; $t =~ s/\s*\|.*$//; emit('W', "$f:$n", "unconfirmed ASSUMPTION: " . substr($t, 0, 100)) }
+  }
+}
+if ($mode eq 'assumptions') { print "$_\n" for @out; exit($asm ? 1 : 0) }
+
+# ---- definitions ----
+my %def;
+for my $f (md_under('docs/ba', qr{^docs/ba/_templates/})) {
+  my ($b) = $f =~ m{([^/]+)$};
+  $def{norm($1, $2)} = $f if $f =~ m{/use-cases/} && $b =~ /^(UC)-(\d+)/;
+  $def{norm($1, $2)} = $f if $f =~ m{/stories/}   && $b =~ /^(US)-(\d+)/;
+  my $s = blank(rd($f));
+  while ($s =~ /^(?:\|\s*\**|#{1,6}\s+)(UC|US|BR|FR|NFR)-(\d+)\b/mg) { $def{norm($1, $2)} //= $f }
+}
+if (opendir(my $d, 'docs/adr')) { for (readdir $d) { $def{norm('ADR', $1)} = "docs/adr/$_" if /^(\d{4})-.*\.md$/ } closedir $d }
+
+# ---- dangling references (errors) ----
+for my $f (@scan) {
+  my $n = 0; my %seen;
+  for my $l (split /\n/, blank(rd($f)), -1) {
+    $n++;
+    while ($l =~ /(?<![A-Za-z0-9_-])(UC|US|BR|FR|NFR|ADR)-(\d+)(?![0-9])/g) {
+      my $id = norm($1, $2); next if $def{$id} || $seen{$id}++;
+      emit('E', "$f:$n", "$1-$2 is referenced but not defined (create it with kit-new / add it to docs/ba, or fix the id)");
+    }
+  }
+}
+
+# ---- story / use case / FR coverage (warnings) ----
+my (%uc_has_story, @ucs);
+for my $f (md_under('docs/ba', qr{^docs/ba/_templates/})) {
+  my ($b) = $f =~ m{([^/]+)$};
+  if ($f =~ m{/use-cases/} && $b =~ /^(UC)-(\d+)/) {
+    my $id = norm($1, $2); push @ucs, [$id, $f, "$1-$2"];
+    my $s = rd($f); if ($s =~ /^stories:\s*\[?([^\]\n]*)/m) { $uc_has_story{$id} = 1 if $1 =~ /US-\d+/ }
+  }
+  next unless $f =~ m{/stories/} && $b =~ /^US-\d+/;
+  my $raw = rd($f); my $s = blank($raw);
+  my ($uc) = $raw =~ /^use_case:[ \t]*([^\n]*)/m; $uc //= '';
+  if ($uc =~ /(UC)-(\d+)/) { $uc_has_story{norm($1, $2)} = 1 } else { emit('W', $f, 'story has no use case (front matter use_case: UC-NN)') }
+  my ($acs) = $s =~ /^##\s+Acceptance criteria\s*\n(.*?)(?=^##\s|\z)/ms; $acs //= '';
+  if ($acs !~ /\b(Given|AC\d+)\b/) { emit('W', $f, 'story has no acceptance criteria (Given/When/Then)') }
+  elsif ($acs !~ /negative|\bIF\b|invalid|reject|denied|fail|error|lỗi|không hợp lệ|từ chối|thất bại/i) {
+    emit('W', $f, 'story has no negative-path acceptance criterion (mark one "(negative)")') }
+}
+for my $u (@ucs) { emit('W', $u->[1], "$u->[2] has no user story (kit-new story \"…\" --uc $u->[2])") unless $uc_has_story{$u->[0]} }
+for my $f (md_under('docs/ba', qr{^docs/ba/_templates/})) {
+  my $n = 0;
+  for my $l (split /\n/, blank(rd($f)), -1) {
+    $n++;
+    next unless $l =~ /^\|\s*(FR-\d+)\s*\|([^|]*)\|/; my ($id, $txt) = ($1, $2);
+    next if $txt =~ /…|\.\.\.|<|^\s*$/;
+    emit('W', "$f:$n", "$id is not covered by any user story") unless $l =~ /US-\d+/;
+  }
+}
+
+# ---- module drift: .agent/rules/project/modules.md ↔ folders ----
+my $mm = '.agent/rules/project/modules.md';
+if (-f $mm) {
+  my (%declared, %parents);
+  for my $l (split /\n/, blank(rd($mm))) {
+    next unless $l =~ /^\|/; my @c = map { s/^\s+|\s+$//gr } split /\|/, $l;
+    my $p = $c[2] // ''; $p =~ s/`//g; $p =~ s{/+$}{};
+    next if $p eq '' || $p =~ /[<…]|^path$|^-+$/i || $p !~ m{/};
+    $declared{$p} = 1; (my $par = $p) =~ s{/[^/]+$}{}; $parents{$par} = 1;
+  }
+  for my $p (sort keys %declared) { (my $par = $p) =~ s{/[^/]+$}{}; emit('W', $mm, "module path '$p' is declared but missing on disk") if -d $par && !-d $p }
+  for my $par (sort keys %parents) {
+    next unless -d $par; opendir(my $d, $par) or next;
+    for my $e (sort readdir $d) { next if $e =~ /^[._]/ || !-d "$par/$e"; emit('W', "$par/$e", "folder is not declared in $mm (add a row or move the code)") unless $declared{"$par/$e"} }
+    closedir $d;
+  }
+}
+print "$_\n" for @out;
+PERL
+
+out="$(KIT_TRACE_MODE="$mode" KIT_ROOT="$KIT_ROOT" perl -e "$PL" "${paths[@]+"${paths[@]}"}")" || { [ "$mode" = assumptions ] && { printf '%s\n' "$out" | awk -F'\t' 'NF{printf "  %s  %s\n", $2, $3}'; exit 1; }; die "kit-trace failed"; }
+
+if [ "$mode" = assumptions ]; then exit 0; fi
+
+errs="$(printf '%s\n' "$out" | grep -c '^E' || true)"; warns="$(printf '%s\n' "$out" | grep -c '^W' || true)"
+printf '%s\n' "$out" | awk -F'\t' -v r="$c_red" -v y="$c_yel" -v o="$c_off" \
+  'NF { c = ($1 == "E") ? r : y; printf "  %s%s%s  %s  %s\n", c, $1, o, $2, $3 }'
+if [ "$errs" -gt 0 ] || { [ $strict -eq 1 ] && [ "$warns" -gt 0 ]; }; then
+  die "kit-trace: $errs error(s), $warns warning(s)"
+fi
+info "kit-trace: $errs error(s), $warns warning(s)"

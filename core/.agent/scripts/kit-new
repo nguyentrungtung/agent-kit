@@ -101,9 +101,10 @@ case "$kind" in
     entry=""; for e in $(cfg components ".=$(cfg stack)+"); do
       p="${e%%=*}"; if [ -z "$comp" ] || [ "$p" = "$comp" ] || [ "$p" = "${comp%/}" ]; then entry="$e"; break; fi; done
     [ -n "$entry" ] || die "component '$comp' not found in project.yaml components"
-    cpath="${entry%%=*}"; rest="${entry#*=}"; stack="${rest%%+*}"
+    cpath="${entry%%=*}"; rest="${entry#*=}"; stack="${rest%%+*}"; fw=""; [ "${rest#*+}" != "$rest" ] && fw="${rest#*+}"
     skel="$KIT_DIR/stack/$stack/skeletons/$style.txt"
-    [ -f "$skel" ] || die "no '$style' skeleton for stack $stack (available: $(ls "$KIT_DIR/stack/$stack/skeletons" 2>/dev/null | sed 's/\.txt$//' | tr '\n' ' '))"
+    [ -n "$fw" ] && [ -f "$KIT_DIR/stack/$stack/skeletons/$fw/$style.txt" ] && skel="$KIT_DIR/stack/$stack/skeletons/$fw/$style.txt"
+    [ -f "$skel" ] || die "no '$style' skeleton for stack $stack${fw:++$fw} (available: $(ls "$KIT_DIR/stack/$stack/skeletons" 2>/dev/null | grep '\.txt$' | sed 's/\.txt$//' | tr '\n' ' '))"
     kebab="$(ascii_slug "$name" 40)"; snake="$(printf '%s' "$kebab" | tr '-' '_')"; flat="$(printf '%s' "$kebab" | tr -d '-')"
     pascal="$(printf '%s' "$kebab" | awk -F- '{for(i=1;i<=NF;i++) printf "%s%s", toupper(substr($i,1,1)), substr($i,2)}')"
     case "$stack" in java-*) mod="$flat" ;; python|dbt) mod="$snake" ;; *) mod="$kebab" ;; esac
@@ -118,8 +119,8 @@ case "$kind" in
       path="$(printf '%s' "$path" | sed -e "s#{{module}}#$mod#g" -e "s#{{Module}}#$pascal#g" -e "s#{{package_path}}#$pkgpath#g")"
       mkdir -p "$root/$path"
       if [ -n "$note" ] && [ ! -f "$root/$path/README.md" ]; then
-        printf '# %s\n\n%s\n\nPart of module **%s** (%s, `%s` style — see .agent/stack/%s/skeletons/%s.txt).\n' \
-          "${path%/}" "$note" "$pascal" "$stack" "$style" "$stack" "$style" > "$root/$path/README.md"
+        printf '# %s\n\n%s\n\nPart of module **%s** (%s, `%s` style — see .agent/stack/%s/skeletons/%s).\n' \
+          "${path%/}" "$note" "$pascal" "$stack${fw:++$fw}" "$style" "$stack" "${skel##*/skeletons/}" > "$root/$path/README.md"
       fi
       echo "${cpath#.}${cpath:+/}${path}" | sed 's#^\./##; s#^/##'; made=$((made+1))
     done < "$skel"

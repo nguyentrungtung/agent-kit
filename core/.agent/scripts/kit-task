@@ -2,7 +2,8 @@
 # kit-task — task lifecycle with gitflow branches, checkpoints and safe rollback
 #
 #   kit-task new "<title>" [--type feature|fix|hotfix|refactor|chore|docs|test] [--priority P1|P2|P3] [--change <openspec-change>]
-#   kit-task verify [TASK-ID]         check the workflow gates (understand, clarify, solution, tests, result, AC, change)
+#   kit-task verify [TASK-ID]         check the workflow gates (source, clarify checklist, solution, tests, result, AC,
+#                                     assumptions, traceability, living docs, change). CI runs it on every task PR.
 #   kit-task start <TASK-ID> [--worktree]  create <type>/<TASK-ID>-<slug> from develop (hotfix: from main), tag base
 #                                     --worktree: in a separate git worktree ../<repo>-<TASK-ID> (parallel agents)
 #   kit-task worktrees                list task worktrees
@@ -230,6 +231,12 @@ cmd_rollback() {
   info "rolled back to $tag. Previous state kept in branch $backup"
 }
 
+task_base_commit() { # task_base_commit <id> <type> → commit the task branch started from (CI: KIT_BASE_REF=origin/<base>)
+  if [ -n "${KIT_BASE_REF:-}" ]; then git merge-base HEAD "$KIT_BASE_REF" 2>/dev/null || true; return; fi
+  git rev-parse -q --verify "refs/tags/kit/$1/base^{commit}" 2>/dev/null && return
+  git merge-base HEAD "$(base_for_type "${2:-feature}")" 2>/dev/null || true
+}
+
 section_body() { # section_body <file> <heading-regex> → meaningful lines of that ## section (comments, blanks, table chrome removed)
   perl -0pe 's/<!--.*?-->//gs' "$1" | awk -v h="$2" '/^## /{ins = ($0 ~ h); next} ins' \
     | grep -vE '^[[:space:]]*$|^[[:space:]]*\|[-|: ]+\|[[:space:]]*$|^\|[[:space:]]*#[[:space:]]*\|[[:space:]]*Question' || true
@@ -259,9 +266,33 @@ cmd_verify() {
   type="$(fm_get "$f" type)"; change="$(fm_get "$f" change)"
   gate() { if [ "$1" = ok ]; then printf '  %s✓%s %s\n' "$c_grn" "$c_off" "$2"; else printf '  %s✗%s %s\n' "$c_red" "$c_off" "$2"; bad=1; fi; }
   echo "workflow gates for $id ($type)"
-  [ -n "$(section_body "$f" '^## 1\. Understand')" ] && gate ok "1 Understand filled" || gate no "1 Understand is empty — restate the problem and link its source (change / UC / US)"
-  [ -n "$(section_body "$f" '^## 2\. Clarifications')" ] && gate ok "2 Clarifications recorded" || gate no "2 Clarifications empty — record the Q&A, or write 'None' if nothing was unclear"
+  local s1 s2 ticks open_box unanswered
+  s1="$(section_body "$f" '^## 1\. Understand')"
+  [ -n "$s1" ] && gate ok "1 Understand filled" || gate no "1 Understand is empty — restate the problem and link its source (change / UC / US)"
+  case "$type" in
+    feature|fix|hotfix|refactor)
+      if [ -n "$change" ] || printf '%s\n' "$s1" | grep -qE '(UC|US|BR|FR)-[0-9]+|[Ss]ource:'; then gate ok "1 source linked (change / UC / US / BR / Source:)"
+      else gate no "1 Understand links no source — set 'change:' in the front matter, cite a UC/US/BR/FR id, or add 'Source: <issue / request, who, date>'"; fi ;;
+  esac
+  # 2 Clarify: the ambiguity checklist must be walked (every box ticked) and every asked question answered — "None" alone is not enough
+  s2="$(section_body "$f" '^## 2\. Clarifications')"
+  ticks="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*- \[[xX]\]' || true)"
+  open_box="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*- \[ \]' || true)"
+  if [ "${ticks:-0}" -ge 8 ] && [ "${open_box:-0}" -eq 0 ]; then gate ok "2 ambiguity checklist walked ($ticks/8)"
+  else gate no "2 Clarifications: tick every item of the ambiguity checklist ($ticks ticked, $open_box open) — write n/a where it does not apply (template: .agent/tasks/_TEMPLATE.md)"; fi
+  unanswered="$(printf '%s\n' "$s2" | awk -F'|' '/^\|[[:space:]]*[0-9]+[[:space:]]*\|/ { q=$3; a=$4; gsub(/[[:space:]]/,"",q); gsub(/[[:space:]]/,"",a); n=$2; gsub(/[[:space:]]/,"",n); if (q!="" && a=="") printf " #%s", n }')"
+  [ -z "$unanswered" ] && gate ok "2 every question answered" || gate no "2 questions without an answer:$unanswered — a blocking question stops the task (kit-handoff), never guess"
   [ -n "$(section_body "$f" '^## 3\. Solution')" ] && gate ok "3 Solution filled" || gate no "3 Solution is empty — approach, reuse found, files touched"
+  # assumptions written by the agent must be confirmed by a human before the work is finished
+  if [ -x "$KIT_DIR/scripts/kit-trace" ]; then
+    local scope=("$f") asm
+    [ -n "$change" ] && [ -d "$(change_dir "$change")" ] && scope+=("$(change_dir "$change")")
+    if asm="$("$KIT_DIR/scripts/kit-trace" assumptions "${scope[@]}" 2>&1)"; then gate ok "no unconfirmed ASSUMPTION in the task / change"
+    else gate no "unconfirmed assumptions — the human answers each one; the answer is rewritten as 'CONFIRMED: <answer> (who, date)':
+$(printf '%s\n' "$asm" | head -n 10 | sed 's/^/    /')"; fi
+    if "$KIT_DIR/scripts/kit-trace" >/dev/null 2>&1; then gate ok "traceability: every UC/US/BR/FR/NFR/ADR id referenced exists"
+    else gate no "traceability errors (ids referenced but not defined) — run: .agent/scripts/kit-trace"; fi
+  fi
   ac="$(section_body "$f" '^## Acceptance criteria')"
   if printf '%s\n' "$ac" | grep -qE '^- \[[xX]\]' && ! printf '%s\n' "$ac" | grep -qE '^- \[ \]'; then gate ok "all acceptance criteria ticked"
   else gate no "acceptance criteria: every item must be ticked [x] (and proven by a test)"; fi
@@ -280,7 +311,20 @@ cmd_verify() {
 $(printf '%s\n' "$bad_ref" | sed 's/^/      /' | head -n 10)"
       else gate no "missing docs/qa/$id.md — create it: .agent/scripts/kit-new testplan $id"; fi ;;
   esac
-  [ -n "$(section_body "$f" '^## 7\. Result')" ] && gate ok "7 Result filled" || gate no "7 Result is empty — what changed, how verified, docs updated"
+  local s7; s7="$(section_body "$f" '^## 7\. Result')"
+  [ -n "$s7" ] && gate ok "7 Result filled" || gate no "7 Result is empty — what changed, how verified, docs updated"
+  # living docs: a feature that changes code must change a spec / living doc in the same branch (or say why not)
+  if [ "$type" = feature ]; then
+    local base changed code docs
+    base="$(task_base_commit "$id" "$type")"
+    if [ -n "$base" ]; then
+      changed="$( { git diff --name-only "$base" 2>/dev/null; git ls-files --others --exclude-standard; } | sort -u)"
+      code="$(printf '%s\n' "$changed" | grep -vE "$PLANNING_RE"'|\.md$|(^|/)(tests?|__tests__|spec|e2e)/|\.(test|spec)\.[a-z]+$|_test\.[a-z]+$' | grep . || true)"
+      docs="$(printf '%s\n' "$changed" | grep -E '^(openspec/(specs|changes)/|docs/(api|architecture|data|platform|security)/|README\.md$)' || true)"
+      if [ -z "$code" ] || [ -n "$docs" ] || printf '%s\n' "$s7" | grep -qiE '^[^a-z]*docs?:[[:space:]]*(none|n/?a|no |không)'; then gate ok "living docs updated with the code (or 'Docs: none — <why>' in §7)"
+      else gate no "code changed but no spec / living doc did (openspec change, docs/api, docs/architecture, README) — update them, or write 'Docs: none — <why>' in §7"; fi
+    fi
+  fi
   if [ -n "$change" ] && has_openspec; then
     if [ -d "$(change_dir "$change")" ]; then
       if "$KIT_DIR/scripts/kit-openspec" validate "$change" --strict --no-interactive >/dev/null 2>&1; then gate ok "OpenSpec change '$change' valid (--strict)"

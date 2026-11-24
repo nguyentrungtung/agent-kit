@@ -2,6 +2,12 @@
 <!-- arc42-lite. Owned by the solution architect (kit-sa) as the MAP of the solution: short sections, links to the specialist docs
      (docs/platform, docs/security, docs/data, docs/api). Decisions → docs/adr/. -->
 
+## 0. Architecture interview (kit-sa §1b)
+<!-- 4–6 closed questions on drivers (team, deploy/scale independence, load, reliability, domain complexity, ops & budget,
+     integrations, clients). Unanswered → "ASSUMPTION: <recommended>" — a human turns it into "CONFIRMED: <answer> (who, date)". -->
+| # | Driver | Question (options) | Recommended | Answer | Who / date |
+|---|---|---|---|---|---|
+
 ## 1. Goals & constraints
 | Goal (from BA) | Constraint (tech, legal, budget, team, deadline) |
 |---|---|
@@ -50,11 +56,16 @@ C4Container
 |---|---|---|---|---|
 
 ## 6. Modules & boundaries
-| Module | Responsibility | May depend on | Enforced by |
-|---|---|---|---|
+<!-- Source of truth: .agent/rules/project/modules.md (enforced by the stack's arch test, drift checked by kit-trace).
+     Folder layout for BE + FE: docs/architecture/project-structure.md. Keep only the dependency diagram here. -->
 
 ## 7. Runtime scenarios
 <!-- sequence diagrams for the 2–3 most important / risky flows, incl. failure paths -->
+
+## 7b. Patterns & core logic hotspots
+<!-- kit-sa §5b + PATTERNS.md. Every pattern names the requirement it serves. One row per hard rule from the BA hand-off. -->
+| Hotspot (BR / FR) | Pattern | Algorithm / data structure | Complexity & limits | Consistency / concurrency | Test approach |
+|---|---|---|---|---|---|
 
 ## 8. Platform (owned by DevOps → `docs/platform/PLATFORM.md`)
 <!-- 3 lines: hosting model, environments, deploy strategy, SLO headline. Details live in docs/platform/. -->

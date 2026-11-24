@@ -16,17 +16,32 @@ Write in `docs_language` (`.agent/project.yaml`). Diagrams follow the **kit-diag
 `.agent/context/PROJECT.md`, `GLOSSARY.md`, existing `docs/ba/**`, `docs/architecture/**`. Prefer codegraph/grep over opening whole files.
 For an existing system, derive the **as-is** behaviour from code before asking.
 
-## 2. Elicitation & Clarification Interview Protocol
-Never assume business facts, client platforms, or security rules. If an incoming request is vague (e.g. "implement user authentication", "add checkout"), **DO NOT generate documents immediately**.
-Run an elicitation round (with module eng-skills: **mp-grill-with-docs** or **mp-to-questionnaire**):
-Ask **ONE batch of 3–5 focused clarifying questions** (with recommended defaults / multiple-choice options) covering:
-1. **Actors & Authentication Scope:** Who logs in (End-users, Admins, Partners)? Which methods (Email+Password, Phone+OTP, Social OAuth2: Google/Apple, SSO)?
-2. **Client Platforms:** Web SPA, Web SSR (Blade/Next.js), Mobile App (iOS/Android), or Public API? *(Critical input for SA to choose Session vs JWT vs OAuth2 PKCE)*.
-3. **Security & Business Rules:** MFA needed? Password rules? Lock account after N failed attempts? Session duration ("Remember me")?
-4. **Data Privacy (PII):** What personal data is collected? (Full name, phone, ID number — check Vietnam Law 91/2025/QH15).
-5. **Exceptions & Edge Cases:** What happens if email exists? What if verification OTP expires?
+## 2. Elicitation interview — MANDATORY before writing any requirement
+Never assume business facts. **Do not generate BA documents until a clarification round has been answered** — a document built
+on guesses is the main source of "the AI built the wrong thing". Technique: with module eng-skills use **mp-grill-with-docs**
+(grill against existing docs) or **mp-to-questionnaire** (one numbered questionnaire); otherwise follow the protocol below.
 
-Record all questions and answers in `docs/ba/BRIEF.md` under *Clarifications Q&A*. If no human is present: write `ASSUMPTION:` lines and continue.
+**Protocol (every new project / epic / vague request):**
+1. Read context first (step 1) and cross out what the docs/code already answer — never ask what you can read.
+2. Ask **ONE batch of 3–6 questions** (fewer than 3 only for a one-story change; more than 6 → next round). Pick them from the
+   **6 dimensions** below, highest risk of building the wrong thing first. Cover at least dimensions **A, B, C** in the first round.
+3. Each question: numbered, **closed** (options a/b/c or a number), with **your recommended answer** and why in ≤ 1 line —
+   the human may reply "1a 2 ok 3c". Open questions only for goals.
+4. Record every Q and A in `docs/ba/BRIEF.md` › *Clarifications Q&A* (who, date). Unanswered + blocking → stop and wait.
+5. No human available → write each unknown as `ASSUMPTION: <your recommended answer>` and continue. `kit-trace` lists them and
+   `kit-task finish` blocks on them until a human rewrites each as `CONFIRMED: <answer> (who, date)`.
+6. Repeat a round after modelling (step 4) if new unknowns appear (exceptions, states, rules).
+
+| Dim | Ask about | Example questions (adapt to the domain — do not copy) |
+|---|---|---|
+| **A. Goal & success** | business outcome, measurable target, deadline | "Success after 3 months = (a) X orders/day (b) −Y% handling time (c) other?" |
+| **B. Users & permissions** | actors, roles, who may do/see what, multi-tenant? | "Who approves a refund: (a) any staff (b) manager only (c) amount-based rule?" |
+| **C. Scope** | must-have vs later, explicit out-of-scope, MVP cut | "Is export to Excel in the MVP? (rec: no — later)" |
+| **D. Data & rules** | key entities/fields, validations, calculations, lifecycle/states, PII & legal (VN: Law 91/2025/QH15, Decree 13/2023) | "Can an order be edited after payment? (a) never (b) until shipped (c) by admin" |
+| **E. Scale & quality** | users, volumes, peak, latency, availability, retention, languages, devices | "Peak concurrent users: (a) <100 (b) 100–1k (c) >1k?" |
+| **F. Context & constraints** | client platforms (web SPA/SSR, mobile, public API), integrations, legacy, budget, team, compliance | "Payment via (a) VNPay (b) MoMo (c) bank transfer only?" |
+Domain packs (use only when relevant): **auth** → login methods, MFA, lockout, session length; **payments** → refunds, partial
+payment, reconciliation; **reporting** → freshness, drill-down, export; **workflow** → approvals, SLAs, escalation.
 
 ## 3. Stakeholders → `stakeholders.md` (template `stakeholders.md`)
 Stakeholder list with interest/influence, RACI for decisions, user roles/personas with goals and pain points.
@@ -66,10 +81,13 @@ Stakeholder list with interest/influence, RACI for decisions, user roles/persona
 ## 6. Traceability → `RTM.md` (template `RTM.md`)
 Goal → FR/NFR → US → AC → (TASK, Test case filled later by kit-plan / kit-testcases). No orphan FR, no story without a goal.
 
-## 7. Validate diagrams
-Run `.agent/scripts/kit-run docs` (renders every Mermaid/PlantUML block; fails on syntax errors). Fix until green.
+## 7. Validate diagrams & traceability
+Run `.agent/scripts/kit-run docs` (renders every Mermaid/PlantUML block; fails on syntax errors) and `.agent/scripts/kit-trace`
+(every UC/US/BR/FR id referenced exists; warns on stories without UC/AC/negative AC, FRs without stories). Fix until green.
 
 ## 8. Quality gate (all true before kit-plan)
+- [ ] Clarification round answered (≥ 3 questions covering dimensions A, B, C) and recorded in BRIEF.md; open `ASSUMPTION:` lines listed for the human (`kit-trace assumptions`).
+- [ ] `kit-trace` has 0 errors.
 - [ ] Every goal measurable; scope and out-of-scope explicit.
 - [ ] Every FR traces to a goal and to ≥1 story; every story has testable AC incl. a negative case.
 - [ ] NFRs have numbers; business rules have IDs and single source.
@@ -83,6 +101,7 @@ Deliver the **Architecture Hand-off Packet** in `docs/ba/BRIEF.md`:
 - Client platforms (Web SPA, Web SSR, Mobile App, API)
 - Expected load, transaction volume, and latency numbers (from NFRs)
 - Required external integrations (OAuth providers, payment gateways, legacy systems)
+- The **3–5 hardest business rules / calculations** (e.g. pricing, scheduling, allocation, approval routing) — SA designs the algorithm for them
 - Architectural decision questions for SA (e.g. Auth approach: Session vs JWT vs OAuth2, DB choice, sync vs async messaging)
 
 Summarise to the human (goals, Must-haves, open questions, diagrams produced).

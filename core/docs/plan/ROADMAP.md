@@ -17,7 +17,7 @@ Quy tắc phân chia (3-in-1 Velocity):
 ## Task breakdown
 | Task | Milestone | Story | Depends on | Size (S/M/L) | Parallel? | Status |
 |---|---|---|---|---|---|---|
-| TASK-001 | M1 | US-01 | - | M | Yes | todo |
+| TASK-NNN | M1 | <US-NN> | - | M | Yes | todo |
 
 ## Dependency graph
 ```mermaid

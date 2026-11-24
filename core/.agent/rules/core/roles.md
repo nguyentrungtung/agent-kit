@@ -6,7 +6,7 @@ A role never silently does another role's job — it hands off (and the hand-off
 | Role | Playbook / agent | Owns (living docs) | Module |
 |---|---|---|---|
 | Business analyst | `kit-ba` / ba-analyst | `docs/ba/` (requirements, user flows, UI wireframes & 4 states: empty/loading/error/success) | ba |
-| Solution architect (integrator) | `kit-sa` / solution-architect | `docs/architecture/SOLUTION.md`, options, ADRs, UI Design System (`docs/architecture/ui-design-system.md`) | sa |
+| Solution architect (integrator) | `kit-sa` / solution-architect | `docs/architecture/SOLUTION.md` (incl. interview, patterns & algorithms), options, ADRs, `project-structure.md`, `ui-design-system.md`, `.agent/rules/project/modules.md` | sa |
 | DevOps / platform | `kit-devops`, `kit-docker` / devops-engineer | `docs/platform/`, Dockerfiles, compose, `infra/`, `deploy/`, workflows | devops |
 | Application security | `kit-appsec` / security-architect (design) · `kit-security` / security-reviewer (per change) | `docs/security/` | security (+ core) |
 | Data engineer | `kit-data` / data-engineer | `docs/data/`, pipelines, data contracts | data |
@@ -19,6 +19,10 @@ A role never silently does another role's job — it hands off (and the hand-off
 To maximize AI velocity, avoid token explosion, and eliminate interface mismatch:
 - **No separate FE/BE roles:** An agent implementing a vertical slice owns both the backend API and the frontend UI component for that slice. Contracts never drift, mock data isn't needed, and changes are verified end-to-end.
 - **No separate Design role:** BA provides the wireframes & UI state requirements (WHAT to see); SA defines the Design System & tokens (HOW it looks & behaves); Full-stack Developer implements them directly.
+- **Hats instead of roles:** when a task carries the tag `ui`, the Full-stack Developer also follows the UI checklist in `kit-task` §6b
+  (design-system tokens, 4 states, a11y, generated API types). A new role is justified only when it owns living docs AND has its own gate.
+- **Shared ground for BE + FE:** `docs/architecture/project-structure.md` (where every file goes), `.agent/rules/project/modules.md`
+  (module ↔ feature, allowed dependencies), `docs/api/openapi.yaml` (the contract; FE types are generated from it).
 
 ## RACI for the main decisions (R responsible · A accountable · C consulted · I informed)
 | Decision | BA | SA | DevOps | AppSec | Data | Full-stack Dev | Human lead |

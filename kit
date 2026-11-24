@@ -323,8 +323,12 @@ install_component() { # install_component <idx>
   [ -n "$fd" ] && [ -f "$fd/rules.md" ] && copy_file "$fd/rules.md" "$TARGET/.agent/rules/stack/$f.md"
   src="$(stack_asset "$s" snippets)"; [ -n "$src" ] && copy_tree "$src" "$TARGET/.agent/stack/$s/snippets"
   [ -n "$fd" ] && [ -d "$fd/snippets" ] && copy_tree "$fd/snippets" "$TARGET/.agent/stack/$s/snippets"
-  # architecture skeletons (kit-new module): framework definitions win over the stack's
-  if [ -n "$fd" ] && [ -d "$fd/skeletons" ]; then copy_tree "$fd/skeletons" "$TARGET/.agent/stack/$s/skeletons"; fi
+  # architecture skeletons (kit-new module): framework definitions win over the stack's; they are also kept per framework
+  # (skeletons/<framework>/) so two components of one stack (e.g. node+nestjs backend, node+react frontend) never collide
+  if [ -n "$fd" ] && [ -d "$fd/skeletons" ]; then
+    copy_tree "$fd/skeletons" "$TARGET/.agent/stack/$s/skeletons"
+    copy_tree "$fd/skeletons" "$TARGET/.agent/stack/$s/skeletons/$f"
+  fi
   src="$(stack_asset "$s" skeletons)"
   if [ -n "$src" ]; then
     for rel in "$src"/*; do

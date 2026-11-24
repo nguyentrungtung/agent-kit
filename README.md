@@ -138,6 +138,7 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 | Sự cố production + post-mortem không đổ lỗi | `kit-incident`, `kit-new postmortem "<tiêu đề>"` |
 | Checklist release (gồm DAST/pentest trên staging, rollback) | `.agent/checklists/release.md` |
 | Nâng cấp kit cho dự án đã cài | `kit upgrade <dir>`: file bạn chưa sửa thì cập nhật, file bạn đã sửa thì giữ nguyên + `*.kit-new`, file bạn đã xoá thì không tạo lại; thêm key mới vào `project.yaml` (dựa trên `.agent/kit.manifest`) |
+| Lên 0.11.0 (anti-drift gates) | Task đang làm dở tạo từ template cũ sẽ bị `kit-task verify` chặn ở §2: chép khối checklist 8 mục từ `.agent/tasks/_TEMPLATE.md` vào task rồi tick (ghi n/a nếu không áp dụng). Chạy `.agent/scripts/kit-trace` một lần để dọn các id UC/US/BR/FR/ADR không tồn tại; `ASSUMPTION:` còn mở phải được người đổi thành `CONFIRMED:` |
 | Kit tự test chính nó | `.github/workflows/kit-ci.yml`: lint shell + actionlint + gitleaks, `tests/smoke.sh` (init 14 dự án mẫu), `tests/e2e-workflow.sh` (luồng OpenSpec → task → finish) |
 
 ### Tài liệu nằm ở đâu (`.agent/rules/core/documentation.md`, bản đồ: `docs/README.md`)
@@ -229,6 +230,7 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 | `kit-task start TASK-NNN --worktree` | Task chạy trong worktree riêng `../<repo>-TASK-NNN` để nhiều agent làm song song |
 | `kit-task worktrees` / `cleanup TASK-NNN` | Liệt kê worktree / gỡ worktree (từ chối nếu còn việc chưa commit) |
 | `kit-task sync-gh [TASK-NNN\|--all]` / `pull-gh <issue#>` | Đồng bộ task ↔ GitHub Issues (label status/type/priority, tự đóng khi done, tuỳ chọn thêm vào GitHub Project) / tạo task từ issue |
+| `.agent/scripts/kit-trace [--strict] · kit-trace assumptions` | Bước "analyze": mọi id UC/US/BR/FR/NFR/ADR được nhắc tới phải tồn tại; cảnh báo story thiếu UC/AC/AC âm, FR không có story, thư mục module lệch `modules.md`, `ASSUMPTION:` chưa được người xác nhận. Chạy trong `kit-run check`, CI và `kit-task verify` |
 | `.agent/scripts/kit-board [--json\|--html\|--open]` | Bảng kanban đọc trạng thái thật từ từng nhánh task; JSON cho UI/orchestrator; HTML tự chứa ở `.agent/local/board.html` |
 | `.agent/scripts/kit-doctor [--run]` | Kiểm tra hook, rules, tool cần cho từng `cmd_*` theo từng component, tool của module |
 | `.agent/scripts/kit-diagrams check\|export` | Render mọi sơ đồ Mermaid/PlantUML trong docs (module `ba`) |

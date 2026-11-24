@@ -4,7 +4,7 @@ Rule: read **living** docs to understand the system; change records only for the
 | Where | What | Kind | Created / updated by |
 |---|---|---|---|
 | `../openspec/specs/` | Current behaviour per capability (requirements + scenarios) | living | archiving an OpenSpec change (`kit-task finish`) |
-| `architecture/` | Solution architecture, C4, data model, sizing & cost (module `sa`) | living | `kit-sa` |
+| `architecture/` | Solution architecture (interview, patterns & algorithms), C4, project structure BE+FE, UI design system, data model (module `sa`) | living | `kit-sa` |
 | `api/` | OpenAPI contracts | living | same PR as the API change |
 | `platform/` | Environments, hosting, CI/CD, SLOs, backup/DR, sizing, runbooks (module `devops`) | living | `kit-devops`, `kit-new runbook` |
 | `data/` | Analytics architecture, pipelines, data contracts (module `data`) | living | `kit-data` |

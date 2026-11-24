@@ -5,7 +5,7 @@ Separate by **lifetime**. Agents read living docs to understand the system; chan
 | Kind | Question it answers | Location | Updated | Read |
 |---|---|---|---|---|
 | **Living — behaviour** | What does the system do now? | `openspec/specs/<capability>/spec.md` | By archiving the change, in the PR that changes the code | Always first |
-| **Living — structure** | How is it built? | `docs/architecture/` (SOLUTION, data model, sizing), `.agent/context/ARCHITECTURE.md` (summary) | When structure/data/infrastructure changes | Before design |
+| **Living — structure** | How is it built? | `docs/architecture/` (SOLUTION, project-structure, ui-design-system, data model), `.agent/rules/project/modules.md`, `.agent/context/ARCHITECTURE.md` (summary) | When structure/data/infrastructure changes | Before design |
 | **Living — contracts** | How do others call it? | `docs/api/` (OpenAPI) | Same PR as the API change | When touching APIs |
 | **Business** | What do users need? | `docs/ba/` (brief, use cases, stories, rules, RTM) | When requirements change | When planning |
 | **Change in progress** | What are we changing and why? | `openspec/changes/<change>/` (proposal, spec deltas, design, tasks) | During the change; archived when done | During that change |

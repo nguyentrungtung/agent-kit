@@ -1,0 +1,5 @@
+# React layered (small apps): src/<layer>/<module>. Prefer the modular (feature) style once there are 3+ features.
+src/pages/{{module}}/          # Route-level screens from the BA wireframes.
+src/components/{{module}}/     # Presentational components; implement empty / loading / error / success.
+src/hooks/{{module}}/          # Data hooks calling the GENERATED client in src/shared/api.
+tests/{{module}}/              # Component + hook tests.

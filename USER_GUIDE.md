@@ -95,6 +95,10 @@ Khi bạn đưa ra một yêu cầu mới (ví dụ: *"làm tính năng đăng n
 * Phương thức gì? (Email/Password, OTP SMS, hay Google/Apple OAuth2).
 * Chính sách bảo mật & Điều kiện biên? (Khóa khi sai 5 lần, thời hạn phiên, 2FA).
 
+> Quy tắc chung (mọi dự án, không chỉ auth): BA **bắt buộc** hỏi một lượt **3–6 câu đóng** (có lựa chọn + đáp án đề xuất) trước khi viết tài liệu,
+> chọn từ 6 chiều: **A** Mục tiêu · **B** Người dùng & quyền · **C** Phạm vi · **D** Dữ liệu & quy tắc · **E** Quy mô & chất lượng · **F** Bối cảnh & ràng buộc
+> (vòng đầu phủ ít nhất A, B, C). Câu chưa có người trả lời được ghi `ASSUMPTION:`; chỉ con người đổi thành `CONFIRMED:` — trước đó `kit-task finish` bị chặn.
+
 Sau đó, BA chuẩn hóa yêu cầu theo **cú pháp EARS** (Event-driven, State-driven, Unwanted behavior), **phác thảo Wireframe (khung giao diện) & 4 trạng thái UI then chốt** (Empty, Loading, Error, Success), và xuất ra gói **Architecture Hand-off Packet** cho SA.
 ```bash
 # Tạo tài liệu Use Case
@@ -106,6 +110,11 @@ Sau đó, BA chuẩn hóa yêu cầu theo **cú pháp EARS** (Event-driven, Stat
 
 #### 1.2. SA thiết kế giải pháp & Sơ đồ kết nối (Sequence Diagram, ADR & Design System)
 Sau khi có đầu vào từ BA, Solution Architect (role `sa`) sẽ giải quyết câu hỏi **HOW**:
+* **Phỏng vấn kiến trúc trước (4–6 câu):** số dev/team, có cần deploy/scale độc lập không, tải 12 tháng tới, RTO/RPO, độ phức tạp nghiệp vụ, ngân sách & năng lực vận hành
+  → chấm điểm các phương án (modular monolith / layered / microservices…) rồi ghi ADR. Microservices chỉ khi đủ: nhiều team + ranh giới đã ổn định + cần deploy/scale độc lập + có DevOps.
+* **Tách module** theo bounded context (mỗi module sở hữu dữ liệu riêng, phụ thuộc không vòng) → `.agent/rules/project/modules.md`, được arch test (`kit-run arch`) cưỡng chế.
+* **Cấu trúc thư mục BE + FE** → `docs/architecture/project-structure.md` (module backend ↔ feature frontend 1:1, type API sinh từ `openapi.yaml` bằng `kit-run apigen`).
+* **Pattern & thuật toán cho 3–5 quy tắc khó nhất** (tính giá, xếp lịch, phân bổ, tồn kho đồng thời…) → `SOLUTION.md` §7b, tra cứu ở `.agents/skills/kit-sa/PATTERNS.md`; mỗi pattern phải gắn với một yêu cầu cụ thể.
 * Nếu ứng dụng chỉ chạy trên Web: Chọn **Session Cookie (HttpOnly)** để chống tấn công XSS.
 * Nếu có Mobile App hoặc SPA: Chọn **OAuth2 PKCE + JWT Token** (Access token ngắn hạn + Refresh token xoay vòng).
 * Vẽ **Sơ đồ Sequence (Mermaid)** mô tả cách Client $\leftrightarrow$ API Gateway $\leftrightarrow$ Auth Service $\leftrightarrow$ DB/Redis tương tác với nhau.
@@ -294,6 +303,8 @@ Nếu trong quá trình làm việc AI đi sai hướng hoặc sinh code lỗi:
 | Lệnh | Ý nghĩa |
 |---|---|
 | `.agent/scripts/kit-context --topic <chủ đề>` | Tra cứu ngữ cảnh nén, bài học kinh nghiệm và ADR theo chủ đề |
+| `.agent/scripts/kit-trace` | Kiểm tra truy vết: id UC/US/BR/FR/ADR không tồn tại (agent bịa), story thiếu AC, module lệch `modules.md` |
+| `.agent/scripts/kit-trace assumptions` | Liệt kê các `ASSUMPTION:` chưa được người xác nhận (người sửa thành `CONFIRMED: …` thì mới finish được) |
 | `.agent/scripts/kit-board` | Xem bảng Kanban các task ngay trên Terminal |
 | `.agent/scripts/kit-board --html` | Mở bảng Kanban trực quan trên trình duyệt Web |
 | `.agent/scripts/kit-daily` | Tự động tổng kết báo cáo công việc trong ngày từ git commit |
