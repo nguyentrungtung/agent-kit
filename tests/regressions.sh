@@ -421,6 +421,7 @@ ad "$A" 'mkdir -p agent docs/nghiep-vu docs/tham-chieu tools/checks \
   && printf "{\"client_secret\": \"Zq8vK2mN4pR7sT1w\"}\n" > docs/tham-chieu/api.postman_collection.json \
   && printf "db: postgres://etl:S3cretPw@db:5432/x\n" > docs/nghiep-vu/conn.md \
   && printf "volumes:\n  - ./config/.htpasswd:/etc/nginx/.htpasswd:ro\n" > docs/nghiep-vu/gateway.md \
+  && printf "{\n  \"applicant_name\": \"Tran Thi Real\",\n  \"applicant_name\": \"Nguyen Van A (an danh) anonymous\"\n}\n" > docs/nghiep-vu/api-sample.md \
   && printf "print(1)\n" > tools/checks/check_registry.py \
   && printf "stages: [test]\nchecks:\n  stage: test\n  script:\n    - python3 tools/checks/check_registry.py --token glpat-SeCrEt0123456789\n" > .gitlab-ci.yml \
   && printf "AGENTS.md\nagent/\ndocs/\n" > .gitignore && printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json \
@@ -433,7 +434,8 @@ check "§2 every link into agent/ listed"             "sec 2 | grep -q 'AGENTS.m
 check "§3 own docs folders kept, not kit slots"      "sec 3 | grep -q 'docs/nghiep-vu/.*yours'"
 check "§4 Postman export + secret-like values found" "sec 4 | grep -q 'api.postman_collection.json — file type' && sec 4 | grep -q 'conn.md:1 — password in URL'"
 check "§4 a .htpasswd mount path is not a password"  "! sec 4 | grep -q 'gateway.md'"
-check "§4 never prints the values"                   "! printf '%s\n' \"\$scan\" | grep -q 'S3cretPw' && ! printf '%s\n' \"\$scan\" | grep -q 'Zq8vK2mN4pR7sT1w'"
+check "§4 personal data in API samples is found"    "sec 4 | grep -q 'api-sample.md:2 — personal data (applicant_name)' && ! sec 4 | grep -q 'api-sample.md:3'"
+check "§4 never prints the values"                   "! printf '%s\n' \"\$scan\" | grep -q 'S3cretPw' && ! printf '%s\n' \"\$scan\" | grep -q 'Zq8vK2mN4pR7sT1w' && ! printf '%s\n' \"\$scan\" | grep -q 'Tran Thi Real'"
 check "§5 the .gitignore lines that hide them"       "sec 5 | grep -q '.gitignore:1 .AGENTS.md.' && sec 5 | grep -q '.gitignore:3 .docs/.'"
 check "§6 .kit-new left to merge"                    "sec 6 | grep -q 'AGENTS.md.kit-new'"
 check "§7 kit pipeline not included yet"             "sec 7 | grep -q 'NOT included'"

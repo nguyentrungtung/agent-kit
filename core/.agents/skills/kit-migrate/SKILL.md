@@ -53,6 +53,8 @@ Every reference to an old path must point to its new place before the old file g
   out of Git and say where they live.
 
 ## 5. Before sharing (scan §4) — only when the answer in step 1 was "shared"
+- Personal data counts as much as secrets: API samples pasted into docs often carry real names, phones, ids — replace them with
+  anonymous placeholders before the first commit (a pushed commit keeps them in history).
 - Every item must be resolved: remove the value (keep the name, point to `.env.example`), redact the export, or keep that file ignored
   (add a precise line such as `docs/reference/**/*.postman_collection.json` — never re-ignore the whole folder).
 - A finding that is not a secret (a column description, a path such as `.htpasswd:/etc/…`) is a **human's call**: show it (value

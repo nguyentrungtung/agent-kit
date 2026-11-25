@@ -112,7 +112,7 @@ if [ -d docs ]; then
 else echo "No docs/ folder."; fi
 
 # ---------------------------------------------------------------- 4. sensitive content
-echo; echo "## 4. Before sharing: secret-looking content (values hidden)"; echo
+echo; echo "## 4. Before sharing: secret-looking content and personal data (values hidden)"; echo
 scan_paths=""; for p in docs $LEGACY_DIRS AGENTS.md; do [ -e "$p" ] && scan_paths="$scan_paths $p"; done
 hits=""
 if [ -n "$scan_paths" ]; then
@@ -125,6 +125,12 @@ $(grep -rnIiE --exclude-dir=.git -- '-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9
     | awk -F: '{ l=tolower($0); k="secret-like value"; if (l ~ /private key/) k="private key"; else if (l ~ /akia/) k="AWS key"; else if (l ~ /eyj/) k="JWT";
                  else if (l ~ /:\/\/[^\/]*:[^\/]*@/) k="password in URL"; else if (match(l, /(api[_-]?key|client[_-]?secret|access[_-]?key|secret|passw(or)?d|token)/)) k=substr(l, RSTART, RLENGTH);
                  print $1 ":" $2 " — " k }' | sort -u | head -n 60 || true)"
+  # personal data in samples (API responses pasted into docs): a person's name, phone, e-mail, national id, birth date, address with a value
+  hits="$hits
+$(grep -rnIiE --exclude-dir=.git -- '"?(applicant_?name|full_?name|first_?name|last_?name|[a-z_]*_full_name|ho_?ten|ho_va_ten|ten_cong_dan|ten_nguoi[a-z_]*|nguoi_nop|phone|mobile|so_dien_thoai|sdt|e_?mail|cccd|cmnd|so_dinh_danh_ca_nhan|ngay_sinh|dob|date_of_birth|dia_chi_thuong_tru|home_address)"?[[:space:]]*[:=][[:space:]]*"[^"<{]{3,}"' $scan_paths 2>/dev/null \
+    | grep -viE '(ẩn danh|anonym|example|placeholder|xxx|nguyen van a|john doe|\*\*\*)' \
+    | awk -F: '{ l = tolower($0); k = "personal data"; if (match(l, /(applicant_?name|full_?name|first_?name|last_?name|[a-z_]*_full_name|ho_?ten|ho_va_ten|ten_cong_dan|ten_nguoi[a-z_]*|nguoi_nop|phone|mobile|so_dien_thoai|sdt|e_?mail|cccd|cmnd|so_dinh_danh_ca_nhan|ngay_sinh|dob|date_of_birth|dia_chi_thuong_tru|home_address)/)) k = "personal data (" substr(l, RSTART, RLENGTH) ")"
+                 print $1 ":" $2 " — " k }' | sort -u | head -n 60 || true)"
   if command -v gitleaks >/dev/null 2>&1; then
     tmp="$(mktemp)"
     for p in $scan_paths; do gitleaks detect --no-git --no-banner --redact --exit-code 0 --source "$p" --report-format json --report-path "$tmp" >/dev/null 2>&1 || true
@@ -134,7 +140,7 @@ $(jq -r '.[] | "\(.File):\(.StartLine) — gitleaks \(.RuleID)"' "$tmp" 2>/dev/n
   fi
 fi
 hits="$(printf '%s\n' "$hits" | awk 'NF && !seen[$0]++')"
-if [ -n "$hits" ]; then printf '%s\n' "$hits" | sed 's/^/- [ ] /'; echo; echo "Each one: remove the value (keep the name, point to .env.example) or keep the file out of Git, BEFORE the .gitignore lines in §5 go."
+if [ -n "$hits" ]; then printf '%s\n' "$hits" | sed 's/^/- [ ] /'; echo; echo "Each one: remove the value (keep the name, point to .env.example), replace a real person by an anonymous placeholder, or keep the file out of Git — BEFORE the .gitignore lines in §5 go (a push keeps the history)."
 else echo "Nothing found by the built-in patterns$(command -v gitleaks >/dev/null 2>&1 && echo ' or gitleaks'). Still skim spreadsheets / exports in §3 for personal data."; fi
 
 # ---------------------------------------------------------------- 5. .gitignore lines hiding kit / old files
