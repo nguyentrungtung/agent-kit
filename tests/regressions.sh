@@ -321,6 +321,8 @@ A="$WORK/ad-flow-develop"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n
 check "a develop branch → gitflow as before"        "[ \"\$(yv \"\$A\" develop_branch)\" = develop ]"
 commit_all "$A"; (cd "$A" && git checkout -q develop && git merge -q --ff-only main); dtip="$(git -C "$A" rev-parse develop)"
 (cd "$A" && .agent/scripts/kit-task new "Null ngay tiep nhan" --type bug >/dev/null && .agent/scripts/kit-task start TASK-001 >/dev/null 2>&1)
+(cd "$A" && .agent/scripts/kit-task new "测试任务" >/dev/null 2>&1)
+check "a title with no Latin letters still gives a valid slug" "ls \"\$A\"/.agent/tasks/TASK-002-task.md >/dev/null 2>&1"
 check "gitflow: --type bug → bugfix/TASK-… from develop" "case \"\$(git -C \"\$A\" rev-parse --abbrev-ref HEAD)\" in bugfix/TASK-001-null-ngay-tiep-nhan) true ;; *) false ;; esac && [ \"\$(git -C \"\$A\" merge-base HEAD develop)\" = \"$dtip\" ]"
 A="$WORK/ad-flow-new"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node
 check "brand-new repo → gitflow"                    "[ \"\$(yv \"\$A\" develop_branch)\" = develop ]"
@@ -421,7 +423,7 @@ ad "$A" 'mkdir -p agent docs/nghiep-vu docs/tham-chieu tools/checks \
   && printf "{\"client_secret\": \"Zq8vK2mN4pR7sT1w\"}\n" > docs/tham-chieu/api.postman_collection.json \
   && printf "db: postgres://etl:S3cretPw@db:5432/x\n" > docs/nghiep-vu/conn.md \
   && printf "volumes:\n  - ./config/.htpasswd:/etc/nginx/.htpasswd:ro\n" > docs/nghiep-vu/gateway.md \
-  && printf "{\n  \"applicant_name\": \"Tran Thi Real\",\n  \"applicant_name\": \"Nguyen Van A (an danh) anonymous\"\n}\n" > docs/nghiep-vu/api-sample.md \
+  && printf "{\n  \"applicant_name\": \"Tran Thi Real\",\n  \"applicant_name\": \"Nguyen Van A (an danh) anonymous\",\n  \"automobile\": \"Toyota Camry\",\n  \"phone\": 0912345678\n}\n" > docs/nghiep-vu/api-sample.md \
   && printf "print(1)\n" > tools/checks/check_registry.py \
   && printf "stages: [test]\nchecks:\n  stage: test\n  script:\n    - python3 tools/checks/check_registry.py --token glpat-SeCrEt0123456789\n" > .gitlab-ci.yml \
   && printf "AGENTS.md\nagent/\ndocs/\n" > .gitignore && printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json \
@@ -435,6 +437,7 @@ check "§3 own docs folders kept, not kit slots"      "sec 3 | grep -q 'docs/ngh
 check "§4 Postman export + secret-like values found" "sec 4 | grep -q 'api.postman_collection.json — file type' && sec 4 | grep -q 'conn.md:1 — password in URL'"
 check "§4 a .htpasswd mount path is not a password"  "! sec 4 | grep -q 'gateway.md'"
 check "§4 personal data in API samples is found"    "sec 4 | grep -q 'api-sample.md:2 — personal data (applicant_name)' && ! sec 4 | grep -q 'api-sample.md:3'"
+check "§4 unquoted phone found, 'automobile' is not a phone" "sec 4 | grep -q 'api-sample.md:5 — personal data (phone)' && ! sec 4 | grep -q 'api-sample.md:4'"
 check "§4 never prints the values"                   "! printf '%s\n' \"\$scan\" | grep -q 'S3cretPw' && ! printf '%s\n' \"\$scan\" | grep -q 'Zq8vK2mN4pR7sT1w' && ! printf '%s\n' \"\$scan\" | grep -q 'Tran Thi Real'"
 check "§5 the .gitignore lines that hide them"       "sec 5 | grep -q '.gitignore:1 .AGENTS.md.' && sec 5 | grep -q '.gitignore:3 .docs/.'"
 check "§6 .kit-new left to merge"                    "sec 6 | grep -q 'AGENTS.md.kit-new'"
@@ -579,6 +582,7 @@ check "issue created in the encoded project path"   "[ \"\$(gl '[.[]|select(.m==
 check "title and labels sent"                       "[ \"\$(gl '[.[]|select(.m==\"POST\" and (.p|endswith(\"/issues\")))|.form]|first|[.title, (.labels|contains(\"status:todo\") and contains(\"priority:P1\"))]|@csv')\" = '\"[TASK-001] Alpha feature\",true' ]"
 check "every request carried the token"             "[ \"\$(gl 'all(.[]; .token==\"secret-token\")')\" = true ]"
 check "labels are created first"                    "[ \"\$(gl '[.[]|select(.p|endswith(\"/labels\"))]|length')\" -ge 15 ]"
+check "the bugfix / ci / perf type labels exist too"  "grep -q 'type:bugfix' \"$WORK/gl.log\" && grep -q 'type:perf' \"$WORK/gl.log\""
 check "number saved in .agent/tasks/.issues"        "grep -qx 'TASK-001=41' \"\$g/.agent/tasks/.issues\""
 : > "$WORK/gl.log"; gls sync TASK-001 >/dev/null
 check "second sync updates, adding/removing status" "[ \"\$(gl '[.[]|select(.m==\"PUT\")|.form]|first|[(.add_labels|contains(\"status:todo\")), (.remove_labels|contains(\"status:done\")), (.remove_labels|contains(\"status:todo\"))]|@csv')\" = 'true,true,false' ]"
@@ -587,7 +591,7 @@ check "done → the GitLab issue is closed"           "[ \"\$(gl '[.[]|select(.f
 perl -pi -e 's/^status: done/status: todo/' "$g"/.agent/tasks/TASK-001-*.md; : > "$WORK/gl.log"; gls sync TASK-001 >/dev/null
 check "back to todo → it is reopened"               "[ \"\$(gl '[.[]|select(.form.state_event==\"reopen\")]|length')\" = 1 ]"
 out="$(gls pull 7)"
-check "pull creates a task from the issue"          "ls \"\$g\"/.agent/tasks/TASK-002-*.md >/dev/null 2>&1 && grep -q '^type: fix' \"\$g\"/.agent/tasks/TASK-002-*.md && grep -q '^priority: P1' \"\$g\"/.agent/tasks/TASK-002-*.md && grep -q '^issue: 7' \"\$g\"/.agent/tasks/TASK-002-*.md && grep -q 'Users cannot log in' \"\$g\"/.agent/tasks/TASK-002-*.md && grep -q '^Source: gitlab issue #7' \"\$g\"/.agent/tasks/TASK-002-*.md"
+check "pull creates a task from the issue"          "ls \"\$g\"/.agent/tasks/TASK-002-*.md >/dev/null 2>&1 && grep -q '^type: bugfix' \"\$g\"/.agent/tasks/TASK-002-*.md && grep -q '^priority: P1' \"\$g\"/.agent/tasks/TASK-002-*.md && grep -q '^issue: 7' \"\$g\"/.agent/tasks/TASK-002-*.md && grep -q 'Users cannot log in' \"\$g\"/.agent/tasks/TASK-002-*.md && grep -q '^Source: gitlab issue #7' \"\$g\"/.agent/tasks/TASK-002-*.md"
 out="$(gls pull 7 || true)"
 check "pulling the same issue twice is refused"     "printf '%s\n' \"\$out\" | grep -q 'already linked'"
 kill "$GLPID" 2>/dev/null || true; wait "$GLPID" 2>/dev/null || true
@@ -649,12 +653,16 @@ check "a bad commit subject fails the guard"        "printf '%s\n' \"\$out\" | g
 out="$(kci wip/foo guard || true)"
 check "a branch name outside <type>/ fails"         "printf '%s\n' \"\$out\" | grep -q \"type 'wip' is not one of\""
 out="$(kci feature/Bad_Name guard || true)"
-check "gitflow: description must be lowercase kebab-case" "printf '%s\n' \"\$out\" | grep -q 'lowercase kebab-case'"
+check "gitflow: description must be lowercase kebab-case" "printf '%s\n' \"\$out\" | grep -q 'lowercase-kebab-case'"
 out="$(cd "$r" && KIT_CI_EVENT=pr KIT_CI_BASE=main KIT_CI_HEAD=feature/TASK-009-x .agent/scripts/kit-ci guard 2>&1 || true)"
 check "gitflow: a feature cannot merge into main"   "printf '%s\n' \"\$out\" | grep -q 'only release/\* or hotfix/\* merge into main'"
 (cd "$r" && git commit -q --amend -m "feat(TASK-009): add a thing" --no-verify)
 rc=0; out="$(kci feature/TASK-009-x guard)" || rc=$?
 check "good branch + subject pass"                  "[ $rc -eq 0 ]"
+printf 'gitflow_enforce: warn\n' > "$r/.agent/project.yaml"
+rc=0; out="$(kci wip/foo guard)" || rc=$?
+check "gitflow_enforce: warn → CI warns, does not fail" "[ $rc -eq 0 ] && printf '%s\n' \"\$out\" | grep -q \"WARNING: branch 'wip/foo'\""
+rm -f "$r/.agent/project.yaml"
 rc=0; out="$(kci feat/bronze-all-string guard)" || rc=$?
 check "gitflow: feat/ and bugfix/ are accepted"      "[ $rc -eq 0 ] && kci bugfix/TASK-010-null-date guard >/dev/null"
 rc=0; out="$(cd "$r" && KIT_CI_EVENT=pr KIT_CI_BASE=main KIT_CI_HEAD=release/v1.2.0 .agent/scripts/kit-ci guard 2>&1)" || rc=$?
@@ -699,10 +707,30 @@ check "existing TypeScript repo keeps its typecheck gate" "grep -q '^cmd_typeche
 A="$WORK/rv-dbt"; ad "$A" 'printf "name: t\nprofile: t\n" > dbt_project.yml && printf "t:\n  outputs:\n    ci:\n      type: duckdb\n" > profiles.yml && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack dbt
 check "existing dbt repo without packages.yml: no evaluator gate" "[ -z \"\$(yv \"\$A\" cmd_arch)\" ] && grep -q 'dbt_project_evaluator is not in packages.yml' \"\$A.log\""
 A="$WORK/rv-hint"; ad "$A" 'printf "stages: [test]\nmine:\n  script: [echo mine]\n" > .gitlab-ci.yml && printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node --provider gitlab
+check "new project: gitflow_enforce: block"          "grep -q '^gitflow_enforce: block' \"\$A/.agent/project.yaml\""
+sed -i.bak '/^gitflow_enforce:/d; /^branch_exempt_regex:/d' "$A/.agent/project.yaml" && rm -f "$A/.agent/project.yaml.bak"   # = installed by 0.13
 commit_all "$A"; "$KIT" upgrade "$A" >"$A.up.log" 2>&1 || true
 check "upgrade repeats the GitLab include hint"     "grep -q 'local: .gitlab-ci.kit.yml' \"\$A.up.log\""
+check "upgraded project: gitflow_enforce: warn (CI warns, does not block)" "grep -q '^gitflow_enforce: warn' \"\$A/.agent/project.yaml\""
 A="$WORK/rv-husky4"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\",\"husky\":{\"hooks\":{\"pre-commit\":\"echo\"}}}\n" > package.json' --stack node
 check "Husky v4 (package.json hooks): how-to, no .husky/ written" "[ ! -e \"\$A/.husky\" ] && grep -q 'kit-hook pre-commit' \"\$A.log\""
+
+
+# ---------------------------------------------------------------- gitflow rules (lib.sh) under different configurations
+printf '\n== gitflow rules: names, merge directions, staging, trunk, tool branches, protection\n'
+G="$WORK/gf"; fresh "$G"; (cd "$G" && git init -q && mkdir -p .agent/scripts release/x && cp "$ROOT/core/.agent/scripts/lib.sh" .agent/scripts/)
+gf() { (cd "$G" && bash -c 'source .agent/scripts/lib.sh; "$@"' _ "$@"); }   # gf <function> <args…>
+printf 'main_branch: main\ndevelop_branch: develop\n' > "$G/.agent/project.yaml"
+check "tool branches are exempt (dependabot, renovate, GitHub revert)" "[ -z \"\$(gf branch_name_problem dependabot/npm_and_yarn/lodash-4.17.21)\" ] && [ -z \"\$(gf branch_name_problem revert-123-feature/x)\" ] && [ -z \"\$(gf merge_target_problem revert-12-release/v1 main)\" ]"
+check "versions only for release/hotfix; back-merge-v1.2.0 is fine" "[ -n \"\$(gf branch_name_problem feature/1.2)\" ] && [ -z \"\$(gf branch_name_problem chore/back-merge-v1.2.0)\" ] && [ -z \"\$(gf branch_name_problem hotfix/v1.4.1)\" ]"
+check "names longer than branch_max_len are refused" "gf branch_name_problem feature/TASK-001-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | grep -q 'longer than 60'"
+check "hotfix → main and main → develop (back-merge) are allowed" "[ -z \"\$(gf merge_target_problem hotfix/v1.4.1 main)\" ] && [ -z \"\$(gf merge_target_problem main develop)\" ]"
+check "develop → main is told to go through a release" "gf merge_target_problem develop main | grep -q 'cut a release'"
+check "release/* stays protected even with a release/ folder in the repo" "gf is_protected release/v1 && ! gf is_protected staging"
+printf 'main_branch: main\ndevelop_branch: develop\nstaging_branch: staging\n' > "$G/.agent/project.yaml"
+check "staging: only develop / release / hotfix go there; staging → main ok" "gf merge_target_problem feature/x staging | grep -q 'only develop' && [ -z \"\$(gf merge_target_problem develop staging)\" ] && [ -z \"\$(gf merge_target_problem release/v1.0.0 staging)\" ] && [ -z \"\$(gf merge_target_problem staging main)\" ] && gf is_protected staging"
+printf 'main_branch: main\ndevelop_branch: main\n' > "$G/.agent/project.yaml"
+check "trunk-based: feature → main is fine"          "[ -z \"\$(gf merge_target_problem feature/TASK-1-x main)\" ]"
 
 printf '\n%d failure(s) — workdir %s\n' "$fail" "$WORK"
 [ $fail -eq 0 ]

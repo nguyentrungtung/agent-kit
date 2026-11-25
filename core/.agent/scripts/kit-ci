@@ -23,6 +23,7 @@ else
 fi
 
 ci_error() { if [ "${GITHUB_ACTIONS:-}" = true ]; then echo "::error::$*"; else echo "ERROR: $*" >&2; fi; }
+ci_warn()  { if [ "${GITHUB_ACTIONS:-}" = true ]; then echo "::warning::$*"; else echo "WARNING: $*" >&2; fi; }
 fetch_base() { # make origin/<target> available (shallow or single-branch clones do not have it)
   if [ -n "$BASE_REF" ]; then git fetch -q origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" 2>/dev/null || warn "could not fetch origin/$BASE_REF"; fi
   return 0
@@ -50,9 +51,13 @@ cmd_guard() {
   "$KIT_DIR/scripts/kit-secrets-scan" --all
   if [ "$EVENT" = pr ]; then
     [ -n "$BASE_REF" ] || die "kit-ci: a pull / merge request needs its target branch (KIT_CI_BASE)"
-    local p   # gitflow first: cheap, and the clearest message (rules: .agent/rules/core/git-workflow.md)
-    p="$(branch_name_problem "$HEAD_REF")"; [ -z "$p" ] || { ci_error "branch '$HEAD_REF': $p"; return 1; }
-    p="$(merge_target_problem "$HEAD_REF" "$BASE_REF")"; [ -z "$p" ] || { ci_error "gitflow: $p"; return 1; }
+    local p gf=""   # gitflow first: cheap, and the clearest message (rules: .agent/rules/core/git-workflow.md)
+    p="$(branch_name_problem "$HEAD_REF")"; [ -z "$p" ] || gf="branch '$HEAD_REF': $p"
+    p="$(merge_target_problem "$HEAD_REF" "$BASE_REF")"; [ -z "$p" ] || gf="${gf:+$gf · }gitflow: $p"
+    if [ -n "$gf" ]; then
+      if [ "$(gitflow_mode)" = block ]; then ci_error "$gf"; return 1; fi
+      ci_warn "$gf (gitflow_enforce: warn — set it to block in .agent/project.yaml once open branches follow the convention)"
+    fi
     fetch_base
     if command -v gitleaks >/dev/null 2>&1; then gitleaks detect --no-banner --redact --log-opts="origin/$BASE_REF..HEAD"
     else warn "gitleaks not installed — history scan skipped"; fi

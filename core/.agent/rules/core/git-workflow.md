@@ -23,8 +23,13 @@ A production bug is a **hotfix** (from main); a bug found while testing develop/
 `<type>/<TASK-NNN>-<short-description>` — e.g. `feature/TASK-042-export-csv`, `bugfix/TASK-051-null-ngay-tiep-nhan`, `hotfix/v1.4.1`,
 `release/v1.5.0`.
 - type: one of `branch_types` (default `feature feat bugfix fix hotfix release support refactor chore docs test ci perf build style revert`).
-- description: lowercase kebab-case `a-z 0-9 -` (no spaces, underscores, accents or capitals), optionally led by an issue key
-  (`TASK-042`, `PROJ-12`); release/hotfix/support may be a version. At most `branch_max_len` (60) characters in total.
+- description: lowercase kebab-case `a-z 0-9 -` (no spaces, underscores, accents or capitals), led by the kit task id `TASK-NNN` on
+  code branches (feature/bugfix/fix/hotfix/refactor — the CI task gates read it; an external issue key goes in the task file, not the
+  name); it may end in a version (`chore/back-merge-v1.2.0`); release/hotfix/support may be just a version. At most `branch_max_len` (60).
+- Branches made by tools are not checked: `branch_exempt_regex` (Dependabot, Renovate, Snyk, GitHub's revert button `revert-123-…`,
+  merge queues).
+- `gitflow_enforce: block` (new projects) fails CI on a wrong name or merge direction; `warn` (projects upgraded from < 0.14) only warns —
+  switch to `block` once the open branches follow the convention (renaming a pushed branch closes its open PR: rename before opening one).
 - `kit-task start` creates the right name and base for the task's type (`--type feature|bugfix|hotfix|refactor|chore|docs|test|ci|perf`).
 
 ## Commits and PRs

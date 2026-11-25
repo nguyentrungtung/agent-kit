@@ -861,6 +861,7 @@ sync_project_keys() { # add keys that newer kits introduced; never change values
   while IFS= read -r line; do
     k="$(printf '%s' "$line" | sed -n 's/^\([a-z_][a-z_0-9]*\):.*/\1/p')"; [ -n "$k" ] || continue
     case "$line" in *'{{'*) continue ;; esac
+    [ "$k" = gitflow_enforce ] && line="gitflow_enforce: warn        # upgraded project: CI only warns about branch names / merge directions — set block when ready"
     grep -q "^$k:" "$cfg" || { echo "$line" >> "$cfg"; added="$added $k"; }
   done < "$CORE/.agent/project.yaml.tpl"
   [ -z "$added" ] || say "project.yaml: added new keys:$added"

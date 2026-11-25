@@ -36,26 +36,34 @@ protected_branches() { printf '%s %s %s %s\n' "$(main_branch)" "$(develop_branch
 #   feature/ feat/ bugfix/ fix/ refactor/ chore/ docs/ test/ ci/ perf/ build/ style/ revert/  from develop → develop
 #   release/vX.Y.Z  from develop → main (+ back-merge to develop) · hotfix/…  from main → main (+ back-merge to develop) · support/…  old majors
 branch_types() { cfg branch_types 'feature feat bugfix fix hotfix release support refactor chore docs test ci perf build style revert'; }
+# branches created by tools (dependency bots, GitHub's revert button, merge queues) follow their own naming: never checked
+branch_exempt() { printf '%s' "$1" | grep -Eq "$(cfg branch_exempt_regex '^(dependabot/|renovate/|snyk-|revert-[0-9]+-|gh-readonly-queue/)')"; }
+gitflow_mode() { cfg gitflow_enforce block; }   # block = CI fails · warn = CI only warns (kit upgrade writes warn for projects from < 0.14)
 branch_name_problem() { # branch_name_problem <branch> — prints why the name breaks the convention (nothing = fine)
-  local b="$1" t rest max
+  local b="$1" t rest max ver='v?[0-9]+([.][0-9]+){1,2}'
   case " $(main_branch) $(develop_branch) $(staging_branch) main master develop " in *" $b "*) return 0 ;; esac
+  if branch_exempt "$b"; then return 0; fi
   t="${b%%/*}"; rest="${b#*/}"
-  if [ "$t" = "$b" ] || [ -z "$rest" ]; then echo "no '<type>/' prefix — use <type>/<TASK-NNN>-<short-description>, type one of: $(branch_types)"; return 0; fi
+  if [ "$t" = "$b" ] || [ -z "$rest" ]; then echo "no '<type>/' prefix — use <type>/TASK-NNN-<short-description>, type one of: $(branch_types)"; return 0; fi
   case " $(branch_types) " in *" $t "*) ;; *) echo "type '$t' is not one of: $(branch_types)"; return 0 ;; esac
   max="$(cfg branch_max_len 60)"
   if [ "${#b}" -gt "$max" ]; then echo "longer than $max characters"; return 0; fi
-  # the description: lowercase kebab-case, optionally led by an issue key (TASK-001-…, PROJ-12-…); release/hotfix/support may be a version
-  printf '%s' "$rest" | grep -Eq '^([A-Z][A-Z0-9]*-[0-9]+(-[a-z0-9]+)*|v?[0-9]+[.][0-9]+([.][0-9]+)?(-[a-z0-9.]+)?|[a-z0-9]+(-[a-z0-9]+)*)$' \
-    || echo "after '$t/' use lowercase kebab-case (a-z 0-9 -), optionally led by an issue key (TASK-001-…) or, for release/hotfix, a version (v1.4.0)"
+  # description: lowercase kebab-case, led by the kit task id (TASK-NNN) on code branches, may end in a version (back-merge-v1.2.0);
+  # release/hotfix/support may be just a version (release/v1.5.0)
+  case "$t" in release|hotfix|support) if printf '%s' "$rest" | grep -Eq "^${ver}(-[a-z0-9.]+)?\$"; then return 0; fi ;; esac
+  printf '%s' "$rest" | grep -Eq "^([A-Z][A-Z0-9]*-[0-9]+(-[a-z0-9]+)*|[a-z0-9]+(-[a-z0-9]+)*)(-${ver})?\$" \
+    || echo "after '$t/' use TASK-NNN-<lowercase-kebab-case> (a-z 0-9 -); release/hotfix may be a version (v1.4.0)"
   return 0
 }
 merge_target_problem() { # merge_target_problem <source branch> <target branch> — prints why gitflow forbids that merge (nothing = fine)
   local h="$1" b="$2" mb db sb
   mb="$(main_branch)"; db="$(develop_branch)"; sb="$(staging_branch)"
   [ "$mb" != "$db" ] || return 0   # trunk-based: everything goes to main
+  if branch_exempt "$h"; then return 0; fi
   if [ "$b" = "$mb" ] || [ "$b" = master ]; then
     case "$h" in release/*|hotfix/*) return 0 ;; esac
-    [ -n "$sb" ] && [ "$h" = "$sb" ] && return 0
+    if [ -n "$sb" ] && [ "$h" = "$sb" ]; then return 0; fi
+    if [ "$h" = "$db" ]; then echo "$db does not go straight to $b — cut a release from it (kit-release prepare → release/vX.Y.Z), test it on staging, then PR the release into $b"; return 0; fi
     echo "only release/* or hotfix/*$( [ -n "$sb" ] && echo " (or $sb)") merge into $b (go-live) — open '$h' into $db"; return 0
   fi
   if [ -n "$sb" ] && [ "$b" = "$sb" ]; then
@@ -66,11 +74,14 @@ merge_target_problem() { # merge_target_problem <source branch> <target branch> 
 }
 
 is_protected() { # is_protected <branch>
-  local b="$1" p
-  for p in $(protected_branches); do
+  local b="$1" p list
+  list="$(protected_branches)"
+  set -f   # release/* must stay a pattern, not be expanded against folders of the repo
+  for p in $list; do
     # shellcheck disable=SC2053
-    [[ "$b" == $p ]] && return 0
+    if [[ "$b" == $p ]]; then set +f; return 0; fi
   done
+  set +f
   return 1
 }
 

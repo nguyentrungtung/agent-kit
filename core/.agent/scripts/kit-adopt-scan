@@ -120,17 +120,21 @@ if [ -n "$scan_paths" ]; then
   hits="$(find $scan_paths -type f 2>/dev/null | grep -Ei '(^|/)\.env(\.[^/]*)?$|\.(pem|key|p12|pfx|jks|keystore|har)$|(^|/)id_(rsa|ed25519)|credential|service-account.*\.json$|postman.*\.json$|\.postman_(collection|environment)' \
          | grep -Ev '\.env\.(example|sample|template)$' | sed 's/$/ — file type/' || true)"
   hits="$hits
-$(grep -rnIiE --exclude-dir=.git -- '-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}|[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^/[:space:]@]{3,}@|(^|[^A-Za-z.])(api[_-]?key|secret|passw(or)?d|token|client[_-]?secret|access[_-]?key)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9/+_.=-]{8,}' $scan_paths 2>/dev/null \
+$(grep -rnHIiE --exclude-dir=.git -- '-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}|[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^/[:space:]@]{3,}@|(^|[^A-Za-z.])(api[_-]?key|secret|passw(or)?d|token|client[_-]?secret|access[_-]?key)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9/+_.=-]{8,}' $scan_paths 2>/dev/null \
     | grep -viE '(example|changeme|placeholder|<[a-z_]+>|\$\{|xxxx|\*\*\*)' \
     | awk -F: '{ l=tolower($0); k="secret-like value"; if (l ~ /private key/) k="private key"; else if (l ~ /akia/) k="AWS key"; else if (l ~ /eyj/) k="JWT";
                  else if (l ~ /:\/\/[^\/]*:[^\/]*@/) k="password in URL"; else if (match(l, /(api[_-]?key|client[_-]?secret|access[_-]?key|secret|passw(or)?d|token)/)) k=substr(l, RSTART, RLENGTH);
                  print $1 ":" $2 " — " k }' | sort -u | head -n 60 || true)"
-  # personal data in samples (API responses pasted into docs): a person's name, phone, e-mail, national id, birth date, address with a value
+  # personal data in samples (API responses pasted into docs): a person's name, phone, e-mail, national id, birth date, address with a value.
+  # -H: the file name is always printed (GNU grep omits it for a single file, and the value would then show); only key names are reported.
   hits="$hits
-$(grep -rnIiE --exclude-dir=.git -- '"?(applicant_?name|full_?name|first_?name|last_?name|[a-z_]*_full_name|ho_?ten|ho_va_ten|ten_cong_dan|ten_nguoi[a-z_]*|nguoi_nop|phone|mobile|so_dien_thoai|sdt|e_?mail|cccd|cmnd|so_dinh_danh_ca_nhan|ngay_sinh|dob|date_of_birth|dia_chi_thuong_tru|home_address)"?[[:space:]]*[:=][[:space:]]*"[^"<{]{3,}"' $scan_paths 2>/dev/null \
-    | grep -viE '(ẩn danh|anonym|example|placeholder|xxx|nguyen van a|john doe|\*\*\*)' \
-    | awk -F: '{ l = tolower($0); k = "personal data"; if (match(l, /(applicant_?name|full_?name|first_?name|last_?name|[a-z_]*_full_name|ho_?ten|ho_va_ten|ten_cong_dan|ten_nguoi[a-z_]*|nguoi_nop|phone|mobile|so_dien_thoai|sdt|e_?mail|cccd|cmnd|so_dinh_danh_ca_nhan|ngay_sinh|dob|date_of_birth|dia_chi_thuong_tru|home_address)/)) k = "personal data (" substr(l, RSTART, RLENGTH) ")"
-                 print $1 ":" $2 " — " k }' | sort -u | head -n 60 || true)"
+$(grep -rnHIiE --exclude-dir=.git -- '(^|[^a-z0-9_])["'"'"']?(applicant_?name|full_?name|first_?name|last_?name|[a-z_]*_full_?name|ho_?ten|ho_va_ten|ten_cong_dan|ten_nguoi[a-z_]*|nguoi_nop|phone|phone_?number|mobile|so_dien_thoai|sdt|e_?mail|cccd|cmnd|so_dinh_danh_ca_nhan|ngay_sinh|dob|date_of_birth|dia_chi_thuong_tru|home_address)["'"'"']?[[:space:]]*[:=]' $scan_paths 2>/dev/null \
+    | awk '{ f = $0; sub(/:.*/, "", f); r = substr($0, length(f) + 2); n = r; sub(/:.*/, "", n); c = tolower(substr(r, length(n) + 2))
+        if (!match(c, /(applicant_?name|full_?name|first_?name|last_?name|[a-z_]*_full_?name|ho_?ten|ho_va_ten|ten_cong_dan|ten_nguoi[a-z_]*|nguoi_nop|phone_?number|phone|mobile|so_dien_thoai|sdt|e_?mail|cccd|cmnd|so_dinh_danh_ca_nhan|ngay_sinh|dob|date_of_birth|dia_chi_thuong_tru|home_address)/)) next
+        k = substr(c, RSTART, RLENGTH); v = substr(c, RSTART + RLENGTH); sub(/^["\047]?[[:space:]]*[:=][[:space:]]*/, "", v); gsub(/["\047,]/, "", v); sub(/[[:space:]]+$/, "", v)
+        if (length(v) < 3 || v ~ /^(null|none|true|false|string|text|varchar|character varying|<.*>|\{.*\}|\$.*)$/) next
+        if (v ~ /(ẩn danh|an danh|anonym|example|placeholder|xxx|nguyen van a|john doe|\*\*\*)/) next
+        print f ":" n " — personal data (" k ")" }' | sort -u | head -n 60 || true)"
   if command -v gitleaks >/dev/null 2>&1; then
     tmp="$(mktemp)"
     for p in $scan_paths; do gitleaks detect --no-git --no-banner --redact --exit-code 0 --source "$p" --report-format json --report-path "$tmp" >/dev/null 2>&1 || true

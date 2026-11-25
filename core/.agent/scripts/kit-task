@@ -44,7 +44,7 @@ require_task_branch() {
   is_protected "$(current_branch)" && die "refusing to operate on protected branch $(current_branch)"
   printf '%s' "$id"
 }
-slugify() { ascii_slug "$1" 40; }
+slugify() { local s; s="$(ascii_slug "$1" 40)"; printf '%s' "${s:-task}"; }   # a title with no Latin letters still gives a valid name
 log_progress() { # log_progress <file> <text>
   local f="$1"; shift
   if grep -q '^## Progress log' "$f"; then
@@ -537,7 +537,7 @@ issue_body() { # issue_body <task-content> <file-name>
 ensure_labels() {
   local l
   for l in "status:todo:ededed" "status:in-progress:fbca04" "status:review:1d76db" "status:done:0e8a16" "status:abandoned:b60205" \
-           "type:feature:a2eeef" "type:fix:d73a4a" "type:hotfix:b60205" "type:refactor:c5def5" "type:chore:ededed" "type:docs:0075ca" "type:test:bfd4f2" \
+           "type:feature:a2eeef" "type:feat:a2eeef" "type:bugfix:d73a4a" "type:fix:d73a4a" "type:hotfix:b60205" "type:refactor:c5def5" "type:chore:ededed" "type:docs:0075ca" "type:test:bfd4f2" "type:ci:ededed" "type:perf:fbca04" \
            "priority:P1:b60205" "priority:P2:fbca04" "priority:P3:c2e0c6"; do
     iss_label "${l%:*}" "${l##*:}"
   done
@@ -585,7 +585,7 @@ cmd_pull() {
   json="$(iss_view "$n")" || die "cannot read issue #$n"
   title="$(printf '%s' "$json" | jq -r .title)"; body="$(printf '%s' "$json" | jq -r '.body // ""')"
   labels="$(printf '%s' "$json" | jq -r '.labels[]?' | tr '\n' ' ')"
-  case " $labels " in *" bug "*|*"type:fix"*) type=fix ;; *"type:hotfix"*) type=hotfix ;; *"type:chore"*) type=chore ;; *"type:docs"*) type=docs ;; *"type:refactor"*) type=refactor ;; esac
+  case " $labels " in *" bug "*|*"type:bugfix"*) type=bugfix ;; *"type:fix"*) type=fix ;; *"type:hotfix"*) type=hotfix ;; *"type:chore"*) type=chore ;; *"type:docs"*) type=docs ;; *"type:refactor"*) type=refactor ;; esac
   case " $labels " in *"priority:P1"*) prio=P1 ;; *"priority:P3"*) prio=P3 ;; esac
   id="$(cmd_new "$title" --type "$type" --priority "$prio" | tail -n1)"
   f="$(task_file "$id")"; fm_set "$f" issue "$n"; issue_set "$id" "$n"

@@ -15,8 +15,10 @@ develop_branch: develop      # integration + UAT (gitflow); set to "main" for tr
 staging_branch:              # optional long-lived pre-production branch (e.g. staging); empty = release/* is what STAGING runs
 branch_types: feature feat bugfix fix hotfix release support refactor chore docs test ci perf build style revert
 branch_max_len: 60           # <type>/<TASK-NNN>-<kebab-case-description>, checked by CI (kit-ci guard) and pre-push
+gitflow_enforce: block       # block = CI fails on a bad branch name / merge direction · warn = CI only warns
+branch_exempt_regex: ^(dependabot/|renovate/|snyk-|revert-[0-9]+-|gh-readonly-queue/)   # tool-made branches, never checked
 protected_extra: master release/* hotfix/*
-protected_regex: ^(main|master|develop|staging|release/.*|hotfix/.*)$
+protected_regex: ^(main|master|develop|release/.*|hotfix/.*)$
 push_checkpoints: true       # push task branch to origin on every checkpoint (remote backup)
 
 # --- Tasks & Git hosting ---
