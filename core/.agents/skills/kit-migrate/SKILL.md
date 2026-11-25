@@ -55,8 +55,14 @@ Every reference to an old path must point to its new place before the old file g
 ## 5. Before sharing (scan §4) — only when the answer in step 1 was "shared"
 - Every item must be resolved: remove the value (keep the name, point to `.env.example`), redact the export, or keep that file ignored
   (add a precise line such as `docs/reference/**/*.postman_collection.json` — never re-ignore the whole folder).
+- A finding that is not a secret (a column description, a path such as `.htpasswd:/etc/…`) is a **human's call**: show it (value
+  masked) and let them choose — fix the text, `kit:allow-secret` on that line, or a gitleaks fingerprint in `.gitleaksignore` for a
+  generated file. Never allowlist on your own.
 - Then delete the `.gitignore` lines of scan §5 that hide kit files, AGENTS.md and docs/. Run `.agent/scripts/kit-secrets-scan --all`
   and `git status` — read the list of newly visible files before staging anything.
+- **Run the gates again** (`kit-run format_check lint`, the repo's pre-commit): tools that honour `.gitignore` now see `docs/`, `.agent/`,
+  `.agents/` — e.g. ruff lints archived scripts in docs and formats Python blocks inside `.md` rules. Exclude those folders in the tool's
+  config (`extend-exclude` in ruff, `ignorePatterns` in ESLint…), never by weakening a rule.
 
 ## 6. Merge what the kit left next to your files (scan §6, §7)
 - Each `X.kit-new` → merge into `X`, delete the `.kit-new`. `*.bak-kit` → delete once the merged settings work.

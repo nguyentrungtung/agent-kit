@@ -215,20 +215,25 @@ gi_needed() { # gi_needed <src> <dest .gitignore> — the patterns of <src> the 
   done < "$1"
   rm -rf "$tmp"
 }
-append_gitignore() { # append_gitignore <src> <dest> [block] — only what the repo's .gitignore does not cover; block = inside ">>> agent-kit" markers
+append_gitignore() { # append_gitignore <src> <dest> [rebuild] — add the patterns the repo's .gitignore does not cover yet, always INSIDE the
+  # ">>> agent-kit" block (stack and module lines too), so a later upgrade can tell the kit's lines from the user's.
+  # rebuild (core block, existing-repo upgrade): first drop the block and recompute it; the stack/module calls that follow add theirs back.
   local need
-  if [ "${3:-}" = block ] && [ -f "$2" ] && grep -q '>>> agent-kit' "$2"; then
-    [ $UPGRADE -eq 1 ] && [ $EXISTING -eq 1 ] || return 0
-    awk '/^# >>> agent-kit/{skip=1; next} /^# <<< agent-kit/{skip=0; next} !skip' "$2" > "$2.kit-tmp"
-    need="$(gi_needed "$1" "$2.kit-tmp")"
-    { cat "$2.kit-tmp"; [ -z "$need" ] || printf '# >>> agent-kit\n%s\n# <<< agent-kit\n' "$need"; } > "$2.kit-tmp2"
-    if cmp -s "$2" "$2.kit-tmp2"; then rm -f "$2.kit-tmp2"; else mv "$2.kit-tmp2" "$2"; note ".gitignore: the kit block now holds only lines your rules do not already cover"; fi
-    rm -f "$2.kit-tmp"; return 0
+  if [ "${3:-}" = rebuild ] && [ -f "$2" ] && grep -q '>>> agent-kit' "$2" && [ $UPGRADE -eq 1 ] && [ $EXISTING -eq 1 ]; then
+    awk '/^# >>> agent-kit/{skip=1; next} /^# <<< agent-kit/{skip=0; next} !skip' "$2" > "$2.kit-tmp" && mv "$2.kit-tmp" "$2"
   fi
   need="$(gi_needed "$1" "$2")"
-  [ -n "$need" ] || return 0
-  [ -f "$2" ] && [ -n "$(tail -c1 "$2")" ] && echo >> "$2"
-  if [ "${3:-}" = block ]; then printf '# >>> agent-kit\n%s\n# <<< agent-kit\n' "$need" >> "$2"; else printf '%s\n' "$need" >> "$2"; fi
+  if [ -n "$need" ]; then
+    if [ -f "$2" ] && grep -q '^# <<< agent-kit' "$2"; then   # into the existing block
+      printf '%s\n' "$need" > "$2.kit-add"
+      awk -v af="$2.kit-add" '/^# <<< agent-kit/ { while ((getline l < af) > 0) print l } { print }' "$2" > "$2.kit-tmp" && mv "$2.kit-tmp" "$2"
+      rm -f "$2.kit-add"
+    else
+      [ -f "$2" ] && [ -n "$(tail -c1 "$2")" ] && echo >> "$2"
+      printf '# >>> agent-kit\n%s\n# <<< agent-kit\n' "$need" >> "$2"
+    fi
+  fi
+  return 0
 }
 
 merge_settings() {
@@ -238,7 +243,7 @@ merge_settings() {
   fi
   if [ -f "$theirs" ] && [ $FORCE -eq 0 ] && command -v jq >/dev/null 2>&1; then
     cmp -s "$ours" "$theirs" && { record .claude/settings.json; return 0; }
-    cp "$theirs" "$theirs.bak-kit"
+    [ -e "$theirs.bak-kit" ] || cp "$theirs" "$theirs.bak-kit"   # the first backup is the user's original — never overwrite it
     jq -s '
       def uniq_cat(a;b): ((a // []) + (b // [])) | unique;
       .[0] as $t | .[1] as $o |
@@ -457,7 +462,7 @@ install_core() {
     copy_file "$f" "$TARGET/$rel"
   done < <(find "$CORE" -type f -print0)
   merge_settings
-  append_gitignore "$CORE/gitignore.kit" "$TARGET/.gitignore" block
+  append_gitignore "$CORE/gitignore.kit" "$TARGET/.gitignore" rebuild
   append_block "$CORE/gitattributes.kit" "$TARGET/.gitattributes"
   # an env template the repo keeps somewhere else (platform/.env.example, app.env.example…) is enough — no second one at the root
   local other_env; other_env="$(find "$TARGET" -maxdepth 3 \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type f \( -name '.env.example' -o -name '*.env.example' -o -name '.env.sample' -o -name '.env.template' \) -not -path "$TARGET/.env.example" -print 2>/dev/null | head -n1)"
@@ -814,7 +819,7 @@ sync_project_keys() { # add keys that newer kits introduced; never change values
   local cfg="$TARGET/.agent/project.yaml" step name k line added=""
   for step in $STEPS; do
     grep -q "^cmd_$step:" "$cfg" && continue
-    name="CMD_$step"; printf 'cmd_%s: %s\n' "$step" "${!name}" >> "$cfg"; added="$added cmd_$step"
+    name="CMD_$step"; kv_line "cmd_$step" "${!name}" >> "$cfg"; added="$added cmd_$step"
   done
   while IFS= read -r line; do
     k="$(printf '%s' "$line" | sed -n 's/^\([a-z_][a-z_0-9]*\):.*/\1/p')"; [ -n "$k" ] || continue
@@ -831,11 +836,12 @@ write_project_yaml() {
     cfg="$cfg.kit-new"
   fi
   tmp="$(mktemp)"
-  for step in $STEPS; do name="CMD_$step"; printf 'cmd_%s: %s\n' "$step" "${!name}" >> "$tmp"; done
+  for step in $STEPS; do name="CMD_$step"; kv_line "cmd_$step" "${!name}" >> "$tmp"; done
   awk -v cf="$tmp" '/\{\{COMMANDS\}\}/{while((getline l < cf)>0) print l; next} {print}' "$CORE/.agent/project.yaml.tpl" \
     | sed -e "s|{{NAME}}|$PROJECT_NAME|" -e "s|{{DESCRIPTION}}|TODO|" -e "s|{{KIT_VERSION}}|$VERSION|" \
           -e "s|{{STACK}}|${C_STACK[0]}|" -e "s|{{COMPONENTS}}|$(components_str)|" -e "s|{{MODULES}}|$MODS|" \
-          -e "s|^docs_language: vi|docs_language: $LANG_DOCS|" -e "s|^git_provider:[[:space:]]*#|git_provider: $PROVIDER   #|" > "$cfg"
+          -e "s|^docs_language: vi|docs_language: $LANG_DOCS|" -e "s|^git_provider:[[:space:]]*#|git_provider: $PROVIDER   #|" \
+          -e 's/[[:space:]]*$//' > "$cfg"   # no trailing spaces (empty values), trailing-whitespace hooks would rewrite the file
   rm -f "$tmp"; CREATED=$((CREATED+1))
   [ "${cfg%.kit-new}" = "$cfg" ] || return 0
   # keep a lock with the selection (for kit add / upgrades)
@@ -846,14 +852,15 @@ write_project_yaml() {
 
 # .agent/kit.cmds = the cmd_* the kit generated last time. On upgrade a value still equal to it was not edited by the user, so the
 # kit may replace it with what it generates now; anything else is the user's and stays.
+kv_line() { if [ -n "$2" ]; then printf '%s: %s\n' "$1" "$2"; else printf '%s:\n' "$1"; fi; }   # no trailing space (trailing-whitespace hooks)
 save_generated_cmds() {
   local step name
   { echo "# cmd_* as generated by kit $VERSION — kit upgrade only replaces a project.yaml value that still equals this one"
-    for step in $STEPS; do name="CMD_$step"; printf 'cmd_%s: %s\n' "$step" "${!name}"; done; } > "$TARGET/.agent/kit.cmds"
+    for step in $STEPS; do name="CMD_$step"; kv_line "cmd_$step" "${!name}"; done; } > "$TARGET/.agent/kit.cmds"
 }
 cmd_of() { sed -n "s/^$2:[[:space:]]*//p" "$1" | head -n1 | sed -E 's/[[:space:]]+#[^&|;]*$//; s/[[:space:]]+$//'; }
 set_cmd() { # set_cmd <file> <key> <value>
-  V="$3" awk -v k="$2" 'index($0, k ":") == 1 { print k ": " ENVIRON["V"]; next } { print }' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+  V="$3" awk -v k="$2" 'index($0, k ":") == 1 { print k ":" (ENVIRON["V"] == "" ? "" : " " ENVIRON["V"]); next } { print }' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
 }
 # An install made before kit.cmds existed has no baseline: a value counts as the kit's own only when every "(cd <dir> && …)" segment is
 # a command some stack of this project ships (wrappers such as `uv run`, `--extra dev`, `--ignore=…` aside). `make lint` is the user's.
@@ -883,17 +890,17 @@ reconcile_cmds() { # upgrade: bring untouched cmd_* up to date; for installs wit
   for step in $STEPS; do
     grep -q "^cmd_$step:" "$cfg" || continue
     name="CMD_$step"; new="${!name}"; cur="$(cmd_of "$cfg" "cmd_$step")"
-    if [ "$cur" = "$new" ]; then printf 'cmd_%s: %s\n' "$step" "$new" >> "$keep"; continue; fi
+    if [ "$cur" = "$new" ]; then kv_line "cmd_$step" "$new" >> "$keep"; continue; fi
     if [ -f "$gen" ] && grep -q "^cmd_$step:" "$gen"; then
       prev="$(cmd_of "$gen" "cmd_$step")"
       # edited by the user: theirs — keep the old baseline, so reverting the edit lets the kit update it again
-      [ "$cur" = "$prev" ] || { printf 'cmd_%s: %s\n' "$step" "$prev" >> "$keep"; continue; }
+      [ "$cur" = "$prev" ] || { kv_line "cmd_$step" "$prev" >> "$keep"; continue; }
     elif [ "$force" != 1 ] || ! kit_shaped "$cur"; then
       sug="$sug
    cmd_$step: ${cur:-(empty)}
      → ${new:-(empty)}"; continue   # no baseline: not remembered
     fi
-    printf 'cmd_%s: %s\n' "$step" "$new" >> "$keep"
+    kv_line "cmd_$step" "$new" >> "$keep"
     [ -n "$upd" ] || cp "$cfg" "$cfg.bak-kit"
     set_cmd "$cfg" "cmd_$step" "$new"; upd="$upd
    cmd_$step: ${cur:-(empty)}  →  ${new:-(empty)}"
@@ -1333,6 +1340,7 @@ cmd_upgrade() {
   fi
   EXISTING=0; [ "$mode" = existing ] && { EXISTING=1; repo_snapshot; }
   say "upgrading $TARGET: kit $from → $VERSION · mode: $mode · modules: $MODS"
+  local gi_before=""; [ -f "$TARGET/.gitignore" ] && { gi_before="$(mktemp)"; cp "$TARGET/.gitignore" "$gi_before"; }
   resolve_provider
   install_core
   local i; for i in "${!C_PATH[@]}"; do install_component "$i"; done
@@ -1342,6 +1350,7 @@ cmd_upgrade() {
   wire_harnesses; render_playbooks; insert_ci_setup
   chmod +x "$TARGET"/.agent/scripts/* "$TARGET"/.agent/hooks/*.sh "$TARGET"/.githooks/* 2>/dev/null || true
   write_manifest
+  if [ -n "$gi_before" ]; then cmp -s "$gi_before" "$TARGET/.gitignore" || note ".gitignore: the kit block was updated (only lines your own rules do not already cover)"; rm -f "$gi_before"; fi
   sed -i.bak "s/^kit_version:.*/kit_version: $VERSION/" "$lock" && rm -f "$lock.bak"
   if grep -q '^mode:' "$lock"; then sed -i.bak "s/^mode:.*/mode: $mode/" "$lock" && rm -f "$lock.bak"; else echo "mode: $mode" >> "$lock"; fi
   sed -i.bak "s/^kit_version:.*/kit_version: $VERSION/" "$cfg" && rm -f "$cfg.bak"

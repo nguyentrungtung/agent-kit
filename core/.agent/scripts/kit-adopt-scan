@@ -120,7 +120,7 @@ if [ -n "$scan_paths" ]; then
   hits="$(find $scan_paths -type f 2>/dev/null | grep -Ei '(^|/)\.env(\.[^/]*)?$|\.(pem|key|p12|pfx|jks|keystore|har)$|(^|/)id_(rsa|ed25519)|credential|service-account.*\.json$|postman.*\.json$|\.postman_(collection|environment)' \
          | grep -Ev '\.env\.(example|sample|template)$' | sed 's/$/ — file type/' || true)"
   hits="$hits
-$(grep -rnIiE --exclude-dir=.git -- '-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}|[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^/[:space:]@]{3,}@|(api[_-]?key|secret|passw(or)?d|token|client[_-]?secret|access[_-]?key)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9/+_.=-]{8,}' $scan_paths 2>/dev/null \
+$(grep -rnIiE --exclude-dir=.git -- '-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}|[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^/[:space:]@]{3,}@|(^|[^A-Za-z.])(api[_-]?key|secret|passw(or)?d|token|client[_-]?secret|access[_-]?key)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9/+_.=-]{8,}' $scan_paths 2>/dev/null \
     | grep -viE '(example|changeme|placeholder|<[a-z_]+>|\$\{|xxxx|\*\*\*)' \
     | awk -F: '{ l=tolower($0); k="secret-like value"; if (l ~ /private key/) k="private key"; else if (l ~ /akia/) k="AWS key"; else if (l ~ /eyj/) k="JWT";
                  else if (l ~ /:\/\/[^\/]*:[^\/]*@/) k="password in URL"; else if (match(l, /(api[_-]?key|client[_-]?secret|access[_-]?key|secret|passw(or)?d|token)/)) k=substr(l, RSTART, RLENGTH);

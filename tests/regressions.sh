@@ -375,6 +375,8 @@ EX_SETUP='mkdir -p ingestion transform platform tools && touch ingestion/uv.lock
   && printf "repos:\n  - repo: local\n    hooks: []\n" > .pre-commit-config.yaml \
   && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify'
 A="$WORK/ex-data"; ad "$A" "$EX_SETUP" --stack python:ingestion,dbt:transform
+check "project.yaml: no trailing spaces (trailing-whitespace hooks)" "! grep -nE ' +\$' \"\$A/.agent/project.yaml\" \"\$A/.agent/kit.cmds\""
+check "stack .gitignore lines live inside the kit block" "sed -n '/^# >>> agent-kit/,/^# <<< agent-kit/p' \"\$A/.gitignore\" | grep -qx 'dbt_packages/' && [ \"\$(grep -c '^# >>> agent-kit' \"\$A/.gitignore\")\" = 1 ]"
 check "a repo with commits is adopted as existing"   "grep -q 'mode:       existing repo' \"\$A.log\""
 check "mypy / pip-audit not used → gates empty, no mypy.ini" "[ -z \"\$(yv \"\$A\" cmd_typecheck)\" ] && [ -z \"\$(yv \"\$A\" cmd_audit)\" ] && [ ! -e \"\$A/ingestion/mypy.ini\" ] && grep -q 'does not use: mypy pip-audit' \"\$A.log\""
 check "sqlfluff not used → no lint gate, no .sqlfluff" "! grep -q sqlfluff \"\$A/.agent/project.yaml\" && [ ! -e \"\$A/transform/.sqlfluff\" ]"
@@ -400,6 +402,12 @@ rm -rf "$A/ingestion/.venv"
 "$KIT" upgrade "$A" --allow-dirty >"$A.up1.log" 2>&1 || true; "$KIT" upgrade "$A" --allow-dirty >"$A.up2.log" 2>&1 || true
 check "kit upgrade (twice) does not bring skipped configs back" "[ ! -e \"\$A/ingestion/mypy.ini\" ] && [ ! -e \"\$A/transform/.sqlfluff\" ]"
 
+# --- .claude/settings.json: the first backup is the user's original and survives later merges
+A="$WORK/ex-settings"; ad "$A" 'mkdir -p .claude && printf "{\"permissions\":{\"allow\":[\"Bash(make ORIGINAL)\"]}}\n" > .claude/settings.json && printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack node
+jq '.permissions.allow += ["Bash(make mine)"]' "$A/.claude/settings.json" > "$A/s.tmp" && mv "$A/s.tmp" "$A/.claude/settings.json"
+"$KIT" upgrade "$A" --allow-dirty >/dev/null 2>&1 || true
+check "settings.json.bak-kit still holds the original" "jq -e '.permissions.allow == [\"Bash(make ORIGINAL)\"]' \"\$A/.claude/settings.json.bak-kit\" >/dev/null && grep -q 'make mine' \"\$A/.claude/settings.json\""
+
 # --- kit-migrate: kit-adopt-scan inventories old agent rules, links into them, secrets in docs, hidden files, own CI checks
 printf '\n== kit-adopt-scan: inventory for kit-migrate (read-only, values never printed)\n'
 A="$WORK/ex-migrate"
@@ -408,6 +416,7 @@ ad "$A" 'mkdir -p agent docs/nghiep-vu docs/tham-chieu tools/checks \
   && printf "# Project\n" > agent/project.md && printf "Read agent/rules-security.md first\n" > docs/nghiep-vu/flow.md \
   && printf "{\"client_secret\": \"Zq8vK2mN4pR7sT1w\"}\n" > docs/tham-chieu/api.postman_collection.json \
   && printf "db: postgres://etl:S3cretPw@db:5432/x\n" > docs/nghiep-vu/conn.md \
+  && printf "volumes:\n  - ./config/.htpasswd:/etc/nginx/.htpasswd:ro\n" > docs/nghiep-vu/gateway.md \
   && printf "print(1)\n" > tools/checks/check_registry.py \
   && printf "stages: [test]\nchecks:\n  stage: test\n  script:\n    - python3 tools/checks/check_registry.py\n" > .gitlab-ci.yml \
   && printf "AGENTS.md\nagent/\ndocs/\n" > .gitignore && printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json \
@@ -419,6 +428,7 @@ check "§1 own AGENTS.md and agent/ found"             "sec 1 | grep -q '\`AGENT
 check "§2 every link into agent/ listed"             "sec 2 | grep -q 'AGENTS.md:2 → agent/rules-security.md' && sec 2 | grep -q 'docs/nghiep-vu/flow.md:1 → agent/rules-security.md'"
 check "§3 own docs folders kept, not kit slots"      "sec 3 | grep -q 'docs/nghiep-vu/.*yours'"
 check "§4 Postman export + secret-like values found" "sec 4 | grep -q 'api.postman_collection.json — file type' && sec 4 | grep -q 'conn.md:1 — password in URL'"
+check "§4 a .htpasswd mount path is not a password"  "! sec 4 | grep -q 'gateway.md'"
 check "§4 never prints the values"                   "! printf '%s\n' \"\$scan\" | grep -q 'S3cretPw' && ! printf '%s\n' \"\$scan\" | grep -q 'Zq8vK2mN4pR7sT1w'"
 check "§5 the .gitignore lines that hide them"       "sec 5 | grep -q '.gitignore:1 .AGENTS.md.' && sec 5 | grep -q '.gitignore:3 .docs/.'"
 check "§6 .kit-new left to merge"                    "sec 6 | grep -q 'AGENTS.md.kit-new'"
@@ -496,6 +506,7 @@ else printf '  skip kit-dq (sqlite3 not installed)\n'; fi
 # ---------------------------------------------------------------- kit-catalog + kit-doc-coverage (module data)
 printf '\n== kit-catalog / kit-doc-coverage: which data to use, and how much of it is documented\n'
 A="$WORK/catalog"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node --modules data
+check "lakehouse decisions + failure modes shipped"   "[ -f \"\$A/.agent/rules/data/lakehouse.md\" ] && grep -q 'lakehouse.md' \"\$A/.agents/skills/kit-data/SKILL.md\""
 check "catalog templates + kit-catalog skill installed" "for f in README entities metrics rules; do [ -f \"\$A/docs/data/catalog/\$f.md\" ] || exit 1; done && [ -L \"\$A/.claude/skills/kit-catalog\" ] && grep -q 'docs/data/catalog' \"\$A/.agents/skills/kit-da/SKILL.md\""
 mkdir -p "$A/transform/target"; printf 'name: "lake"\nprofile: lake\n' > "$A/transform/dbt_project.yml"
 cat > "$A/transform/target/manifest.json" <<'JSON'
