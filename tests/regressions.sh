@@ -330,10 +330,10 @@ check "hand-written .git/hooks kept (hooksPath unset)" "[ -z \"\$(hp \"\$A\")\" 
 
 # --- configs and files the repo already has are not duplicated
 A="$WORK/ad-dup"
-ad "$A" 'mkdir -p ingestion/docker platform/compose && printf "[project]\nname=\"i\"\n" > ingestion/pyproject.toml && printf "line-length = 99\n" > ruff.toml && printf "FROM python:3.12\n" > ingestion/docker/Dockerfile && printf "services: {}\n" > platform/compose/docker-compose.yml' --stack python:ingestion --modules devops
+ad "$A" 'mkdir -p ingestion/docker platform/compose && printf "[project]\nname=\"i\"\n" > ingestion/pyproject.toml && printf "line-length = 99\n" > ruff.toml && printf "FROM python:3.12\n" > ingestion/docker/Dockerfile && printf "services:\n  app: {}\n" > platform/compose/core.yml' --stack python:ingestion --modules devops
 check "root ruff.toml → no second ruff.toml in ingestion/" "[ ! -e \"\$A/ingestion/ruff.toml\" ] && grep -q 'not adding a second' \"\$A.log\""
 check "own Dockerfile kept, no generic one added"    "[ ! -e \"\$A/ingestion/Dockerfile\" ] && grep -q 'generic Dockerfile is not added' \"\$A.log\""
-check "own compose file → no compose.yaml generated" "[ ! -e \"\$A/compose.yaml\" ] && grep -q 'not generating a second compose.yaml' \"\$A.log\""
+check "own compose file (core.yml in compose/) → no compose.yaml generated" "[ ! -e \"\$A/compose.yaml\" ] && grep -q 'not generating a second compose.yaml' \"\$A.log\""
 check "cmd_up / down / logs left empty"              "[ -z \"\$(yv \"\$A\" cmd_up)\" ] && [ -z \"\$(yv \"\$A\" cmd_down)\" ]"
 A="$WORK/ad-nodup"; ad "$A" 'mkdir -p ingestion && printf "[project]\nname=\"i\"\n" > ingestion/pyproject.toml' --stack python:ingestion --modules devops
 check "without them the kit's own files are added"   "[ -f \"\$A/ingestion/ruff.toml\" ] && [ -f \"\$A/ingestion/Dockerfile\" ] && [ -f \"\$A/compose.yaml\" ] && [ -n \"\$(yv \"\$A\" cmd_up)\" ]"

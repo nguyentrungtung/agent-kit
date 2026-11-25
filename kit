@@ -333,7 +333,8 @@ config_above() { # config_above <component path> <relative file>
   while [ "$d" != "$TARGET" ] && [ "$d" != "/" ]; do
     d="$(dirname "$d")"
     if [ -f "$d/$rel" ] || { case "$rel" in ruff.toml|.ruff.toml) [ -f "$d/ruff.toml" ] || [ -f "$d/.ruff.toml" ] || grep -qs '^\[tool\.ruff' "$d/pyproject.toml" ;; *) false ;; esac; }; then
-      note "[$p] $rel: the repo already has one in ${d#"$TARGET"}${d:+/} — not adding a second that would replace it for $p/"
+      local where="${d#"$TARGET"}"; where="${where#/}"
+      note "[$p] $rel: the repo already has one in ${where:-the repo root} — not adding a second that would replace it for $p/"
       return 0
     fi
   done
@@ -479,8 +480,13 @@ apply_project_add() { # put module cmd_* lines into project.yaml (fill empty key
   rm -f "$add"
 }
 
-existing_compose() { # prints the first compose file the repo already has (any folder up to 3 deep), else nothing
-  find "$TARGET" -maxdepth 3 \( -name 'compose*.y*ml' -o -name 'docker-compose*.y*ml' \) -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.agent/*' -not -path '*/.venv/*' 2>/dev/null | head -n1
+existing_compose() { # prints the first compose file the repo already has, else nothing. By CONTENT (a top-level `services:`), not by name:
+  local f                # real repos call them platform/compose/core.yml, spark.yml, … not compose.yaml
+  while IFS= read -r f; do
+    if grep -q '^services:' "$f" 2>/dev/null; then printf '%s\n' "$f"; return 0; fi
+  done < <(find "$TARGET" -maxdepth 4 \( -name '*.yml' -o -name '*.yaml' \) -size -400k -not -name '.gitlab-ci*' \
+             -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.agent/*' -not -path '*/.venv/*' -not -path '*/dbt_packages/*' \
+             -not -path '*/target/*' -not -path '*/.github/*' -not -path '*/.gitlab/*' 2>/dev/null)
   return 0
 }
 generate_compose() {
