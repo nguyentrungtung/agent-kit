@@ -27,13 +27,14 @@ IFS= read -r -d '' PL <<'PERL' || true
 use strict; use warnings; use File::Find;
 my $mode = $ENV{KIT_TRACE_MODE}; my $root = $ENV{KIT_ROOT};
 my @out;
-sub rd { my $f = shift; open(my $fh, '<', $f) or return ''; local $/; my $s = <$fh>; close $fh; return $s // '' }
+sub rd { my $f = shift; open(my $fh, '<', $f) or return ''; local $/; my $s = <$fh>; close $fh; $s //= ''; $s =~ s/\r\n?/\n/g; return $s }   # CRLF → LF
 # blank out HTML comments (nocomments) and also fenced code blocks (blank), keeping line numbers.
 # Fences may be indented up to 3 spaces (CommonMark); the closing fence uses the same character and is at least as long.
 sub nocomments { my $s = shift; $s =~ s{<!--(.*?)-->}{"\n" x ($1 =~ tr/\n//)}gse; return $s }
 sub blank {
   my $s = nocomments(shift);
-  $s =~ s{^ {0,3}((`{3,})|(~{3,}))[^\n]*\n(.*?)^ {0,3}(?(2)\2`*|\3~*)[ \t]*$}{"\n" x (1 + ($4 =~ tr/\n//))}gmse;
+  # an unclosed fence runs to the end of the file (CommonMark)
+  $s =~ s{^ {0,3}((`{3,})|(~{3,}))[^\n]*(?:\n|\z)(.*?)(?:^ {0,3}(?(2)\2`*|\3~*)[ \t]*$|\z)}{"\n" x ((($4 // '') =~ tr/\n//) + 1)}gmse;
   return $s;
 }
 # a template row: after blanking `<placeholder>` cells (the kit's templates write placeholders in backticks), the first cell

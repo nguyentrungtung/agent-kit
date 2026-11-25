@@ -153,11 +153,12 @@ grep -E '^\| TC-0' docs/qa/TASK-001.md | cut -c1-40
 step "verify must FAIL without a recorded code review, and while a MAJOR is open"
 vrc=0; vout="$($T verify 2>&1)" || vrc=$?
 if [ "$vrc" -ne 0 ] && printf '%s\n' "$vout" | grep -q 'no code review recorded'; then echo "ok: blocked (no review)"; else echo "UNEXPECTED: missing review not reported"; exit 1; fi
+$T checkpoint "greet implemented" | tail -1   # the review covers committed code only
 $T review "BLOCKER 0 · MAJOR 1 open · MINOR 0 — by e2e" | tail -1
 vrc=0; vout="$($T verify 2>&1)" || vrc=$?
 if [ "$vrc" -ne 0 ] && printf '%s\n' "$vout" | grep -q 'open BLOCKER/MAJOR'; then echo "ok: blocked (open MAJOR)"; else echo "UNEXPECTED: open MAJOR not reported"; exit 1; fi
 $T review "BLOCKER 0 · MAJOR 1 fixed · MINOR 0 — by e2e" | tail -1
-$T checkpoint "greet implemented" | tail -1
+$T checkpoint "review recorded" | tail -1
 
 step "finish: gates + check + archive change"
 $T finish 2>&1 | grep -E '✓|✗|archiv|ERROR|no remote|OK' | grep -v 'change/add-greeting' || true

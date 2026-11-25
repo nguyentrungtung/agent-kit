@@ -71,7 +71,8 @@ first; domain terms → **mp-domain-modeling**.
   - **Accessibility (a11y)**: Standards based on WCAG 2.1 AA (color contrast ≥ 4.5:1, keyboard focus outlines, semantic HTML, aria roles).
 - **Project structure (BE + FE + contracts) → `docs/architecture/project-structure.md`**: repo layout (monorepo
   `backend/` + `frontend/` + `docs/api/`, or single app), the folder skeleton per module from `.agent/stack/<stack>/skeletons/<framework>/` (framework components) or
-  `.agent/stack/<stack>/skeletons/` (plain stack)
+  `.agent/stack/<stack>/skeletons/` (plain stack — and the fallback when the framework ships no skeleton for that style,
+  e.g. Symfony `modular` uses `.agent/stack/php/skeletons/modular.txt`)
   (`kit-new module <name> --component <path>` creates it), the 1:1 mapping backend module ↔ frontend feature, where generated API
   types live (`kit-api` §3b), shared code rules. The Full-stack Developer places every file by this document.
 - **Patterns & core logic hotspots → SOLUTION.md §7b**: read `PATTERNS.md` (this folder). For each of the 3–5 hardest rules from

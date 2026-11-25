@@ -299,6 +299,11 @@ cmd_review() { # cmd_review "<summary>" — log the latest code review; the summ
     [ "$n" -eq 0 ] || printf '%s' "$msg" | grep -qE "$sev $n (fixed|open)([^A-Za-z]|$)" \
       || die "'$sev $n' must be followed by 'fixed' or 'open' (e.g. \"$sev $n fixed\")"
   done
+  # the reviewer reads the committed diff (kit-review: base...HEAD) — bind the record to that snapshot: no uncommitted code
+  local dirty
+  dirty="$(git -c core.quotePath=false status --porcelain --untracked-files=all | cut -c4- | sed 's/.* -> //' | grep -vE "$PLANNING_RE"'|\.md$' || true)"
+  [ -z "$dirty" ] || die "commit (or stash) code changes before recording the review — the reviewer saw only committed code:
+$(printf '%s\n' "$dirty" | sed 's/^/  /' | head -n 10)"
   log_progress "$(task_file "$id")" "Review: $msg [code $(code_fingerprint)]"   # verify: code changed after the review → stale
   info "review recorded in $(basename "$(task_file "$id")")"
 }
@@ -331,8 +336,12 @@ cmd_verify() {
   if [ "$tpl" -ge 2 ]; then
     ticks="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*- \[[xX]\]' || true)"
     open_box="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*- \[ \]' || true)"
-    if [ "${ticks:-0}" -ge 8 ] && [ "${open_box:-0}" -eq 0 ]; then gate ok "2 ambiguity checklist walked ($ticks/8)"
-    else gate no "2 Clarifications: tick every item of the ambiguity checklist ($ticks ticked, $open_box open) — an item that does not apply is ticked too, with 'n/a: <why>' after it"; fi
+    local dim missing=""   # each of the 8 dimensions must be present AND ticked (extra items are fine, renaming one is not)
+    for dim in 'Actor & permission' 'Data & validation' 'Edge cases' 'Errors' 'Numbers' 'State' 'Integrations' 'Scope'; do
+      printf '%s\n' "$s2" | grep -qiE "^[[:space:]]*- \[[xX]\][[:space:]]+\**$dim([^A-Za-z]|$)" || missing="$missing${missing:+, }$dim"
+    done
+    if [ -z "$missing" ] && [ "${open_box:-0}" -eq 0 ]; then gate ok "2 ambiguity checklist walked ($ticks ticked)"
+    else gate no "2 Clarifications: tick every item of the ambiguity checklist (${missing:+not ticked/missing: $missing; }$open_box open) — an item that does not apply is ticked too, with 'n/a: <why>' after it"; fi
   else
     [ -n "$s2" ] && gate ok "2 Clarifications recorded (legacy task file without checklist — template < 2)" \
       || gate no "2 Clarifications empty — record the Q&A (legacy task file; new ones use the 8-item checklist)"

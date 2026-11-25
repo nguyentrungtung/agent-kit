@@ -12,9 +12,9 @@ sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -d' ' -f1
     for p in $( { git log --all --format= --name-only -- 'stacks/*/frameworks/*/skeletons/*'; ls stacks/*/frameworks/*/skeletons/* 2>/dev/null; } | sort -u); do
       key="$(printf '%s' "$p" | sed -E 's#^stacks/([^/]+)/frameworks/([^/]+)/skeletons/#\1/\2/#')"
       for c in $(git log --all --format=%H -- "$p"); do
-        git cat-file -e "$c:$p" 2>/dev/null && printf '%s  %s\n' "$(git show "$c:$p" | sha)" "$key"
+        if git cat-file -e "$c:$p" 2>/dev/null; then printf '%s  %s\n' "$(git show "$c:$p" | sha)" "$key"; fi
       done
-      [ -f "$p" ] && printf '%s  %s\n' "$(sha < "$p")" "$key"
+      if [ -f "$p" ]; then printf '%s  %s\n' "$(sha < "$p")" "$key"; fi   # deleted since: history only, no failing status
     done
   } | sort -k2 -k1 -u
 } > stacks/skeleton-hashes.txt

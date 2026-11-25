@@ -414,7 +414,7 @@ apply_project_add() { # put module cmd_* lines into project.yaml (fill empty key
     while IFS= read -r l; do
       k="${l%%:*}"; [ -z "$k" ] && continue
       if grep -q "^$k:[[:space:]]*$" "$cfg"; then   # literal replacement: the line may contain # & / \ (comments, URLs)
-        K="$k" L="$l" perl -i -pe 's/^\Q$ENV{K}\E:[ \t]*$/$ENV{L}/' "$cfg"
+        K="$k" L="$l" perl -i -pe 's/^\Q$ENV{K}\E:[ \t]*(\r?)$/$ENV{L}$1/' "$cfg"   # keeps a CRLF ending
       elif ! grep -q "^$k:" "$cfg"; then echo "$l" >> "$add"; fi
     done < "$MODULES/$m/project.add"
   done

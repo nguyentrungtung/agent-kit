@@ -5,7 +5,7 @@
 # Usage: tests/regressions.sh [workdir]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; KIT="$ROOT/kit"
-WORK="${1:-$(mktemp -d)}"; mkdir -p "$WORK"
+WORK="${1:-$(mktemp -d)}"; mkdir -p "$WORK"; WORK="$(cd "$WORK" && pwd)"   # absolute: cases cd around
 export GIT_AUTHOR_NAME=kit GIT_AUTHOR_EMAIL=kit@example.invalid GIT_COMMITTER_NAME=kit GIT_COMMITTER_EMAIL=kit@example.invalid
 fail=0
 check() { if eval "$2"; then printf '  ok   %s\n' "$1"; else printf '  FAIL %s\n' "$1"; fail=$((fail+1)); fi; }
@@ -152,14 +152,31 @@ printf '\n== a review goes stale when code changes after it; "Docs: none" accept
 out="$(cd "$d" && .agent/scripts/kit-task review "BLOCKER 0 · MAJOR 0 — by test" >/dev/null && mkdir -p src && echo 'export const x = 1;' > src/later.js \
   && { .agent/scripts/kit-task verify 2>&1 || true; })"
 check "code after the review → stale"               "printf '%s\n' \"\$out\" | grep -q 'code changed after the last review'"
-out="$(cd "$d" && .agent/scripts/kit-task review "BLOCKER 0 · MAJOR 0 — before unicode" >/dev/null && echo 'export const y = 2;' > 'src/tài-khoản.js' \
+out="$(cd "$d" && git add -A && git commit -qm wip --no-verify && .agent/scripts/kit-task review "BLOCKER 0 · MAJOR 0 — before unicode" >/dev/null && echo 'export const y = 2;' > 'src/tài-khoản.js' \
   && { .agent/scripts/kit-task verify 2>&1 || true; })"
 check "a non-ASCII file name also makes it stale"   "printf '%s\n' \"\$out\" | grep -q 'code changed after the last review'"
-out="$(cd "$d" && .agent/scripts/kit-task review "BLOCKER 0 · MAJOR 0 — re-reviewed" >/dev/null && { .agent/scripts/kit-task verify 2>&1 || true; })"
+rc=0; (cd "$d" && .agent/scripts/kit-task review "BLOCKER 0 · MAJOR 0 — uncommitted" >/dev/null 2>&1) || rc=$?
+check "review refused while code is uncommitted"   "[ $rc -ne 0 ]"
+out="$(cd "$d" && git add -A && git commit -qm wip --no-verify && .agent/scripts/kit-task review "BLOCKER 0 · MAJOR 0 — re-reviewed" >/dev/null && { .agent/scripts/kit-task verify 2>&1 || true; })"
 check "re-recorded review is current"               "printf '%s\n' \"\$out\" | grep -q '6 code review recorded'"
 out="$(cd "$d" && f="$(ls .agent/tasks/TASK-001-*.md)" && perl -0pi -e 's/(## 7\. Result\n(?:<!--.*?-->\n)?)/$1- **Docs:** none — internal helper\n/s' "$f" \
   && { .agent/scripts/kit-task verify 2>&1 || true; })"
 check "'- **Docs:** none' accepted"                 "printf '%s\n' \"\$out\" | grep -q 'living docs updated with the code'"
+
+printf '\n== the checklist gate needs each of the 8 dimensions ticked, not just 8 ticks\n'
+out="$(cd "$d" && f="$(ls .agent/tasks/TASK-002-*.md)" && perl -pi -e 's/^- \[ \] /- [x] /' "$f" && { .agent/scripts/kit-task verify TASK-002 2>&1 || true; })"
+check "all 8 dimensions ticked → walked"            "printf '%s\n' \"\$out\" | grep -q '2 ambiguity checklist walked'"
+out="$(cd "$d" && f="$(ls .agent/tasks/TASK-002-*.md)" && perl -pi -e 's/^- \[x\] Numbers.*$/- [x] Something unrelated/' "$f" && { .agent/scripts/kit-task verify TASK-002 2>&1 || true; })"
+check "a replaced dimension is reported missing"    "printf '%s\n' \"\$out\" | grep -q 'missing: Numbers'"
+
+printf '\n== kit add fills an empty key in a CRLF project.yaml and keeps the CRLF ending\n'
+c="$WORK/crlf"; fresh "$c"
+(cd "$c" && git init -q && printf '{"name":"x","version":"1.0.0"}\n' > package.json)
+"$KIT" init "$c" --stack node --modules none --yes --no-deps --no-setup --no-tools >"$c.log" 2>&1
+perl -pi -e 's/^cmd_api:.*\n//; s/^(cmd_audit:.*)$/$1\ncmd_api:/' "$c/.agent/project.yaml" && perl -pi -e 's/\r?\n/\r\n/g' "$c/.agent/project.yaml"
+"$KIT" add api --dir "$c" --yes >>"$c.log" 2>&1 || true
+check "empty CRLF key filled"                        "grep -q \$'^cmd_api: npx .*\\r\$' \"\$c/.agent/project.yaml\""
+check "key not duplicated"                           "[ \"\$(grep -c '^cmd_api:' \"\$c/.agent/project.yaml\")\" = 1 ]"
 
 printf '\n== kit-trace: placeholder rows, real rows with < and ..., ids outside docs/ba, negative-path wording\n'
 t="$WORK/trace"; fresh "$t"; mkdir -p "$t/.agent/scripts" "$t/docs/ba/stories" "$t/docs/architecture"
@@ -175,7 +192,12 @@ story US-02 "If the card is declined Then an error banner shows"
 story US-03 "Given a user When opening Then the dashboard shows if data exists"
 story US-04 "Given a viewer
 - AC2 — If the user lacks permission Then a 403 page shows"
+printf '```text\r\nUS-71 inside a CRLF fence\r\n```\r\nUS-72 after the closed fence\r\n' > "$t/docs/ba/crlf.md"
+printf 'See US-73 before.\n~~~\nUS-74 in a fence that is never closed\n' > "$t/docs/ba/unclosed.md"
 out="$(cd "$t" && git init -q && { .agent/scripts/kit-trace 2>&1 || true; })"
+check "id inside a CRLF fence is ignored"           "! printf '%s\n' \"\$out\" | grep -q 'US-71 is referenced'"
+check "id after a closed CRLF fence is checked"     "printf '%s\n' \"\$out\" | grep -q 'US-72 is referenced'"
+check "unclosed fence masks to end of file"         "! printf '%s\n' \"\$out\" | grep -q 'US-74 is referenced' && printf '%s\n' \"\$out\" | grep -q 'US-73 is referenced'"
 check "real rows with < and ... define their ids"   "! printf '%s\n' \"\$out\" | grep -qE 'BR-0[78] is referenced'"
 check "a filled row with a placeholder Stories cell" "! printf '%s\n' \"\$out\" | grep -q 'FR-05 is referenced'"
 check "template placeholder rows define nothing"    "printf '%s\n' \"\$out\" | grep -q 'BR-01 is referenced' && printf '%s\n' \"\$out\" | grep -q 'NFR-02 is referenced'"

@@ -31,7 +31,7 @@ human is available (step 5) — never on silent guesses. Technique: with module 
 4. Record every Q and A in `docs/ba/BRIEF.md` › *Clarifications Q&A* (who, date). Unanswered + blocking → stop and wait.
 5. No human available → write each unknown as `ASSUMPTION: <your recommended answer>` in BRIEF.md and continue drafting (status
    stays `draft`). `kit-trace assumptions` lists them; `kit-task verify`/`finish` scans `docs/ba/BRIEF.md` and blocks every task
-   until a human rewrites each one as `CONFIRMED: <answer> (who, date)`.
+   created from the 0.11 template (`template: 2`; older in-flight tasks are exempt) until a human rewrites each one as `CONFIRMED: <answer> (who, date)`.
 6. Repeat a round after modelling (step 4) if new unknowns appear (exceptions, states, rules).
 
 | Dim | Ask about | Example questions (adapt to the domain — do not copy) |
@@ -88,7 +88,7 @@ Run `.agent/scripts/kit-run docs` (renders every Mermaid/PlantUML block; fails o
 (every UC/US/BR/FR id referenced exists; warns on stories without UC/AC/negative AC, FRs without stories). Fix until green.
 
 ## 8. Quality gate (all true before kit-plan)
-- [ ] Clarification round asked (≥ 3 questions covering dimensions A, B, C) and recorded in BRIEF.md — each one answered, or an
+- [ ] Clarification round asked (≥ 3 questions covering dimensions A, B, C — fewer only for a one-story change) and recorded in BRIEF.md — each one answered, or an
       `ASSUMPTION:` shown to the human (`kit-trace assumptions`). kit-plan may start on assumptions only when none of them changes scope.
 - [ ] `kit-trace` has 0 errors.
 - [ ] Every goal measurable; scope and out-of-scope explicit.
