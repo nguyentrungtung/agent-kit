@@ -33,7 +33,8 @@ A production bug is a **hotfix** (from main); a bug found while testing develop/
 - `kit-task start` creates the right name and base for the task's type (`--type feature|bugfix|hotfix|refactor|chore|docs|test|ci|perf`).
 
 ## Commits and PRs
-- Conventional Commits `<type>(<scope>): <imperative subject>` ≤ 100 chars, body explains WHY, trailer `Refs: TASK-NNN`.
+- Conventional Commits `<type>(<scope>): <imperative subject>` ≤ `commit_subject_max` chars (default 100), body explains WHY, trailer `Refs: TASK-NNN`.
+  Language of subject and body: the project's rule if it has one (e.g. `.agent/rules/project/`), else `docs_language`; scopes: the project's list.
   Types: `feat fix chore docs style refactor perf test build ci revert sec`. Breaking change → `!` + `BREAKING CHANGE:` footer.
 - Small commits that each build and pass tests (checkpoints). Formatting-only changes in their own commit.
 - Rebase the task branch on `develop` **before** opening the PR; never rewrite pushed shared history; no merge commits from develop into a task branch.
