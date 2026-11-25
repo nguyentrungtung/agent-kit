@@ -14,6 +14,10 @@ The Data engineer (`kit-data`) builds pipelines; the Data analyst checks what th
   failure, and the rows never go into docs, tasks, commits or chat — describe them ("12 rows with a 10-digit ma_dinh_danh").
 - Production is queried only with the human's go-ahead for that environment; prefer the CI/dev target or a sample.
 
+## 0. Read the catalog first
+`docs/data/catalog/README.md` (which table for which question), `entities.md`, `metrics.md`, `rules.md` (mandatory filters, gotchas) and the
+dbt `.yml` of the tables you touch. Missing or wrong there → fix it with **kit-catalog** as part of this task, not after.
+
 ## 1. Question and scope
 Which dataset (layer: bronze/silver/gold), which consumer and decision, what "right" means for them (from the data contract in
 `docs/data/contracts/` and `docs/ba/`). Unknown rule → ask, do not guess the threshold.
@@ -36,6 +40,7 @@ Add a short analysis under the generated table: what failed, likely cause (sourc
 next step. Numbers only, no row values. Discrepancies with an external provider → a question list for them (what we see, period, query).
 
 ## 5. Make it stick
+- A meaning, formula or filter you had to discover → written back to `docs/data/catalog/` (kit-catalog) in the same task.
 - A rule that must always hold → a **dbt test** on the model (hand off to `kit-data`, write it red first) or keep the `kit-dq` check and run
   it in the pipeline/CI against the CI target.
 - A rule nobody owns yet → a task (`kit-task new … --type fix`) with the check attached as its acceptance test.

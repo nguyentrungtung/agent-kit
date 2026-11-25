@@ -493,6 +493,36 @@ if command -v sqlite3 >/dev/null 2>&1; then
   check "one check by path (the last file not matching is fine)" "[ $rc -eq 0 ] && printf '%s\n' \"\$out\" | grep -q '1 check(s): 0 failed'"
 else printf '  skip kit-dq (sqlite3 not installed)\n'; fi
 
+# ---------------------------------------------------------------- kit-catalog + kit-doc-coverage (module data)
+printf '\n== kit-catalog / kit-doc-coverage: which data to use, and how much of it is documented\n'
+A="$WORK/catalog"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node --modules data
+check "catalog templates + kit-catalog skill installed" "for f in README entities metrics rules; do [ -f \"\$A/docs/data/catalog/\$f.md\" ] || exit 1; done && [ -L \"\$A/.claude/skills/kit-catalog\" ] && grep -q 'docs/data/catalog' \"\$A/.agents/skills/kit-da/SKILL.md\""
+mkdir -p "$A/transform/target"; printf 'name: "lake"\nprofile: lake\n' > "$A/transform/dbt_project.yml"
+cat > "$A/transform/target/manifest.json" <<'JSON'
+{"nodes": {
+  "model.lake.mart_a": {"resource_type": "model", "package_name": "lake", "name": "mart_a", "unique_id": "model.lake.mart_a",
+    "original_file_path": "models/gold/mart_a.sql", "description": "Schools per day",
+    "columns": {"ma_truong": {"description": "School code"}, "so_hs": {"description": "  "}}},
+  "model.lake.silver_b": {"resource_type": "model", "package_name": "lake", "name": "silver_b", "unique_id": "model.lake.silver_b",
+    "original_file_path": "models/silver/silver_b.sql", "description": "", "columns": {}},
+  "model.dbt_utils.x": {"resource_type": "model", "package_name": "dbt_utils", "name": "x", "unique_id": "model.dbt_utils.x",
+    "original_file_path": "models/x.sql", "description": "", "columns": {"c": {"description": ""}}},
+  "test.lake.t": {"resource_type": "test", "package_name": "lake", "name": "t", "unique_id": "test.lake.t", "original_file_path": "tests/t.sql", "description": ""}},
+ "sources": {"source.lake.raw.hs": {"package_name": "lake", "source_name": "raw", "name": "hs", "unique_id": "source.lake.raw.hs",
+    "original_file_path": "models/bronze/sources.yml", "description": "Students from the provider", "columns": {}}}}
+JSON
+out="$(cd "$A" && .agent/scripts/kit-doc-coverage transform --list 2>&1 || true)"
+check "per layer: objects and columns documented"     "printf '%s\n' \"\$out\" | grep -Eq '^gold +1 +1 \(100%\) +1/2 +\( 50%\)' && printf '%s\n' \"\$out\" | grep -Eq '^silver +1 +0 \(  0%\)'"
+check "other packages and tests are not counted"      "printf '%s\n' \"\$out\" | grep -Eq '^TOTAL +3 +2 '"
+check "--list names the gaps (blank description = missing)" "printf '%s\n' \"\$out\" | grep -q 'silver_b — no description' && printf '%s\n' \"\$out\" | grep -q 'mart_a — columns: so_hs'"
+printf '{"nodes": {"model.lake.mart_a": {"columns": {"ma_truong": {}, "so_hs": {}, "nam_hoc": {}}}}, "sources": {}}\n' > "$A/transform/target/catalog.json"
+out="$(cd "$A" && .agent/scripts/kit-doc-coverage transform --list 2>&1 || true)"
+check "catalog.json: warehouse columns missing from .yml count too" "printf '%s\n' \"\$out\" | grep -Eq '^gold .* 1/3 ' && printf '%s\n' \"\$out\" | grep -q 'columns: nam_hoc,so_hs'"
+rc=0; (cd "$A" && .agent/scripts/kit-doc-coverage transform --min 80 >/dev/null 2>&1) || rc=$?
+check "--min fails below the threshold"               "[ $rc -eq 1 ]"
+rc=0; (cd "$A" && .agent/scripts/kit-doc-coverage transform --min 30 >/dev/null 2>&1) || rc=$?
+check "--min passes at or above it"                   "[ $rc -eq 0 ]"
+
 # ---------------------------------------------------------------- issue sync: GitLab (REST) and GitHub (gh) behind one interface
 printf '\n== kit-task sync / pull: GitLab through its REST API (fake server), GitHub through gh (fake gh)\n'
 issue_project() { # issue_project <dir> <provider> <remote-url> → a kit project on develop with git_provider set

@@ -7,6 +7,10 @@ description: Data engineering design and delivery — analytics architecture (ba
 Rules: `.agent/rules/data/` + stack rules (`dbt`, `python` + airflow/pyspark). Living docs: `docs/data/`. Changes: OpenSpec schema **data-flow**
 (`.agent/scripts/kit-new change <name> --schema data-flow`). Decisions → ADR. Never touch production data — `ci`/`dev` targets only.
 
+## 0. Know the data
+Read `docs/data/catalog/` (kit-catalog) before designing or writing SQL. Every new source, model or mart ships with its column
+descriptions in the dbt `.yml` and its line in the catalog — `.agent/scripts/kit-doc-coverage --list` shows what is missing.
+
 ## 1. Start from the consumer (not the source)
 Read `docs/ba/` and ask ONE batch (or **mp-grilling** rounds): which decisions/dashboards/models consume the data, the business questions,
 required **freshness** (e.g. by 07:00 ICT), history depth/backfill window, volumes and growth, accuracy tolerance, PII involved, budget.
