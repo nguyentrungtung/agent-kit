@@ -437,6 +437,38 @@ check "clean repo: nothing to migrate"               "sec 1 | grep -q 'None foun
 A="$WORK/ex-new"; ad "$A" "$EX_SETUP" --stack python:ingestion,dbt:transform --mode new
 check "--mode new: full set-up in an existing repo"  "grep -q '^cmd_typecheck:.*mypy' \"\$A/.agent/project.yaml\" && [ -f \"\$A/ingestion/mypy.ini\" ]"
 
+# --- upgrading an install made by an older kit (the real case: a repo adopted before 0.13 got the full set-up)
+printf '\n== kit upgrade of an existing repo: untouched cmd_* follow the kit, --mode existing re-adopts an old install\n'
+A="$WORK/up-old"; ad "$A" "$EX_SETUP" --stack python:ingestion,dbt:transform --mode new
+sed -i.bak '/^mode:/d' "$A/.agent/kit.lock" && rm -f "$A/.agent/kit.lock.bak" "$A/.agent/kit.cmds"          # = installed before 0.13
+sed -i.bak -e 's#^cmd_lint:.*#cmd_lint: make lint#' \
+  -e 's#^cmd_install:.*#cmd_install: (cd ingestion \&\& uv sync) \&\& (cd transform \&\& dbt deps)#' \
+  -e 's#^cmd_test:.*#cmd_test: (cd ingestion \&\& uv run pytest -q) \&\& (cd transform \&\& dbt build --target ci --exclude package:dbt_project_evaluator)#' \
+  "$A/.agent/project.yaml" && rm -f "$A/.agent/project.yaml.bak"   # what kit 0.12 generated, plus one user edit (make lint)
+(cd "$A" && rm -f ./*.kit-new && git add -A && git -c core.hooksPath=/dev/null commit -qm "chore: add agent-kit" --no-verify)
+"$KIT" upgrade "$A" >"$A.up1.log" 2>&1 || true
+check "no mode in kit.lock: upgrade as new, say how to re-adopt" "grep -q 'kit upgrade --mode existing' \"\$A.up1.log\" && grep -q '^cmd_typecheck:.*mypy' \"\$A/.agent/project.yaml\""
+check "old install: differing cmd_* only suggested"   "grep -q 'would set these commands differently' \"\$A.up1.log\" && grep -q '^cmd_install: (cd ingestion && uv sync) ' \"\$A/.agent/project.yaml\""
+check "no baseline guessed for them in kit.cmds"     "! grep -q '^cmd_install:' \"\$A/.agent/kit.cmds\""
+(cd "$A" && git add -A && git -c core.hooksPath=/dev/null commit -qm "chore: upgrade kit" --no-verify)
+"$KIT" upgrade "$A" --mode existing >"$A.up2.log" 2>&1 || true
+check "--mode existing: kit's untouched mypy.ini / .sqlfluff removed" "[ ! -e \"\$A/ingestion/mypy.ini\" ] && [ ! -e \"\$A/transform/.sqlfluff\" ] && grep -q 'removed ingestion/mypy.ini' \"\$A.up2.log\""
+check "--mode existing: commands as an existing-repo init" "[ -z \"\$(yv \"\$A\" cmd_typecheck)\" ] && grep -q '^cmd_test: (cd ingestion && uv run pytest -q --ignore=tests/live)\$' \"\$A/.agent/project.yaml\" && grep -q 'uv run --project ../ingestion dbt deps' \"\$A/.agent/project.yaml\""
+check "a user-edited cmd_* is never replaced"         "grep -q '^cmd_lint: make lint\$' \"\$A/.agent/project.yaml\""
+check "backup kept, mode stored in kit.lock"          "[ -f \"\$A/.agent/project.yaml.bak-kit\" ] && grep -q '^mode: existing' \"\$A/.agent/kit.lock\""
+check ".gitignore kit block trimmed to what is not covered" "! sed -n '/>>> agent-kit/,/<<< agent-kit/p' \"\$A/.gitignore\" | grep -qx '.env' && grep -qx '.agent/local/' \"\$A/.gitignore\""
+cp "$A/.agent/project.yaml" "$A.before"; "$KIT" upgrade "$A" --allow-dirty >"$A.up3.log" 2>&1 || true
+check "next upgrade changes nothing more"             "cmp -s \"\$A/.agent/project.yaml\" \"\$A.before\" && [ ! -e \"\$A/ingestion/mypy.ini\" ] && ! grep -q 'removed ' \"\$A.up3.log\""
+# kit.cmds: a value the user never edited follows the kit; an edited one stays
+A="$WORK/up-cmds"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\",\"scripts\":{\"test\":\"x\"}}\n" > package.json' --stack node
+check "init remembers generated commands (kit.cmds)" "grep -q '^cmd_test:' \"\$A/.agent/kit.cmds\" && grep -q '^mode: new' \"\$A/.agent/kit.lock\""
+for k in cmd_test cmd_lint; do sed -i.bak "s#^$k:.*#$k: old-kit-$k#" "$A/.agent/project.yaml" "$A/.agent/kit.cmds"; done
+sed -i.bak 's#^cmd_lint:.*#cmd_lint: my-own-lint#' "$A/.agent/project.yaml"; rm -f "$A"/.agent/*.bak
+(cd "$A" && rm -f ./*.kit-new && git add -A && git -c core.hooksPath=/dev/null commit -qm "chore: base" --no-verify)
+"$KIT" upgrade "$A" >"$A.up.log" 2>&1 || true
+check "untouched cmd_* updated to the new kit's"     "! grep -q 'old-kit-cmd_test' \"\$A/.agent/project.yaml\" && grep -q '^cmd_test: ' \"\$A/.agent/project.yaml\""
+check "edited cmd_* kept"                             "grep -q '^cmd_lint: my-own-lint\$' \"\$A/.agent/project.yaml\""
+
 # ---------------------------------------------------------------- issue sync: GitLab (REST) and GitHub (gh) behind one interface
 printf '\n== kit-task sync / pull: GitLab through its REST API (fake server), GitHub through gh (fake gh)\n'
 issue_project() { # issue_project <dir> <provider> <remote-url> → a kit project on develop with git_provider set
