@@ -1,0 +1,1 @@
+pip install -q uv ruff mypy pytest pytest-cov pip-audit import-linter

@@ -37,10 +37,13 @@ is_protected() { # is_protected <branch>
   return 1
 }
 
-git_provider() { # github | gitlab — project.yaml git_provider, else guessed from the remote URL (self-hosted GitLab: set git_provider)
+git_provider() { # github | gitlab | none — project.yaml git_provider, else guessed (kit init writes it explicitly; self-hosted: set it)
   local p; p="$(cfg git_provider)"
-  if [ -z "$p" ]; then
-    case "$(git remote get-url "${KIT_REMOTE:-origin}" 2>/dev/null || true)" in *gitlab*) p=gitlab ;; *) p=github ;; esac
+  if [ -z "$p" ]; then   # same rules as `kit init` (detect_provider): remote host, then the CI files the repo already has
+    case "$(git remote get-url "${KIT_REMOTE:-origin}" 2>/dev/null || true)" in
+      *github*) p=github ;; *gitlab*) p=gitlab ;;
+      *) if [ -f "$KIT_ROOT/.gitlab-ci.yml" ] || [ -d "$KIT_ROOT/.gitlab" ]; then p=gitlab; else p=github; fi ;;
+    esac
   fi
   printf '%s' "$p"
 }

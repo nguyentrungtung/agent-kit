@@ -16,7 +16,47 @@ problems=0
 echo "agent-kit doctor — $(cfg name "$(basename "$KIT_ROOT")") · components: $(cfg components "$(cfg stack)")"
 
 echo "Setup"
-if [ "$(git config --get core.hooksPath 2>/dev/null)" = ".githooks" ]; then ok "git hooks active (.githooks)"; else bad "git hooks NOT active — run: git config core.hooksPath .githooks"; fi
+hp="$(git config --get core.hooksPath 2>/dev/null || true)"
+if [ "$hp" = ".githooks" ]; then ok "git hooks active (.githooks)"
+else  # a hook manager (Husky, lefthook, …) may own the hooks and call the kit through kit-hook
+  missing=""
+  for h in pre-commit commit-msg pre-push; do
+    grep -qs 'kit-hook' ".husky/$h" 2>/dev/null || grep -qsE "kit-hook +$h" lefthook.* .lefthook.* .pre-commit-config.yaml 2>/dev/null || missing="$missing $h"
+  done
+  case "$missing" in
+    "") ok "git hooks chained through your hook manager (kit-hook)" ;;
+    " pre-push") ok "pre-commit + commit-msg chained through your hook manager (kit-hook)"; meh "pre-push is not chained — protected-branch pushes are then only stopped by the server" ;;
+    " pre-commit commit-msg pre-push")
+      if [ -f .pre-commit-config.yaml ] || [ -d .husky ] || ls lefthook.* .lefthook.* >/dev/null 2>&1; then
+        bad "your hook manager does not call the kit yet — add .agent/scripts/kit-hook to it (the exact lines: kit init prints them; header of .agent/scripts/kit-hook), then reinstall its hooks"
+      else bad "git hooks NOT active — run: git config core.hooksPath .githooks   (or keep your hook manager and chain the kit: see .agent/scripts/kit-hook)"; fi ;;
+    *) bad "kit hooks only partly chained — missing:$missing (see .agent/scripts/kit-hook)" ;;
+  esac
+  if [ -z "$hp" ] && [ ! -f .git/hooks/pre-commit ] && [ "$missing" != " pre-commit commit-msg pre-push" ]; then
+    meh "hooks are wired but not installed in git yet — run your manager's install (npm install for Husky, lefthook install)"
+  fi
+fi
+# kit files the repo's own .gitignore hides: they would exist on this machine only
+ign="$( { printf '%s\n' AGENTS.md CLAUDE.md .claude/settings.json .agent/project.yaml .githooks/pre-commit; awk '!/^#/ {print $2}' .agent/kit.manifest 2>/dev/null; } \
+       | awk 'NF && !seen[$0]++' | while IFS= read -r f; do [ -e "$f" ] && printf '%s\n' "$f"; done | git check-ignore --stdin 2>/dev/null \
+       | awk -F/ '{ k = (NF > 1 ? $1 "/" : $1); if (!seen[k]++) printf " %s", k }' || true)"
+[ -z "$ign" ] || meh "your .gitignore ignores kit files:$ign — teammates and CI will not see them (remove those lines to share the kit)"
+# CI files of the other Git host are dead weight
+prov="$(git_provider)"
+if [ "$prov" = gitlab ] && [ -d .github/workflows ]; then meh ".github/workflows exists but git_provider is gitlab — GitHub Actions do not run there (delete it, or set git_provider: github)"; fi
+if [ "$prov" = github ] && [ -f .gitlab-ci.yml ] && [ -z "$(git remote get-url origin 2>/dev/null | grep -i github || true)" ]; then meh ".gitlab-ci.yml exists but git_provider is github — check 'git_provider' in .agent/project.yaml"; fi
+# dbt commands that say --target ci need that target, or they run against whatever the default target is (maybe a real warehouse)
+for comp in $(cfg components); do
+  cpath="${comp%%=*}"; cst="${comp#*=}"; cst="${cst%%+*}"
+  [ "$cst" = dbt ] || continue
+  printf '%s' "$(cfg cmd_typecheck)$(cfg cmd_arch)$(cfg cmd_test)$(cfg cmd_build)" | grep -q -- '--target ci' || continue
+  have=0; for pf in "$cpath/profiles.yml" "${DBT_PROFILES_DIR:-$HOME/.dbt}/profiles.yml"; do [ -f "$pf" ] && grep -qE '^[[:space:]]+ci:[[:space:]]*$' "$pf" && have=1; done
+  [ $have -eq 1 ] || bad "dbt ($cpath): cmd_* use --target ci but no 'ci' target in profiles.yml — they would hit another target. Add one (see .agent/stack/dbt/snippets/profiles.example.yml, a DuckDB target) or clear those cmd_*"
+done
+# agent rules the repo had before the kit: two sets of rules drift apart — move them in (kit-migrate)
+old=""; for d in agent agents .ai .cursor/rules .clinerules; do [ -d "$d" ] && [ -n "$(find "$d" -type f -name '*.md' 2>/dev/null | head -n1)" ] && old="$old $d/"; done
+[ -f AGENTS.md.kit-new ] && old="$old AGENTS.md.kit-new"
+[ -z "$old" ] || meh "old agent rules next to the kit's:$old — run the kit-migrate playbook (starts from .agent/scripts/kit-adopt-scan)"
 if grep -q 'TODO' .agent/context/PROJECT.md 2>/dev/null; then meh "PROJECT.md still has TODOs — run the kit-onboard (existing code) or kit-ba (new project) playbook"; else ok "context filled"; fi
 n_rules=$(find .agent/rules -name '*.md' 2>/dev/null | grep -vc README || true)
 if [ "${n_rules:-0}" -gt 0 ]; then ok "$n_rules rule file(s) in .agent/rules"; else bad "no rules in .agent/rules"; fi
@@ -35,7 +75,18 @@ check_cmd() { # check_cmd <step> <command>
     case "${1:-}" in
       npx) shift; [ "${1:-}" = "--no-install" ] && shift ;;
       pnpm|yarn) [ "${2:-}" = exec ] && shift 2 || { exe="$1"; } ;;
-      uv) [ "${2:-}" = run ] && shift 2 ;;
+      uv|poetry|pdm|hatch|pipenv|rye) # "<runner> run <tool>": the tool lives in the project's own environment — only the runner is checked
+        if [ "${2:-}" = run ]; then
+          local runner="$1" proj="$dir"; shift 2
+          while [ -n "${1:-}" ] && [ "${1#-}" != "$1" ]; do
+            case "$1" in --project|--directory) proj="$dir/$2"; shift 2 ;; --with|--group|--extra|--python) shift 2 ;; *) shift ;; esac
+          done
+          if ! command -v "$runner" >/dev/null 2>&1; then echo "missing|$dir|$runner"
+          elif [ "$runner" = uv ] && [ -d "$proj/.venv/bin" ] && [ -n "${1:-}" ] && [ ! -x "$proj/.venv/bin/$1" ] && ! command -v "$1" >/dev/null 2>&1; then
+            echo "notinenv|$dir|$1|${proj#./}"   # the env exists but lacks the tool: the gate fails at the first run
+          else echo "ok|$dir|$runner run ${1:-}"; fi
+          continue
+        fi ;;
       test|bash|sh) echo "ok|$dir|$1"; continue ;;
       .agent/*|./.agent/*) echo "ok|$dir|$1"; continue ;;
     esac
@@ -56,10 +107,11 @@ for step in install format format_check lint typecheck arch test build audit doc
     case "$step" in format_check|lint|test) meh "cmd_$step empty — this gate is skipped" ;; esac
     continue
   fi
-  while IFS='|' read -r st dir exe; do
+  while IFS='|' read -r st dir exe proj; do
     [ -z "$st" ] && continue
     where=""; [ "$dir" != "." ] && where=" (in $dir)"
     if [ "$st" = ok ]; then ok "$step: $exe$where"
+    elif [ "$st" = notinenv ]; then bad "$step: '$exe' is not in the uv environment of $proj — add it (uv add --dev $exe) or clear cmd_$step"
     else
       case "$exe" in
         vendor/bin/*) bad "$step: $exe$where not found — run kit-run install (composer) or add the dev dependency" ;;
@@ -88,7 +140,11 @@ for m in $mods; do
                  v="$(openspec --version 2>/dev/null)"; [ "$v" = "$(cfg openspec_version)" ] && ok "openspec $v (pinned)" || meh "openspec $v installed, project pins $(cfg openspec_version) — kit-openspec will use npx"
                elif command -v npx >/dev/null 2>&1; then ok "openspec via npx (pinned $(cfg openspec_version))"
                else bad "OpenSpec needs Node.js ≥ 20.19 (no openspec/npx found)"; fi ;;
-    data)      for t in dbt sqlfluff; do command -v $t >/dev/null 2>&1 && ok "$t available" || meh "$t not installed — pip install dbt-core dbt-duckdb sqlfluff (in a venv)"; done
+    data)      for t in dbt sqlfluff; do   # also found in a uv environment of the repo (dbt-core listed in ingestion/pyproject.toml…)
+                 inenv=0; for e in ./.venv/bin/$t ./*/.venv/bin/$t; do [ -x "$e" ] && inenv=1; done
+                 if command -v $t >/dev/null 2>&1 || [ $inenv -eq 1 ]; then ok "$t available"
+                 elif grep -q "^cmd_[a-z_]*:.*\b$t\b" "$KIT_CFG"; then meh "$t not installed — pip install dbt-core dbt-duckdb sqlfluff (in a venv)"; fi
+               done
                [ -d openspec/schemas/data-flow ] && ok "OpenSpec data-flow schema present" ;;
     security)  for t in syft trivy; do command -v $t >/dev/null 2>&1 && ok "$t available" || meh "$t not installed — kit-sec-scan uses Docker images"; done ;;
     serena)    if command -v uvx >/dev/null 2>&1; then ok "uvx available (serena)"; else meh "uvx missing — brew install uv"; fi ;;

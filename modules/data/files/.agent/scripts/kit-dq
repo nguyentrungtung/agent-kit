@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# kit-dq [run] [<path|dataset|dimension>…] [--samples] [--report]   — data-quality checks in SQL, READ-ONLY (module data, playbook kit-da)
+# kit-dq new <dataset> <correct|complete|fresh|clean> <name>          — a check file from the template
+# kit-dq list                                                         — the checks, by dataset and dimension
+#
+# A check is one SELECT (or WITH … SELECT) in <dq_dir>/<dataset>/<dimension>-<name>.sql that returns the rows that VIOLATE the rule:
+# 0 rows = pass. Four dimensions — đúng / đủ / sống / sạch:
+#   correct   (đúng)  values valid and equal to the source: ranges, accepted values, sums reconciled with the source, relationships
+#   complete  (đủ)    nothing missing: row counts vs source, required columns not null, every expected day / partition present
+#   fresh     (sống)  still alive: newest load / event within the SLA, no source silently stopped sending
+#   clean     (sạch)  no duplicate keys, no malformed ids / phones / dates, no orphan rows, no stray whitespace or case variants
+# Header lines in the file:  -- severity: error|warn   -- why: <the rule in one sentence>   -- owner: <who fixes it>
+#
+# The query runs through cmd_sql in .agent/project.yaml (your client: trino / duckdb / psql / sqlite3 / spark-sql …), SQL on stdin or in
+# {file}. Use a READ-ONLY database user; credentials come from your shell environment, never from this repo. kit-dq refuses any
+# statement that writes (INSERT, UPDATE, DELETE, MERGE, CREATE, DROP, ALTER, TRUNCATE, GRANT, COPY, CALL…) — a guard, not a sandbox.
+# Only counts are printed; --samples also prints up to dq_sample_rows violating rows (they may contain personal data — never paste
+# them into docs or chats). --report writes docs/data/quality/<date>.md. Exit 1 when an error-severity check fails.
+# No backslash anywhere in a check (psql would run \! / \o meta-commands): write regexes with classes, e.g. [0-9] not \d.
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+
+DIR="$(cfg dq_dir dq)"; SQLCMD="$(cfg cmd_sql)"; NSAMPLE="$(cfg dq_sample_rows 20)"
+DIMS="correct complete fresh clean"
+dim_vi() { case "$1" in correct) echo "đúng" ;; complete) echo "đủ" ;; fresh) echo "sống" ;; clean) echo "sạch" ;; *) echo "?" ;; esac; }
+
+meta() { sed -n "s/^--[[:space:]]*$2:[[:space:]]*//p" "$1" | head -n1; }
+body() { # the statement without `--` comments (outside quotes) and without a trailing semicolon
+  awk '{
+    out = ""; q = 0
+    for (i = 1; i <= length($0); i++) {
+      c = substr($0, i, 1)
+      if (q) { out = out c; if (c == qc) q = 0; continue }
+      if (c == "\047" || c == "\"") { q = 1; qc = c; out = out c; continue }
+      if (c == "-" && substr($0, i + 1, 1) == "-") break
+      out = out c
+    }
+    print out
+  }' "$1" | awk 'NF' | sed -e ':a' -e '$!N' -e '$!ba' -e 's/;[[:space:]]*$//'
+}
+read_only() { # true = a single read statement
+  local b up
+  b="$(body "$1")"
+  # a backslash is refused outright: psql runs meta-commands (\! shell, \o / \w write files) even inside a query buffer
+  case "$b" in *\\*) return 1 ;; esac
+  # keywords are looked for outside string literals and quoted identifiers ('INSERT' as a value is fine)
+  up="$(printf '%s' "$b" | tr '\n' ' ' | sed -e "s/'[^']*'/''/g" -e 's/"[^"]*"/""/g' | tr '[:lower:]' '[:upper:]')"
+  printf '%s' "$up" | grep -Eq '^[[:space:]]*\(?[[:space:]]*(SELECT|WITH)[[:space:]]' || return 1
+  printf '%s' "$up" | grep -Eq '(^|[^A-Z0-9_])(INSERT|UPDATE|DELETE|MERGE|UPSERT|REPLACE[[:space:]]+INTO|CREATE|DROP|ALTER|TRUNCATE|GRANT|REVOKE|COPY|CALL|EXEC|EXECUTE|REFRESH|VACUUM|OPTIMIZE|ANALYZE|ATTACH|DETACH|PRAGMA|LOAD|INSTALL|EXPORT|IMPORT|UNLOAD|PUT|REMOVE)([^A-Z0-9_]|$)' && return 1
+  printf '%s' "$up" | grep -q ';' && return 1   # one statement only
+  return 0
+}
+
+run_sql() { # run_sql "<sql>" → client output
+  local tmp rc=0; tmp="$(mktemp "${TMPDIR:-/tmp}/kit-dq.XXXXXX")"; printf '%s\n' "$1" > "$tmp"
+  case "$SQLCMD" in
+    *'{file}'*) bash -c "${SQLCMD//\{file\}/$tmp}" 2>&1 || rc=$? ;;
+    *) bash -c "$SQLCMD" < "$tmp" 2>&1 || rc=$? ;;
+  esac
+  rm -f "$tmp"; return $rc
+}
+
+checks() { # checks [filter…] → matching check files
+  [ -d "$DIR" ] || return 0
+  local f keep a
+  find "$DIR" -type f -name '*.sql' | sort | while IFS= read -r f; do
+    keep=1
+    if [ $# -gt 0 ]; then keep=0
+      for a in "$@"; do case "$f" in "$a"|"$a"/*|"$DIR/$a"|"$DIR/$a"/*|*/"$a"-*.sql) keep=1 ;; esac; done
+    fi
+    if [ $keep -eq 1 ]; then printf '%s\n' "$f"; fi
+  done
+  return 0
+}
+dim_of() { local b; b="$(basename "$1")"; b="${b%%-*}"; case " $DIMS " in *" $b "*) echo "$b" ;; *) echo "?" ;; esac; }
+
+cmd_list() {
+  local f n=0
+  while IFS= read -r f; do n=$((n+1))
+    printf '%-9s %-5s %-6s %s  %s\n' "$(dim_of "$f")" "$(dim_vi "$(dim_of "$f")")" "$(meta "$f" severity)" "${f#"$DIR"/}" "$(meta "$f" why)"
+  done < <(checks)
+  [ $n -gt 0 ] || info "no checks yet in $DIR/ — kit-dq new <dataset> <correct|complete|fresh|clean> <name>"
+}
+
+cmd_new() {
+  local ds="${1:-}" dim="${2:-}" name="${3:-}" dst tpl
+  [ -n "$ds" ] && [ -n "$name" ] || die "usage: kit-dq new <dataset> <correct|complete|fresh|clean> <name>"
+  case " $DIMS " in *" $dim "*) ;; *) die "dimension must be one of: $DIMS (đúng đủ sống sạch)" ;; esac
+  name="$(printf '%s' "$name" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9_-')"
+  dst="$DIR/$ds/$dim-$name.sql"; [ -e "$dst" ] && die "$dst exists"
+  tpl="$KIT_DIR/templates/dq/$dim.sql"; [ -f "$tpl" ] || die "template $tpl missing (kit add data)"
+  mkdir -p "$(dirname "$dst")"; sed "s#{{DATASET}}#$ds#g" "$tpl" > "$dst"
+  info "created $dst — replace the placeholders, then: kit-dq run $dst"
+}
+
+cmd_run() {
+  local samples=0 report=0 args=() f dim sev res n st fails=0 warns=0 total=0 rows="" out
+  while [ $# -gt 0 ]; do case "$1" in --samples) samples=1 ;; --report) report=1 ;; *) args+=("$1") ;; esac; shift; done
+  [ -n "$SQLCMD" ] || die "cmd_sql is empty in .agent/project.yaml — set your read-only SQL client, e.g.  cmd_sql: trino --server \"\$TRINO_URL\" --user \"\$TRINO_RO_USER\" --output-format CSV   (SQL arrives on stdin, or put {file})"
+  local list; list="$(checks ${args[@]+"${args[@]}"})"
+  [ -n "$list" ] || { info "no checks match in $DIR/ (kit-dq new …)"; return 0; }
+  while IFS= read -r f; do
+    total=$((total+1)); dim="$(dim_of "$f")"; sev="$(meta "$f" severity)"; sev="${sev:-error}"
+    if ! read_only "$f"; then st="REFUSED"; n="-"; fails=$((fails+1)); res="not a single read-only SELECT — kit-dq never writes"
+    elif out="$(run_sql "SELECT COUNT(*) AS violations FROM ( $(body "$f") ) kit_dq")"; then
+      n="$(printf '%s\n' "$out" | grep -oE '[0-9]+' | tail -n1)"
+      if [ -z "$n" ]; then st="ERROR"; fails=$((fails+1)); res="no count in the client output"
+      elif [ "$n" -eq 0 ]; then st="ok"; res=""
+      elif [ "$sev" = warn ]; then st="WARN"; warns=$((warns+1)); res="$(meta "$f" why)"
+      else st="FAIL"; fails=$((fails+1)); res="$(meta "$f" why)"; fi
+    else st="ERROR"; n="-"; fails=$((fails+1)); res="$(printf '%s' "$out" | tail -n1 | cut -c1-160)"; fi
+    printf '%-7s %-9s %-5s %6s  %s%s\n' "$st" "$dim" "$(dim_vi "$dim")" "$n" "${f#"$DIR"/}" "${res:+  — $res}"
+    rows="$rows| $st | $dim ($(dim_vi "$dim")) | \`${f#"$DIR"/}\` | $n | $res |
+"
+    if [ $samples -eq 1 ] && [ "$st" = FAIL -o "$st" = WARN ]; then
+      run_sql "SELECT * FROM ( $(body "$f") ) kit_dq LIMIT $NSAMPLE" | sed 's/^/        /' || true
+    fi
+  done <<< "$list"
+  echo; info "$total check(s): $fails failed, $warns warning(s)"
+  if [ $report -eq 1 ]; then
+    local rp; rp="docs/data/quality/$(date +%Y-%m-%d).md"; mkdir -p "$(dirname "$rp")"
+    { echo "# Data quality — $(date +%Y-%m-%d)"; echo
+      echo "Checks: \`$DIR/\` · run: \`.agent/scripts/kit-dq run ${args[*]:-}\` · counts only (no row values in this report)."; echo
+      echo "| Result | Dimension | Check | Violations | Rule |"; echo "|---|---|---|---|---|"; printf '%s' "$rows"; } > "$rp"
+    info "report: $rp"
+  fi
+  [ $fails -eq 0 ]
+}
+
+case "${1:-run}" in
+  run) shift || true; cmd_run "$@" ;;
+  new) shift; cmd_new "$@" ;;
+  list) cmd_list ;;
+  -h|--help|help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) cmd_run "$@" ;;
+esac

@@ -1,0 +1,2 @@
+pip install -q dbt-core dbt-duckdb sqlfluff
+mkdir -p ~/.dbt && cp .agent/stack/dbt/snippets/profiles.example.yml ~/.dbt/profiles.yml

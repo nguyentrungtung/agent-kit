@@ -46,7 +46,7 @@ Tasks with no shared dependencies (`depends_on: []`) can run **in parallel** by 
 
 ## 5. Roadmap
 `docs/plan/ROADMAP.md`: milestones, change → tasks table, mermaid dependency graph, risks & mitigations.
-Update `docs/ba/RTM.md` (story → change → task). Optional: `kit-task sync-gh --all` (asks first).
+Update `docs/ba/RTM.md` (story → change → task). Optional: `kit-task sync --all` (asks first).
 
 ## 6. Self-check, then ask for approval
 Every Must story is in a change; every change validates; every task has AC + depends_on; no cycles; first task runnable today.

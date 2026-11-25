@@ -7,7 +7,7 @@
 1. Run `.agent/scripts/kit-context` (Claude Code does this automatically at session start).
 2. Read `.agent/memory/STATE.md` and, if on a task branch, the task file `.agent/tasks/TASK-NNN-*.md`.
 3. If `.agent/context/PROJECT.md` still contains `TODO`, the project is not onboarded yet →
-   follow the **kit-onboard** playbook before writing any code.
+   follow the **kit-onboard** playbook before writing any code (an existing repo with its own agent rules or docs: **kit-migrate** first).
 
 ## 1. Where things are (read only what the task needs)
 | Need | File |

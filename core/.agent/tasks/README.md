@@ -10,7 +10,7 @@ To maximize AI velocity while keeping context small and safe:
 - **Size L (> 350 lines)**: Too large for a single context session; split into smaller vertical slices in `kit-plan`.
 - **Parallel work**: Independent tasks run concurrently via `kit-task start TASK-NNN --worktree`.
 
-## Front matter schema (stable — read by kit-board, kit-task sync-gh and any future UI)
+## Front matter schema (stable — read by kit-board, kit-task sync and any future UI)
 | Key | Values | Set by |
 |---|---|---|
 | `id` | `TASK-NNN` | kit-task new |
@@ -24,7 +24,7 @@ To maximize AI velocity while keeping context small and safe:
 | `assignee` | agent/session or person | human / orchestrator |
 | `branch` | `<type>/TASK-NNN-slug` | kit-task start |
 | `worktree` | path relative to repo root, e.g. `../app-TASK-007` | kit-task start --worktree |
-| `issue` | GitHub issue number (pull-gh). Links made by `sync-gh` live in `.agent/tasks/.issues` (`TASK-NNN=<n>`) so task branches never conflict | kit-task sync-gh / pull-gh |
+| `issue` | Issue number on GitHub/GitLab (`pull`). Links made by `sync` live in `.agent/tasks/.issues` (`TASK-NNN=<n>`) so task branches never conflict | kit-task sync-gh / pull-gh |
 | `created` `started` `done` | `YYYY-MM-DD` | kit-task |
 
 The *effective* status shown on the board is read from the task's own branch (where `start` / `finish` record it);

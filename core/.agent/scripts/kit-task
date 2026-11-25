@@ -8,8 +8,8 @@
 #                                     --worktree: in a separate git worktree ../<repo>-<TASK-ID> (parallel agents)
 #   kit-task worktrees                list task worktrees
 #   kit-task cleanup <TASK-ID>        remove the task's worktree (refuses if it has uncommitted work)
-#   kit-task sync-gh [TASK-ID|--all]  create/update GitHub issues from task files (labels, close when done)
-#   kit-task pull-gh <issue#>         create a task file from a GitHub issue
+#   kit-task sync [TASK-ID|--all]     create/update issues (GitHub via gh, GitLab via API token) from task files (labels, close when done)
+#   kit-task pull <issue#>            create a task file from an issue   (the old names sync-gh / pull-gh still work)
 #   kit-task checkpoint "<msg>"       commit all work + tag kit/<id>/cp-N  (a restore point)
 #   kit-task review "<summary>"       record the code review in the Progress log (verify needs it), e.g.
 #                                     "BLOCKER 0 · MAJOR 1 fixed · MINOR 2 → TASK-031 — by code-reviewer"
@@ -21,6 +21,7 @@
 #   kit-task abandon                  drop the current task branch (backup branch kept)
 #   kit-task status | list
 source "$(dirname "$0")/lib.sh"
+source "$(dirname "$0")/lib-issues.sh"
 cd "$KIT_ROOT"
 mkdir -p "$KIT_TASKS"
 
@@ -474,7 +475,8 @@ cmd_finish() {
     sed -n '/^## Acceptance criteria/,/^## /p' "$f" | sed '$d'; echo
     { [ "$prov" = gitlab ] && cat "$KIT_ROOT/.gitlab/merge_request_templates/Default.md" 2>/dev/null; } \
       || cat "$KIT_ROOT/.github/PULL_REQUEST_TEMPLATE.md" 2>/dev/null || true; } > "$body"
-  if [ "$prov" = gitlab ]; then
+  if [ "$prov" = none ]; then warn "git_provider: none — open the merge/pull request yourself: $br → $base"
+  elif [ "$prov" = gitlab ]; then
     if command -v glab >/dev/null 2>&1 && glab auth status >/dev/null 2>&1; then
       glab mr create --target-branch "$base" --source-branch "$br" --title "${type:-feature}($id): $title" --description "$(cat "$body")" --yes \
         || warn "glab mr create failed — open the merge request manually"
@@ -527,11 +529,6 @@ cmd_abandon() {
   info "abandoned. Work kept in $backup; task file on this branch is untouched (status unchanged)"
 }
 
-gh_ready() {
-  [ "$(git_provider)" = github ] || die "sync-gh and pull-gh work with GitHub issues only (git_provider: $(git_provider)) — keep task files as the source of truth, or open issues by hand"
-  command -v gh >/dev/null 2>&1 || die "GitHub CLI (gh) not installed"
-  gh auth status >/dev/null 2>&1 || die "gh not authenticated — run: gh auth login"
-}
 issue_body() { # issue_body <task-content> <file-name>
   printf '%s\n' "$1" | awk '/^## Goal/{p=1} /^## (Context|Out of scope|Plan|Test cases|Risks|Progress log|Handoff)/{p=0} /^## Acceptance criteria/{p=1} p'
   printf '\n---\nTask file: `%s` · synced by agent-kit (edit the task file, not this issue body)\n' "$2"
@@ -541,13 +538,13 @@ ensure_labels() {
   for l in "status:todo:ededed" "status:in-progress:fbca04" "status:review:1d76db" "status:done:0e8a16" "status:abandoned:b60205" \
            "type:feature:a2eeef" "type:fix:d73a4a" "type:hotfix:b60205" "type:refactor:c5def5" "type:chore:ededed" "type:docs:0075ca" "type:test:bfd4f2" \
            "priority:P1:b60205" "priority:P2:fbca04" "priority:P3:c2e0c6"; do
-    gh label create "${l%:*}" --color "${l##*:}" --force >/dev/null 2>&1 || true
+    iss_label "${l%:*}" "${l##*:}"
   done
 }
 
-cmd_sync_gh() {
-  gh_ready
-  local sel="${1:---all}" name c id title st type prio issue body n url changed=0 proj
+cmd_sync() { # GitHub issues (gh) or GitLab issues (REST API) — git_provider decides
+  iss_ready
+  local sel="${1:---all}" name c id title st type prio issue body n url changed=0 proj others
   proj="$(cfg gh_project)"
   ensure_labels
   for name in $(task_names_all); do
@@ -557,18 +554,18 @@ cmd_sync_gh() {
     title="$(fmv "$c" title)"; st="$(task_effective_status "$c")"; type="$(fmv "$c" type)"; prio="$(fmv "$c" priority)"; issue="$(issue_of "$id" "$c")"
     body="$(mktemp)"; issue_body "$c" "$name" > "$body"
     if [ -z "$issue" ]; then
-      url="$(gh issue create --title "[$id] $title" --body-file "$body" --label "status:$st" --label "type:${type:-feature}" --label "priority:${prio:-P2}")" || { warn "$id: issue create failed"; rm -f "$body"; continue; }
+      url="$(iss_create "[$id] $title" "$body" "status:$st,type:${type:-feature},priority:${prio:-P2}")" || { warn "$id: issue create failed"; rm -f "$body"; continue; }
       n="${url##*/}"
       issue_set "$id" "$n"; changed=1
       info "$id → created #$n"
-      [ -n "$proj" ] && { gh project item-add "${proj#*/}" --owner "${proj%/*}" --url "$url" >/dev/null 2>&1 || warn "$id: could not add to project $proj"; }
+      [ -n "$proj" ] && [ "$(git_provider)" = github ] && { gh project item-add "${proj#*/}" --owner "${proj%/*}" --url "$url" >/dev/null 2>&1 || warn "$id: could not add to project $proj"; }
     else
       n="$issue"
-      gh issue edit "$n" --title "[$id] $title" --body-file "$body" --add-label "status:$st,type:${type:-feature},priority:${prio:-P2}" \
-         --remove-label "$(printf 'status:%s,' todo in-progress review done abandoned | sed "s/status:$st,//; s/,$//")" >/dev/null 2>&1 || warn "$id: issue edit #$n failed"
+      others="$(printf 'status:%s,' todo in-progress review done abandoned | sed "s/status:$st,//; s/,$//")"
+      iss_update "$n" "[$id] $title" "$body" "status:$st,type:${type:-feature},priority:${prio:-P2}" "$others" >/dev/null || warn "$id: issue update #$n failed"
       case "$st" in
-        done|abandoned) gh issue close "$n" --reason "$( [ "$st" = done ] && echo completed || echo 'not planned')" >/dev/null 2>&1 || true ;;
-        *) [ "$(gh issue view "$n" --json state -q .state 2>/dev/null)" = CLOSED ] && gh issue reopen "$n" >/dev/null 2>&1 || true ;;
+        done|abandoned) iss_close "$n" "$( [ "$st" = done ] && echo completed || echo not-planned)" >/dev/null 2>&1 || true ;;
+        *) iss_reopen_if_closed "$n" >/dev/null 2>&1 || true ;;
       esac
       info "$id → #$n [$st]"
     fi
@@ -577,21 +574,23 @@ cmd_sync_gh() {
   [ $changed -eq 0 ] || warn "new issue links saved in .agent/tasks/.issues — commit that file (it is never edited on task branches, so no merge conflicts)"
 }
 
-cmd_pull_gh() {
-  gh_ready
-  local n="${1:-}"; n="${n#\#}"; [ -n "$n" ] || die "usage: kit-task pull-gh <issue-number>"
+cmd_pull() {
+  iss_ready
+  local n="${1:-}"; n="${n#\#}"; [ -n "$n" ] || die "usage: kit-task pull <issue-number>"
   local existing; existing="$(sed -n "s/=$n\$//p" "$ISSUE_MAP" 2>/dev/null | head -n1)"
   [ -n "$existing" ] || existing="$(grep -l "^issue: $n\$" "$KIT_TASKS"/TASK-*.md 2>/dev/null | head -n1 || true)"
   [ -z "$existing" ] || die "issue #$n is already linked to $(basename "$existing")"
-  local title body labels type=feature prio=P2 id f
-  title="$(gh issue view "$n" --json title -q .title)" || die "cannot read issue #$n"
-  body="$(gh issue view "$n" --json body -q .body)"
-  labels="$(gh issue view "$n" --json labels -q '.labels[].name' | tr '\n' ' ')"
+  local title body labels json type=feature prio=P2 id f
+  json="$(iss_view "$n")" || die "cannot read issue #$n"
+  title="$(printf '%s' "$json" | jq -r .title)"; body="$(printf '%s' "$json" | jq -r '.body // ""')"
+  labels="$(printf '%s' "$json" | jq -r '.labels[]?' | tr '\n' ' ')"
   case " $labels " in *" bug "*|*"type:fix"*) type=fix ;; *"type:hotfix"*) type=hotfix ;; *"type:chore"*) type=chore ;; *"type:docs"*) type=docs ;; *"type:refactor"*) type=refactor ;; esac
   case " $labels " in *"priority:P1"*) prio=P1 ;; *"priority:P3"*) prio=P3 ;; esac
   id="$(cmd_new "$title" --type "$type" --priority "$prio" | tail -n1)"
   f="$(task_file "$id")"; fm_set "$f" issue "$n"; issue_set "$id" "$n"
-  awk -v b="$body" -v n="$n" '{print} /^## Context/{print "From GitHub issue #" n ":"; print ""; print b}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  # the issue text goes under "## 1. Understand" (template 2; "## Context" in older task files) with a Source: line kit-trace/verify accept;
+  # passed through the environment — awk -v would process backslash escapes in the text
+  B="$body" N="$n" P="$(git_provider)" awk '{print} /^## (1\. Understand|Context)/ && !done {print "Source: " ENVIRON["P"] " issue #" ENVIRON["N"]; print ""; print ENVIRON["B"]; print ""; done=1}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
   info "$id created from #$n — refine Goal/Acceptance criteria (kit-plan) before starting"
 }
 
@@ -619,7 +618,7 @@ cmd_list() {
 sub="${1:-status}"; shift || true
 case "$sub" in
   new|start|checkpoint|points|rollback|finish|merged|revert|abandon|status|list|worktrees|cleanup|verify|review) "cmd_$sub" "$@" ;;
-  sync-gh) cmd_sync_gh "$@" ;;
-  pull-gh) cmd_pull_gh "$@" ;;
+  sync|sync-gh) cmd_sync "$@" ;;
+  pull|pull-gh) cmd_pull "$@" ;;
   *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

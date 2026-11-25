@@ -7,6 +7,10 @@ description: Data engineering design and delivery — analytics architecture (ba
 Rules: `.agent/rules/data/` + stack rules (`dbt`, `python` + airflow/pyspark). Living docs: `docs/data/`. Changes: OpenSpec schema **data-flow**
 (`.agent/scripts/kit-new change <name> --schema data-flow`). Decisions → ADR. Never touch production data — `ci`/`dev` targets only.
 
+## 0. Know the data
+Read `docs/data/catalog/` (kit-catalog) before designing or writing SQL. Every new source, model or mart ships with its column
+descriptions in the dbt `.yml` and its line in the catalog — `.agent/scripts/kit-doc-coverage --list` shows what is missing.
+
 ## 1. Start from the consumer (not the source)
 Read `docs/ba/` and ask ONE batch (or **mp-grilling** rounds): which decisions/dashboards/models consume the data, the business questions,
 required **freshness** (e.g. by 07:00 ICT), history depth/backfill window, volumes and growth, accuracy tolerance, PII involved, budget.
@@ -14,6 +18,8 @@ required **freshness** (e.g. by 07:00 ICT), history depth/backfill window, volum
 ## 2. Architecture (ADR) → `docs/data/DATA-ARCHITECTURE.md`
 - **Batch vs streaming**: batch (hourly/daily ELT) unless a consumer needs < minutes latency; streaming (Kafka/Debezium CDC + stream processing) only with a real-time use case and ops maturity.
 - **Storage**: warehouse (Postgres/BigQuery/Snowflake/ClickHouse) vs lakehouse (Iceberg/Delta on object storage + Spark/Trino). Simplest that fits volume and cost.
+  Lakehouse → answer the per-source questions of `.agent/rules/data/lakehouse.md` §1 (full list or changes, measured volume → rebuild or MERGE,
+  bronze typing, schema baseline, immutable key, history) in the ADR, and plan maintenance (snapshot expiry, orphan files) from day one.
 - **Layers**: raw/bronze (as ingested, immutable) → staging/silver (cleaned, typed, 1:1) → marts/gold (business-ready, contracted). In dbt: `stg_` → `int_` → `fct_`/`dim_`.
 - **Ingestion**: managed connector / Airbyte / Debezium / custom jobs; schema-drift policy; late/duplicate data handling.
 - **Orchestration**: Airflow (or Dagster) DAGs by domain; dbt run via selectors; SLAs and alerting.
@@ -30,6 +36,10 @@ change policy (versioning, deprecation window). In dbt: `contract: { enforced: t
 ## 5. Quality & tests (written first)
 Per dataset: uniqueness + not-null on keys, referential integrity, accepted values/ranges, recency (freshness), volume anomaly bounds,
 business-rule singular tests; unit tests for transformation code (PySpark functions, dbt unit tests). They fail before the model exists (red).
+
+## 5b. Hand-off to the Data analyst (`kit-da`)
+Before a dataset is delivered (and after any change to it): `kit-da` checks the real data — correct, complete, fresh, clean — with
+read-only SQL in `dq/`, reconciles with the source and reports in `docs/data/quality/`. Rules it finds that must always hold come back here as dbt tests.
 
 ## 6. Operations
 Idempotent loads (MERGE / partition overwrite keyed by interval), parameterised **backfills** (date range vars), reprocessing plan,

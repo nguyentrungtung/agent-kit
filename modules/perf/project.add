@@ -1,0 +1,1 @@
+cmd_perf: if command -v k6 >/dev/null 2>&1; then k6 run perf/smoke.js; else docker run --rm -i --network host -e BASE_URL grafana/k6:0.57.0 run - < perf/smoke.js; fi

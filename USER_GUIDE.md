@@ -66,6 +66,7 @@ kit init .
 cd /path/to/du-an-hien-tai
 kit init .
 ```
+Với repo có sẵn (đã có commit; `--mode new` để cài đầy đủ) kit lấy repo làm chuẩn: chỉ bật gate cho công cụ repo đang dùng (không mypy/sqlfluff nếu repo chưa dùng), lấy cờ pytest từ CI, và chỉ **thêm** những gì repo chưa có: tự nhận Git host (GitHub hay GitLab tự host), chạy trunk-based nếu repo chưa có `develop`, không đặt cấu hình trùng với cái đã có ở thư mục cha, không chiếm hook Husky/lefthook, và cảnh báo nếu `.gitignore` của bạn đang ẩn file của kit. Chi tiết: README mục "Áp dụng vào repo có sẵn". Sau khi cài, mở agent và nói **"run kit-migrate, then kit-onboard"**: `kit-migrate` chuyển luật agent / docs cũ của repo vào cấu trúc kit (bắt đầu từ `.agent/scripts/kit-adopt-scan`), `kit-onboard` lấy lệnh build/test từ file CI của repo làm chuẩn.
 
 ### Chạy nhanh không cần hỏi qua menu (Dành cho script hoặc CI):
 ```bash
@@ -77,6 +78,9 @@ kit init . --stack java-maven::spring --services postgres,redis --yes
 
 # Dự án Python FastAPI
 kit init . --stack python::fastapi --yes
+
+# Repo dữ liệu trên GitLab tự host: Python (ingestion/) + dbt (transform/), trunk-based, giữ hook cũ
+kit init . --preset data --provider gitlab --flow trunk --hooks keep --yes
 ```
 
 ---

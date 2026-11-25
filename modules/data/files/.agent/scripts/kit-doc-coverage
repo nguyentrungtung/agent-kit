@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# kit-doc-coverage [<dbt project dir>] [--list] [--min <pct>] — how much of the dbt project is documented (module data, playbooks kit-catalog / kit-da)
+#   Reads <dir>/target/manifest.json (`dbt parse` writes it — no warehouse connection needed) and, when present, target/catalog.json
+#   (`dbt docs generate`) to also count columns that exist in the warehouse but are not declared in any .yml.
+#   Prints: models / sources with a description, columns with a description, per layer (folder under models/).
+#   --list   the undocumented models, sources and columns (path + name), worst models first
+#   --min N  exit 1 when column coverage is below N % (default: doc_coverage_min in .agent/project.yaml, empty = report only)
+# Column meanings live in the dbt .yml files (one source); docs/data/catalog/ links to them instead of copying.
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+command -v jq >/dev/null 2>&1 || die "kit-doc-coverage needs jq"
+
+dir=""; list=0; min="$(cfg doc_coverage_min)"
+while [ $# -gt 0 ]; do case "$1" in --list) list=1 ;; --min) min="${2:?--min needs a number}"; shift ;; -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; *) dir="$1" ;; esac; shift; done
+if [ -z "$dir" ]; then   # the dbt component from project.yaml, else the first dbt_project.yml
+  for c in $(cfg components); do case "${c#*=}" in dbt*) dir="${c%%=*}"; break ;; esac; done
+  [ -n "$dir" ] || dir="$(find . -maxdepth 3 -name dbt_project.yml -not -path '*/dbt_packages/*' 2>/dev/null | head -n1 | xargs -I{} dirname {})"
+fi
+[ -n "$dir" ] && [ -f "$dir/dbt_project.yml" ] || die "no dbt project found (pass its folder: kit-doc-coverage transform)"
+man="$dir/target/manifest.json"; cat_json="$dir/target/catalog.json"
+[ -f "$man" ] || die "$man missing — run: (cd $dir && dbt parse)   (no warehouse needed; uses your profile)"
+proj="$(sed -n 's/^name:[[:space:]]*["'"'"']\{0,1\}\([A-Za-z0-9_]*\).*/\1/p' "$dir/dbt_project.yml" | head -n1)"
+[ -f "$cat_json" ] || cat_json=""
+
+# one line per model / source: kind \t layer \t path \t name \t described(0/1) \t columns \t described columns \t undocumented column names
+rows="$(jq -r --arg p "$proj" --slurpfile cat <( [ -n "$cat_json" ] && cat "$cat_json" || echo '{}' ) '
+  def blank: (. // "") | gsub("^\\s+|\\s+$"; "") | . == "";
+  def layer: (.original_file_path | split("/")) as $s | if ($s | length) > 2 then $s[1] else "(root)" end;
+  ($cat[0].nodes // {}) as $cn | ($cat[0].sources // {}) as $cs |
+  ( [.nodes[] | select(.resource_type == "model" and .package_name == $p)]
+    | map(. as $n | ((($cn[$n.unique_id].columns // {}) | keys) + (($n.columns // {}) | keys) | map(ascii_downcase) | unique) as $all
+      | [ "model", layer, .original_file_path, .name, (if (.description | blank) then 0 else 1 end), ($all | length),
+          ([ $all[] as $c | select(((($n.columns // {}) | to_entries | map(select(.key | ascii_downcase == $c)) | .[0].value.description) | blank) | not) | $c ] | length),
+          ([ $all[] as $c | select((($n.columns // {}) | to_entries | map(select(.key | ascii_downcase == $c)) | .[0].value.description) | blank) | $c ] | join(",")) ]) )
+  + ( [.sources[] | select(.package_name == $p)]
+    | map(. as $n | ((($cs[$n.unique_id].columns // {}) | keys) + (($n.columns // {}) | keys) | map(ascii_downcase) | unique) as $all
+      | [ "source", "sources", .original_file_path, (.source_name + "." + .name), (if (.description | blank) then 0 else 1 end), ($all | length),
+          ([ $all[] as $c | select(((($n.columns // {}) | to_entries | map(select(.key | ascii_downcase == $c)) | .[0].value.description) | blank) | not) | $c ] | length),
+          ([ $all[] as $c | select((($n.columns // {}) | to_entries | map(select(.key | ascii_downcase == $c)) | .[0].value.description) | blank) | $c ] | join(",")) ]) )
+  | .[] | @tsv' "$man")"
+
+[ -n "$rows" ] || die "no models or sources of project '$proj' in $man"
+pct() { [ "$2" -gt 0 ] && echo $(( $1 * 100 / $2 )) || echo 100; }
+echo "dbt project '$proj' ($dir) — $( [ -n "$cat_json" ] && echo 'manifest + catalog (warehouse columns counted)' || echo 'manifest only: columns declared in .yml (run dbt docs generate to count undeclared ones too)')"
+printf '%-14s %8s %12s %14s\n' "layer" "objects" "described" "columns doc'd"
+printf '%s\n' "$rows" | awk -F'\t' '{ l=$2; o[l]++; d[l]+=$5; c[l]+=$6; cd[l]+=$7; O++; D+=$5; C+=$6; CD+=$7 }
+  END { for (l in o) printf "%-14s %8d %7d (%3d%%) %6d/%-6d (%3d%%)\n", l, o[l], d[l], (o[l] ? d[l]*100/o[l] : 100), cd[l], c[l], (c[l] ? cd[l]*100/c[l] : 100) | "sort"
+        close("sort"); printf "%-14s %8d %7d (%3d%%) %6d/%-6d (%3d%%)\n", "TOTAL", O, D, (O ? D*100/O : 100), CD, C, (C ? CD*100/C : 100) }'
+tot_c="$(printf '%s\n' "$rows" | awk -F'\t' '{ s+=$6 } END { print s+0 }')"; tot_cd="$(printf '%s\n' "$rows" | awk -F'\t' '{ s+=$7 } END { print s+0 }')"
+cov="$(pct "$tot_cd" "$tot_c")"
+
+if [ $list -eq 1 ]; then
+  echo; echo "Undocumented (worst first):"
+  printf '%s\n' "$rows" | awk -F'\t' '($5 == 0 || $8 != "") { miss = $6 - $7; printf "%d\t%s %s%s%s\n", miss + ($5 == 0 ? 1000 : 0), $3, $4, ($5 == 0 ? " — no description" : ""), ($8 != "" ? " — columns: " $8 : "") }' \
+    | sort -t$'\t' -k1,1nr | cut -f2- | sed 's/^/  - /'
+fi
+if [ -n "$min" ]; then
+  [ "$cov" -ge "$min" ] || { warn "column documentation $cov% < $min% (doc_coverage_min)"; exit 1; }
+  info "column documentation $cov% ≥ $min%"
+fi

@@ -15,3 +15,5 @@ cmd_coverage: dotnet test --no-restore /p:CollectCoverage=true /p:Threshold=${KI
 cmd_build: dotnet build -c Release --no-restore
 cmd_audit: dotnet list package --vulnerable --include-transitive
 post_note: Directory.Build.props turns on nullable + analyzers + warnings-as-errors for every project; add NetArchTest tests from .agent/stack/dotnet/snippets.
+
+ci_image: mcr.microsoft.com/dotnet/sdk:8.0
