@@ -1160,7 +1160,8 @@ report() {
       *) printf '  1. git switch -c chore/agent-kit-setup   — the kit set-up gets its own branch and %s (not %s)\n' "$pr" "${cur:-$mb}" >&2 ;;
     esac
     printf '  2. Merge every *.kit-new into your file (or ask the agent), then delete the *.kit-new files — they are not committed\n' >&2
-    printf '  3. Open your agent and say: "run kit-onboard"   (moves your old agent rules/docs into the kit, aligns cmd_* with your CI, records baseline debt)\n' >&2
+    printf '  3. Open your agent and say: "run kit-migrate, then kit-onboard"   (kit-migrate: your old agent rules/docs into the kit, from\n' >&2
+    printf '     .agent/scripts/kit-adopt-scan; kit-onboard: context from the code, cmd_* aligned with your CI, baseline debt)\n' >&2
     printf '  4. Commit: git add -A && git commit -m "chore: add agent-kit" → %s into %s\n' "$pr" "$db" >&2
   else
     printf '  1. cd %s — commit: git add -A && git commit -m "chore: add agent-kit"\n' "$TARGET" >&2

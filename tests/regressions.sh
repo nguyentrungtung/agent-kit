@@ -399,6 +399,41 @@ rm -rf "$A/ingestion/.venv"
 (cd "$A" && git add -A && git reset -q -- '*.kit-new' && git -c core.hooksPath=/dev/null commit -qm "chore: add agent-kit" --no-verify && rm -f ./*.kit-new docs/*.kit-new)
 "$KIT" upgrade "$A" --allow-dirty >"$A.up1.log" 2>&1 || true; "$KIT" upgrade "$A" --allow-dirty >"$A.up2.log" 2>&1 || true
 check "kit upgrade (twice) does not bring skipped configs back" "[ ! -e \"\$A/ingestion/mypy.ini\" ] && [ ! -e \"\$A/transform/.sqlfluff\" ]"
+
+# --- kit-migrate: kit-adopt-scan inventories old agent rules, links into them, secrets in docs, hidden files, own CI checks
+printf '\n== kit-adopt-scan: inventory for kit-migrate (read-only, values never printed)\n'
+A="$WORK/ex-migrate"
+ad "$A" 'mkdir -p agent docs/nghiep-vu docs/tham-chieu tools/checks \
+  && printf "# Rules\nSee agent/rules-security.md and agent/project.md\n" > AGENTS.md && printf "# Security\nnever log tokens\n" > agent/rules-security.md \
+  && printf "# Project\n" > agent/project.md && printf "Read agent/rules-security.md first\n" > docs/nghiep-vu/flow.md \
+  && printf "{\"client_secret\": \"Zq8vK2mN4pR7sT1w\"}\n" > docs/tham-chieu/api.postman_collection.json \
+  && printf "db: postgres://etl:S3cretPw@db:5432/x\n" > docs/nghiep-vu/conn.md \
+  && printf "print(1)\n" > tools/checks/check_registry.py \
+  && printf "stages: [test]\nchecks:\n  stage: test\n  script:\n    - python3 tools/checks/check_registry.py\n" > .gitlab-ci.yml \
+  && printf "AGENTS.md\nagent/\ndocs/\n" > .gitignore && printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json \
+  && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack node
+before="$(git -C "$A" status --porcelain | sort)"
+scan="$(cd "$A" && .agent/scripts/kit-adopt-scan 2>/dev/null || true)"
+sec() { printf '%s\n' "$scan" | awk -v h="## $1." 'index($0, h) == 1 {f=1; next} /^## / {f=0} f'; }
+check "§1 own AGENTS.md and agent/ found"             "sec 1 | grep -q '\`AGENTS.md\` .*your own' && sec 1 | grep -q '\`agent/\`.*2 files' && sec 1 | grep -q 'agent/rules-security.md'"
+check "§2 every link into agent/ listed"             "sec 2 | grep -q 'AGENTS.md:2 → agent/rules-security.md' && sec 2 | grep -q 'docs/nghiep-vu/flow.md:1 → agent/rules-security.md'"
+check "§3 own docs folders kept, not kit slots"      "sec 3 | grep -q 'docs/nghiep-vu/.*yours'"
+check "§4 Postman export + secret-like values found" "sec 4 | grep -q 'api.postman_collection.json — file type' && sec 4 | grep -q 'conn.md:1 — password in URL'"
+check "§4 never prints the values"                   "! printf '%s\n' \"\$scan\" | grep -q 'S3cretPw' && ! printf '%s\n' \"\$scan\" | grep -q 'Zq8vK2mN4pR7sT1w'"
+check "§5 the .gitignore lines that hide them"       "sec 5 | grep -q '.gitignore:1 .AGENTS.md.' && sec 5 | grep -q '.gitignore:3 .docs/.'"
+check "§6 .kit-new left to merge"                    "sec 6 | grep -q 'AGENTS.md.kit-new'"
+check "§7 kit pipeline not included yet"             "sec 7 | grep -q 'NOT included'"
+check "§8 CI check no cmd_* covers"                  "sec 8 | grep -q 'tools/checks/check_registry.py'"
+check "report saved in .agent/local (ignored)"       "[ -f \"\$A/.agent/local/adopt-scan.md\" ] && git -C \"\$A\" check-ignore -q .agent/local/adopt-scan.md"
+check "read-only: git status unchanged"              "[ \"\$(git -C \"\$A\" status --porcelain | sort)\" = \"\$before\" ]"
+check "kit-migrate skill installed for every harness" "[ -f \"\$A/.agents/skills/kit-migrate/SKILL.md\" ] && [ -L \"\$A/.claude/skills/kit-migrate\" ] && grep -q '\`kit-migrate\`' \"\$A/AGENTS.md.kit-new\""
+out="$(cd "$A" && .agent/scripts/kit-doctor 2>&1 || true)"
+check "doctor points at kit-migrate"                 "printf '%s\n' \"\$out\" | grep -q 'old agent rules next to the kit.s: agent/ AGENTS.md.kit-new — run the kit-migrate'"
+check "init next steps name kit-migrate"             "grep -q 'run kit-migrate, then kit-onboard' \"\$A.log\""
+A="$WORK/ex-clean"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack node
+scan="$(cd "$A" && .agent/scripts/kit-adopt-scan 2>/dev/null || true)"
+check "clean repo: nothing to migrate"               "sec 1 | grep -q 'None found' && sec 2 | grep -q '^None' && sec 4 | grep -q 'Nothing found'"
+
 A="$WORK/ex-new"; ad "$A" "$EX_SETUP" --stack python:ingestion,dbt:transform --mode new
 check "--mode new: full set-up in an existing repo"  "grep -q '^cmd_typecheck:.*mypy' \"\$A/.agent/project.yaml\" && [ -f \"\$A/ingestion/mypy.ini\" ]"
 

@@ -17,10 +17,9 @@ Goal: after this, any fresh session can work correctly by reading `.agent/` only
    - `.agent/context/CONVENTIONS.md` — fill "Observed in code": where the code differs from `.agent/rules/stack/*.md` (naming, layering, error/logging, tests).
    - `.agent/rules/project/` — module boundaries and domain rules found in code (one file per topic, each rule + enforcing tool).
    - `GLOSSARY.md` — domain terms found in code.
-3b. **Existing agent instructions** (`AGENTS.md.kit-new`, a `agent/` or `docs/` rule folder, `.cursor/`, an old `CLAUDE.md`): keep the project's rules, do not
-   throw them away and do not paste them twice. Move what is specific to this project into `AGENTS.md` §7 / `.agent/rules/project/` (or link to the
-   existing files from there), keep `CLAUDE.md` as `@AGENTS.md`, delete only what became a duplicate. If `kit-doctor` says the repo's `.gitignore` hides kit
-   files, ask the human: share the kit with the team (remove those lines) or use it personally.
+3b. **Existing agent instructions or docs** (an own `AGENTS.md` / `AGENTS.md.kit-new`, `agent/`, `.cursor/`, an old `CLAUDE.md`, a `docs/` the
+   `.gitignore` hides): run the **kit-migrate** playbook first (it starts from `.agent/scripts/kit-adopt-scan`), then come back here.
+   Scan §8 lists checks the repo's CI / hooks run that no `cmd_*` covers — wire them in step 4.
 4. **Wire the quality tools**: run `.agent/scripts/kit-doctor`. Merge every snippet in `.agent/stack/<stack>/snippets/`
    (e.g. Maven/Gradle plugins, ArchitectureTest with the real base package, tsconfig strict flags, Cargo lints) and adapt
    tool configs to the real folder layout (paths in phpstan/deptrac/dependency-cruiser…). Never relax a rule to get green — record debt instead.

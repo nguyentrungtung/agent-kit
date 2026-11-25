@@ -53,6 +53,10 @@ for comp in $(cfg components); do
   have=0; for pf in "$cpath/profiles.yml" "${DBT_PROFILES_DIR:-$HOME/.dbt}/profiles.yml"; do [ -f "$pf" ] && grep -qE '^[[:space:]]+ci:[[:space:]]*$' "$pf" && have=1; done
   [ $have -eq 1 ] || bad "dbt ($cpath): cmd_* use --target ci but no 'ci' target in profiles.yml — they would hit another target. Add one (see .agent/stack/dbt/snippets/profiles.example.yml, a DuckDB target) or clear those cmd_*"
 done
+# agent rules the repo had before the kit: two sets of rules drift apart — move them in (kit-migrate)
+old=""; for d in agent agents .ai .cursor/rules .clinerules; do [ -d "$d" ] && [ -n "$(find "$d" -type f -name '*.md' 2>/dev/null | head -n1)" ] && old="$old $d/"; done
+[ -f AGENTS.md.kit-new ] && old="$old AGENTS.md.kit-new"
+[ -z "$old" ] || meh "old agent rules next to the kit's:$old — run the kit-migrate playbook (starts from .agent/scripts/kit-adopt-scan)"
 if grep -q 'TODO' .agent/context/PROJECT.md 2>/dev/null; then meh "PROJECT.md still has TODOs — run the kit-onboard (existing code) or kit-ba (new project) playbook"; else ok "context filled"; fi
 n_rules=$(find .agent/rules -name '*.md' 2>/dev/null | grep -vc README || true)
 if [ "${n_rules:-0}" -gt 0 ]; then ok "$n_rules rule file(s) in .agent/rules"; else bad "no rules in .agent/rules"; fi

@@ -17,6 +17,7 @@
       "Bash(.agent/scripts/kit-task worktrees)",
       "Bash(.agent/scripts/kit-board:*)",
       "Bash(.agent/scripts/kit-doctor:*)",
+      "Bash(.agent/scripts/kit-adopt-scan:*)",
       "Bash(.agent/scripts/kit-task points)",
       "Bash(.agent/scripts/kit-task checkpoint:*)",
       "Bash(.agent/scripts/kit-task review:*)",
