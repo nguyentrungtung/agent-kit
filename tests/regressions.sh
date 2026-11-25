@@ -469,6 +469,30 @@ sed -i.bak 's#^cmd_lint:.*#cmd_lint: my-own-lint#' "$A/.agent/project.yaml"; rm 
 check "untouched cmd_* updated to the new kit's"     "! grep -q 'old-kit-cmd_test' \"\$A/.agent/project.yaml\" && grep -q '^cmd_test: ' \"\$A/.agent/project.yaml\""
 check "edited cmd_* kept"                             "grep -q '^cmd_lint: my-own-lint\$' \"\$A/.agent/project.yaml\""
 
+# ---------------------------------------------------------------- kit-dq (module data, playbook kit-da): read-only SQL checks
+printf '\n== kit-dq: data checks correct / complete / fresh / clean, read-only, counts only\n'
+if command -v sqlite3 >/dev/null 2>&1; then
+  A="$WORK/dq"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node --modules data
+  check "data module: kit-da skill, kit-dq, templates, cmd_sql key" "[ -x \"\$A/.agent/scripts/kit-dq\" ] && [ -f \"\$A/.agents/skills/kit-da/SKILL.md\" ] && [ -f \"\$A/.agent/templates/dq/fresh.sql\" ] && grep -q '^cmd_sql:' \"\$A/.agent/project.yaml\" && grep -q '^dq_dir: dq' \"\$A/.agent/project.yaml\""
+  rc=0; out="$(cd "$A" && .agent/scripts/kit-dq run 2>&1)" || rc=$?
+  check "no cmd_sql → clear error"                    "[ $rc -ne 0 ] && printf '%s' \"\$out\" | grep -q 'cmd_sql is empty'"
+  sqlite3 "$A/dq.sqlite" "CREATE TABLE hs(ma TEXT, ten TEXT, so INT); INSERT INTO hs VALUES ('A1','NGUYEN SECRET',5),('A1','x',3),('B2','y',-1);"
+  sed -i.bak 's#^cmd_sql:.*#cmd_sql: sqlite3 dq.sqlite#' "$A/.agent/project.yaml" && rm -f "$A/.agent/project.yaml.bak"
+  (cd "$A" && .agent/scripts/kit-dq new hs clean dup-ma >/dev/null)
+  check "kit-dq new: check from the dimension template" "grep -q 'dimension: clean (sạch) · dataset: hs' \"\$A/dq/hs/clean-dup-ma.sql\""
+  printf -- '-- severity: error\n-- why: one row per ma\nSELECT ma, COUNT(*) FROM hs GROUP BY ma HAVING COUNT(*) > 1\n' > "$A/dq/hs/clean-dup-ma.sql"
+  printf -- '-- severity: warn\n-- why: so is never negative\nSELECT ma FROM hs WHERE so < 0;\n' > "$A/dq/hs/correct-so.sql"
+  printf -- '-- why: every row has a name\nSELECT ma FROM hs WHERE ten IS NULL\n' > "$A/dq/hs/complete-ten.sql"
+  printf 'DELETE FROM hs\n' > "$A/dq/hs/clean-evil.sql"; printf 'SELECT 1; DROP TABLE hs\n' > "$A/dq/hs/clean-evil2.sql"
+  rc=0; out="$(cd "$A" && .agent/scripts/kit-dq run --report 2>&1)" || rc=$?
+  check "duplicate key fails, warn only warns, pass is ok" "printf '%s\n' \"\$out\" | grep -q '^FAIL .*clean-dup-ma' && printf '%s\n' \"\$out\" | grep -q '^WARN .*correct-so' && printf '%s\n' \"\$out\" | grep -q '^ok .*complete-ten'"
+  check "writes refused, table intact"                "printf '%s\n' \"\$out\" | grep -q '^REFUSED .*clean-evil.sql' && printf '%s\n' \"\$out\" | grep -q '^REFUSED .*clean-evil2.sql' && [ \"\$(sqlite3 \"\$A/dq.sqlite\" 'select count(*) from hs')\" = 3 ]"
+  check "exit 1 on an error-severity failure"         "[ $rc -eq 1 ]"
+  check "report has counts, never row values"         "grep -q 'clean-dup-ma.sql. | 1 |' \"\$A\"/docs/data/quality/*.md && ! grep -rq 'SECRET' \"\$A/docs/data/quality\" && ! printf '%s' \"\$out\" | grep -q SECRET"
+  rc=0; out="$(cd "$A" && .agent/scripts/kit-dq run hs/complete-ten.sql 2>&1)" || rc=$?
+  check "one check by path (the last file not matching is fine)" "[ $rc -eq 0 ] && printf '%s\n' \"\$out\" | grep -q '1 check(s): 0 failed'"
+else printf '  skip kit-dq (sqlite3 not installed)\n'; fi
+
 # ---------------------------------------------------------------- issue sync: GitLab (REST) and GitHub (gh) behind one interface
 printf '\n== kit-task sync / pull: GitLab through its REST API (fake server), GitHub through gh (fake gh)\n'
 issue_project() { # issue_project <dir> <provider> <remote-url> → a kit project on develop with git_provider set

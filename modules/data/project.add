@@ -1,0 +1,3 @@
+cmd_sql:                     # read-only SQL client for kit-dq / kit-da (SQL on stdin, or {file}), e.g. trino --server "$TRINO_URL" --user "$TRINO_RO_USER" --output-format CSV
+dq_dir: dq
+dq_sample_rows: 20

@@ -10,6 +10,7 @@ A role never silently does another role's job — it hands off (and the hand-off
 | DevOps / platform | `kit-devops`, `kit-docker` / devops-engineer | `docs/platform/`, Dockerfiles, compose, `infra/`, `deploy/`, workflows | devops |
 | Application security | `kit-appsec` / security-architect (design) · `kit-security` / security-reviewer (per change) | `docs/security/` | security (+ core) |
 | Data engineer | `kit-data` / data-engineer | `docs/data/`, pipelines, data contracts | data |
+| Data analyst | `kit-da` | `dq/` (read-only SQL checks: correct / complete / fresh / clean — đúng, đủ, sống, sạch), `docs/data/quality/` (findings, reconciliation with sources) — gate: `kit-dq run` | data |
 | Planner | `kit-plan` / planner | `openspec/changes/`, tasks, `docs/plan/` | core + openspec |
 | Full-stack Developer | `kit-task` | code (vertical slice: DB + logic + API + UI component), tests, living-doc updates in the same PR | core |
 | QA | `kit-testcases` / qa-engineer | `docs/qa/` (Core 6 test matrix, incl. UI responsiveness & a11y) | core |

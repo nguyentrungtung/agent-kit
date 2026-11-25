@@ -31,6 +31,10 @@ change policy (versioning, deprecation window). In dbt: `contract: { enforced: t
 Per dataset: uniqueness + not-null on keys, referential integrity, accepted values/ranges, recency (freshness), volume anomaly bounds,
 business-rule singular tests; unit tests for transformation code (PySpark functions, dbt unit tests). They fail before the model exists (red).
 
+## 5b. Hand-off to the Data analyst (`kit-da`)
+Before a dataset is delivered (and after any change to it): `kit-da` checks the real data — correct, complete, fresh, clean — with
+read-only SQL in `dq/`, reconciles with the source and reports in `docs/data/quality/`. Rules it finds that must always hold come back here as dbt tests.
+
 ## 6. Operations
 Idempotent loads (MERGE / partition overwrite keyed by interval), parameterised **backfills** (date range vars), reprocessing plan,
 monitoring (freshness, row counts, failed tests → alert → runbook), cost per run/day and guardrails (partition pruning, clustering, quotas).
