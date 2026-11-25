@@ -33,8 +33,8 @@ sub rd { my $f = shift; open(my $fh, '<', $f) or return ''; local $/; my $s = <$
 sub nocomments { my $s = shift; $s =~ s{<!--(.*?)-->}{"\n" x ($1 =~ tr/\n//)}gse; return $s }
 sub blank {
   my $s = nocomments(shift);
-  # an unclosed fence runs to the end of the file (CommonMark)
-  $s =~ s{^ {0,3}((`{3,})|(~{3,}))[^\n]*(?:\n|\z)(.*?)(?:^ {0,3}(?(2)\2`*|\3~*)[ \t]*$|\z)}{"\n" x ((($4 // '') =~ tr/\n//) + 1)}gmse;
+  # an unclosed fence runs to the end of the file (CommonMark); a backtick opener whose info string holds a backtick is an inline span, not a fence
+  $s =~ s{^ {0,3}((`{3,})(?=[^`\n]*(?:\n|\z))|(~{3,}))[^\n]*(?:\n|\z)(.*?)(?:^ {0,3}(?(2)\2`*|\3~*)[ \t]*$|\z)}{"\n" x ((($4 // '') =~ tr/\n//) + 1)}gmse;
   return $s;
 }
 # a template row: after blanking `<placeholder>` cells (the kit's templates write placeholders in backticks), the first cell

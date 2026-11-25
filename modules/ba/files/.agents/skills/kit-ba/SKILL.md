@@ -32,6 +32,8 @@ human is available (step 5) — never on silent guesses. Technique: with module 
 5. No human available → write each unknown as `ASSUMPTION: <your recommended answer>` in BRIEF.md and continue drafting (status
    stays `draft`). `kit-trace assumptions` lists them; `kit-task verify`/`finish` scans `docs/ba/BRIEF.md` and blocks every task
    created from the 0.11 template (`template: 2`; older in-flight tasks are exempt) until a human rewrites each one as `CONFIRMED: <answer> (who, date)`.
+   The scan only detects ASSUMPTION markers still present: it does not check CONFIRMED entries, who wrote them or their date — a deleted or
+   self-rewritten marker passes, so the human review of the PR is what really confirms an assumption.
 6. Repeat a round after modelling (step 4) if new unknowns appear (exceptions, states, rules).
 
 | Dim | Ask about | Example questions (adapt to the domain — do not copy) |
