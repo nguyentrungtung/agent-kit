@@ -336,12 +336,15 @@ cmd_verify() {
   if [ "$tpl" -ge 2 ]; then
     ticks="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*- \[[xX]\]' || true)"
     open_box="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*- \[ \]' || true)"
-    local dim missing=""   # each of the 8 dimensions must be present AND ticked (extra items are fine, renaming one is not)
+    # the checklist belongs to the task: every box in §2 must be ticked (n/a ones too), however many there are.
+    # The 8 standard dimensions are a reminder — one that is missing is only a warning, the task may not need it.
+    if [ "${ticks:-0}" -gt 0 ] && [ "${open_box:-0}" -eq 0 ]; then gate ok "2 clarification checklist done ($ticks ticked)"
+    else gate no "2 Clarifications: tick every item of the checklist ($ticks ticked, $open_box open) — an item that does not apply is ticked too, with 'n/a: <why>' after it"; fi
+    local dim missing=""
     for dim in 'Actor & permission' 'Data & validation' 'Edge cases' 'Errors' 'Numbers' 'State' 'Integrations' 'Scope'; do
-      printf '%s\n' "$s2" | grep -qiE "^[[:space:]]*- \[[xX]\][[:space:]]+\**$dim([^A-Za-z]|$)" || missing="$missing${missing:+, }$dim"
+      printf '%s\n' "$s2" | grep -qiE "^[[:space:]]*- \[[xX ]\][[:space:]]+\**$dim([^A-Za-z]|$)" || missing="$missing${missing:+, }$dim"
     done
-    if [ -z "$missing" ] && [ "${open_box:-0}" -eq 0 ]; then gate ok "2 ambiguity checklist walked ($ticks ticked)"
-    else gate no "2 Clarifications: tick every item of the ambiguity checklist (${missing:+not ticked/missing: $missing; }$open_box open) — an item that does not apply is ticked too, with 'n/a: <why>' after it"; fi
+    [ -z "$missing" ] || printf '  %s!%s 2 standard dimensions not in the checklist: %s — fine if they do not apply, otherwise add them\n' "$c_yel" "$c_off" "$missing"
   else
     [ -n "$s2" ] && gate ok "2 Clarifications recorded (legacy task file without checklist — template < 2)" \
       || gate no "2 Clarifications empty — record the Q&A (legacy task file; new ones use the 8-item checklist)"

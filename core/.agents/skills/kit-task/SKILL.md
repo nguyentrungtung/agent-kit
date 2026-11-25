@@ -22,7 +22,7 @@ capability (`.agent/scripts/kit-openspec show <capability> --type spec`), the st
 Write the problem in your own words + links. Do NOT read archived tasks to learn the system.
 
 ## 3. Clarify (task §2)
-Tick every item of the ambiguity checklist in §2 (write n/a when it does not apply). Ask the human in rounds — with module eng-skills use **mp-grilling** (numbered questions, your
+Tick every item of the ambiguity checklist in §2 (write n/a when it does not apply); add task-specific items when the task needs them. Ask the human in rounds — with module eng-skills use **mp-grilling** (numbered questions, your
 recommended answer each, only the questions whose prerequisites are settled); record Q | A | who/date. Nothing to ask → every checklist item is still ticked (with "n/a: <why>" where it does not apply).
 A blocking question without an answer → stop the task (kit-handoff), don't guess. Low-risk unknown → `ASSUMPTION: …` line;
 `kit-task verify` blocks until the human rewrites it as `CONFIRMED: …`. Never cite an id, file or API you have not seen.

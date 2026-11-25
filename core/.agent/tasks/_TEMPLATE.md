@@ -30,7 +30,8 @@ done:
 
 ## 2. Clarifications
 <!-- Walk EVERY item BEFORE designing and tick it: when the answer is known (from docs or the human), or when it does not apply —
-     then tick it too and add "n/a: <why>" after it (e.g. "- [x] Integrations — n/a: no external calls"). An unticked box blocks verify.
+     then tick it too and add "n/a: <why>" after it (e.g. "- [x] Integrations — n/a: no external calls"). An unticked box blocks verify. Add task-specific items as needed;
+     removing a standard one only warns.
      Unknown + blocking → ask the human ONE batch and stop until answered. Unknown + low-risk → "ASSUMPTION: …" line;
      only a human turns it into "CONFIRMED: <answer> (who, date)" — finish is blocked while any ASSUMPTION is open here, in the
      change, in docs/ba/BRIEF.md or in docs/architecture/SOLUTION.md. -->

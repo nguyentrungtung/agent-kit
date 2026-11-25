@@ -6,7 +6,7 @@ If a step has no source to trace to, stop and ask.
 | # | Step | Output (where) | Gate |
 |---|---|---|---|
 | 1 | **Understand** — read the task (including `tags`), its OpenSpec change, linked UC/US/BR, check topic lessons in `.agent/memory/LESSONS.md` (`kit-context --topic <tag>`), current spec (`openspec/specs/`), relevant rules | Task §1 in your own words | §1 not empty |
-| 2 | **Clarify** — tick every item of the ambiguity checklist below (ticked + "n/a: why" when it does not apply); ask the human ONE batch; never guess a business fact | Task §2 checklist + Q&A table; change proposal › Clarifications | 8/8 ticked, every question answered |
+| 2 | **Clarify** — tick every item of the ambiguity checklist below (ticked + "n/a: why" when it does not apply); ask the human ONE batch; never guess a business fact | Task §2 checklist + Q&A table; change proposal › Clarifications | every checklist item ticked (8 standard dimensions; missing ones only warn), every question answered |
 | 3 | **Solution** — `codegraph explore/impact` (reuse first), approach + rejected alternatives, data/API changes | Task §3; change `design.md`; ADR for project-wide choices | §3 not empty |
 | 4 | **Tests first** — test cases from every AC/scenario (`kit-new testplan`), write them, see them FAIL for the right reason | `docs/qa/TASK-NNN.md` + test code | every AC in the test plan |
 | 5 | **Implement** — smallest change that passes; follow `.agent/rules/`; checkpoint each green step | code + `kit-task checkpoint` | `kit-run check` green |

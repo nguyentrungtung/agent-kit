@@ -125,7 +125,7 @@ check "legacy task not asked for a source link"     "! printf '%s\n' \"\$out\" |
 check "legacy task not blocked by assumption/docs"  "! printf '%s\n' \"\$out\" | grep -qE 'unconfirmed assumptions|no spec / living doc'"
 check "legacy task not blocked by repo-wide trace"  "! printf '%s\n' \"\$out\" | grep -q 'traceability errors'"
 out="$(cd "$d" && f="$(ls .agent/tasks/TASK-001-*.md)" && perl -0pi -e 's/^(tags: .*\n)/$1template: 2\n/m' "$f" && { .agent/scripts/kit-task verify 2>&1 || true; })"
-check "template 2 enforces the checklist"           "printf '%s\n' \"\$out\" | grep -q 'tick every item of the ambiguity checklist'"
+check "template 2 enforces the checklist"           "printf '%s\n' \"\$out\" | grep -q 'tick every item of the checklist'"
 check "template 2 asks for a review record"         "printf '%s\n' \"\$out\" | grep -q 'no code review recorded'"
 rc=0; (cd "$d" && .agent/scripts/kit-task review "BLOCKER 0 · MAJOR 1 — oops" >/dev/null 2>&1) || rc=$?
 check "review summary needs fixed/open for non-zero" "[ $rc -ne 0 ]"
@@ -141,7 +141,7 @@ check "hand-written review line is not accepted"    "printf '%s\n' \"\$out\" | g
 printf '\n== template 2 cannot be switched off by deleting the line; a customised _TEMPLATE.md still yields template 2\n'
 out="$(cd "$d" && .agent/scripts/kit-task new "After the upgrade" >/dev/null && f="$(ls .agent/tasks/TASK-002-*.md)" \
   && perl -0pi -e 's/^template: 2\n//m' "$f" && { .agent/scripts/kit-task verify TASK-002 2>&1 || true; })"
-check "deleted template line still enforces gates"  "printf '%s\n' \"\$out\" | grep -q 'tick every item of the ambiguity checklist'"
+check "deleted template line still enforces gates"  "printf '%s\n' \"\$out\" | grep -q 'tick every item of the checklist'"
 out="$(cd "$d" && perl -0pi -e 's/^template: 2\n//m' .agent/tasks/_TEMPLATE.md && .agent/scripts/kit-task new "From custom template" >/dev/null \
   && grep -h '^template:' .agent/tasks/TASK-003-*.md)"
 check "new task from a customised template is 2"    "[ \"\$out\" = 'template: 2' ]"
@@ -163,11 +163,13 @@ out="$(cd "$d" && f="$(ls .agent/tasks/TASK-001-*.md)" && perl -0pi -e 's/(## 7\
   && { .agent/scripts/kit-task verify 2>&1 || true; })"
 check "'- **Docs:** none' accepted"                 "printf '%s\n' \"\$out\" | grep -q 'living docs updated with the code'"
 
-printf '\n== the checklist gate needs each of the 8 dimensions ticked, not just 8 ticks\n'
+printf '\n== the checklist gate: every box ticked (any number); a missing standard dimension only warns\n'
 out="$(cd "$d" && f="$(ls .agent/tasks/TASK-002-*.md)" && perl -pi -e 's/^- \[ \] /- [x] /' "$f" && { .agent/scripts/kit-task verify TASK-002 2>&1 || true; })"
-check "all 8 dimensions ticked → walked"            "printf '%s\n' \"\$out\" | grep -q '2 ambiguity checklist walked'"
+check "all boxes ticked → done"                    "printf '%s\n' \"\$out\" | grep -q '2 clarification checklist done'"
 out="$(cd "$d" && f="$(ls .agent/tasks/TASK-002-*.md)" && perl -pi -e 's/^- \[x\] Numbers.*$/- [x] Something unrelated/' "$f" && { .agent/scripts/kit-task verify TASK-002 2>&1 || true; })"
-check "a replaced dimension is reported missing"    "printf '%s\n' \"\$out\" | grep -q 'missing: Numbers'"
+check "a replaced dimension only warns"            "printf '%s\n' \"\$out\" | grep -q 'not in the checklist: Numbers' && printf '%s\n' \"\$out\" | grep -q '2 clarification checklist done'"
+out="$(cd "$d" && f="$(ls .agent/tasks/TASK-002-*.md)" && perl -0pi -e 's/(- \[x\] Something unrelated\n)/$1- [ ] Task-specific: export format\n/' "$f" && { .agent/scripts/kit-task verify TASK-002 2>&1 || true; })"
+check "an unticked task-specific item blocks"     "printf '%s\n' \"\$out\" | grep -q 'tick every item of the checklist'"
 
 printf '\n== kit add fills an empty key in a CRLF project.yaml and keeps the CRLF ending\n'
 c="$WORK/crlf"; fresh "$c"
