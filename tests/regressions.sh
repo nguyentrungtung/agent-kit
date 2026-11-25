@@ -242,8 +242,108 @@ check "gitlab.com remote → gitlab"                   "[ \"\$(prov https://gitl
 check "github.com remote → github"                   "[ \"\$(prov git@github.com:acme/app.git)\" = github ]"
 printf 'git_provider: gitlab   # self-hosted\n' > "$b/.agent/project.yaml"
 check "git_provider in project.yaml wins"            "[ \"\$(prov https://git.corp.example/acme/app.git)\" = gitlab ]"
-out="$(cd "$d" && git remote add origin https://gitlab.com/acme/app.git 2>/dev/null; { .agent/scripts/kit-task sync-gh --all 2>&1 || true; })"
-check "sync-gh refuses on a GitLab remote"           "printf '%s\n' \"\$out\" | grep -q 'work with GitHub issues only'"
+
+# ---------------------------------------------------------------- hook managers (Husky / lefthook / …) coexist
+printf '\n== kit init --hooks: an existing hook manager keeps ownership and calls the kit through kit-hook\n'
+hk() { # hk <dir> [init args…] — a git repo with package.json, then kit init; log in <dir>.log
+  local dir="$1"; shift; fresh "$dir"
+  (cd "$dir" && git init -q -b main && printf '{"name":"x","version":"1.0.0"}\n' > package.json)
+  [ -z "${PRE:-}" ] || (cd "$dir" && eval "$PRE")
+  "$KIT" init "$dir" --stack node --modules none --yes --no-deps --no-setup --no-tools "$@" >"$dir.log" 2>&1 || true
+}
+hp() { git -C "$1" config --get core.hooksPath 2>/dev/null || true; }
+H="$WORK/hk-husky"
+PRE='mkdir -p .husky && printf "echo existing-hook-ran >> hook-ran.log" > .husky/pre-commit' hk "$H"
+check "husky found → core.hooksPath left unset"     "[ -z \"\$(hp \"\$H\")\" ]"
+check "your husky command is kept"                  "grep -q 'existing-hook-ran' \"\$H/.husky/pre-commit\""
+check "kit call appended to an existing hook"       "[ \"\$(grep -c 'kit-hook pre-commit' \"\$H/.husky/pre-commit\")\" = 1 ]"
+check "commit-msg / pre-push hook files created"    "grep -q 'kit-hook commit-msg \"\$1\"' \"\$H/.husky/commit-msg\" && grep -q 'kit-hook pre-push \"\$@\"' \"\$H/.husky/pre-push\" && [ -x \"\$H/.husky/pre-push\" ]"
+"$KIT" init "$H" --stack node --modules none --yes --no-deps --no-setup --no-tools >/dev/null 2>&1 || true
+check "running init again does not duplicate"       "[ \"\$(grep -c 'kit-hook' \"\$H/.husky/pre-commit\")\" = 1 ]"
+# simulate Husky being active, then prove the whole chain: protected branch, commit message, and the user's own hook
+(cd "$H" && git config core.hooksPath .husky && git add -A && git -c core.hooksPath=/dev/null commit -qm "chore: base" && git branch develop)
+rc=0; (cd "$H" && git commit -q --allow-empty -m "chore: on main" >/dev/null 2>&1) || rc=$?
+check "chain blocks a commit on a protected branch" "[ $rc -ne 0 ]"
+(cd "$H" && git checkout -q -b feature/TASK-001-x)
+rc=0; out="$(cd "$H" && git commit -q --allow-empty -m "bad message" 2>&1)" || rc=$?
+check "chain enforces Conventional Commits"         "[ $rc -ne 0 ] && printf '%s\n' \"\$out\" | grep -q 'Conventional Commits'"
+rc=0; (cd "$H" && rm -f hook-ran.log && git commit -q --allow-empty -m "chore(TASK-001): fine" >/dev/null 2>&1) || rc=$?
+check "good commit passes and your hook also ran"   "[ $rc -eq 0 ] && grep -q existing-hook-ran \"\$H/hook-ran.log\""
+out="$(cd "$H" && .agent/scripts/kit-doctor 2>&1 || true)"
+check "kit-doctor accepts the chained hooks"        "printf '%s\n' \"\$out\" | grep -q 'chained through your hook manager'"
+rc=0; (cd "$H" && .agent/scripts/kit-hook nonsense >/dev/null 2>&1) || rc=$?
+check "kit-hook rejects an unknown hook name"       "[ $rc -eq 2 ]"
+
+H="$WORK/hk-lefthook"; PRE='printf "pre-commit:\n  commands: {}\n" > lefthook.yml' hk "$H"
+check "lefthook found → hooksPath unset, howto shown" "[ -z \"\$(hp \"\$H\")\" ] && grep -q 'lefthook.yml' \"\$H.log\" && grep -q 'kit-hook pre-push' \"\$H.log\""
+H="$WORK/hk-husky-kit"; PRE='mkdir -p .husky' hk "$H" --hooks kit
+check "--hooks kit overrides (with a warning)"      "[ \"\$(hp \"\$H\")\" = .githooks ] && grep -q 'stop running' \"\$H.log\""
+H="$WORK/hk-plain"; hk "$H"
+check "no manager → kit owns hooks as before"       "[ \"\$(hp \"\$H\")\" = .githooks ]"
+H="$WORK/hk-keep"; hk "$H" --hooks keep
+check "--hooks keep on a plain repo prints the lines" "[ -z \"\$(hp \"\$H\")\" ] && grep -q 'kit-hook commit-msg' \"\$H.log\""
+rc=0; "$KIT" init "$WORK/hk-bad" --hooks nonsense >/dev/null 2>&1 || rc=$?
+check "--hooks rejects other values"                "[ $rc -ne 0 ]"
+
+# ---------------------------------------------------------------- issue sync: GitLab (REST) and GitHub (gh) behind one interface
+printf '\n== kit-task sync / pull: GitLab through its REST API (fake server), GitHub through gh (fake gh)\n'
+issue_project() { # issue_project <dir> <provider> <remote-url> → a kit project on develop with git_provider set
+  local dir="$1"; fresh "$dir"
+  (cd "$dir" && git init -q -b main && printf '{"name":"x","version":"1.0.0"}\n' > package.json)
+  "$KIT" init "$dir" --stack node --modules none --yes --no-deps --no-setup --no-tools >"$dir.log" 2>&1
+  perl -pi -e "s/^git_provider:.*/git_provider: $2/" "$dir/.agent/project.yaml"
+  (cd "$dir" && git add -A && git commit -qm "chore: init" --no-verify && git branch develop && git checkout -q develop && git remote add origin "$3")
+}
+python3 "$ROOT/tests/lib/fake-gitlab.py" "$WORK/gl.log" "$WORK/gl.port" & GLPID=$!
+rm -f "$WORK/gl.log" "$WORK/gl.port"; for _ in $(seq 1 50); do [ -s "$WORK/gl.port" ] && break; sleep 0.1; done
+GLP="$(cat "$WORK/gl.port" 2>/dev/null || echo 0)"
+g="$WORK/glsync"; issue_project "$g" gitlab "http://127.0.0.1:$GLP/acme/app.git"
+(cd "$g" && .agent/scripts/kit-task new "Alpha feature" --priority P1 >/dev/null)
+gls() { (cd "$g" && GITLAB_TOKEN="${GLT:-secret-token}" .agent/scripts/kit-task "$@" 2>&1); }
+gl() { jq -s -r "$1" "$WORK/gl.log"; }
+rc=0; out="$(cd "$g" && env -u GITLAB_TOKEN -u GITLAB_PRIVATE_TOKEN .agent/scripts/kit-task sync 2>&1)" || rc=$?
+check "no token → clear error, nothing sent"        "[ $rc -ne 0 ] && printf '%s\n' \"\$out\" | grep -q GITLAB_TOKEN && [ ! -s \"$WORK/gl.log\" ]"
+out="$(GLT=wrong gls sync TASK-001 || true)"
+check "a rejected token is reported"                "printf '%s\n' \"\$out\" | grep -q 'HTTP 401'"
+: > "$WORK/gl.log"; gls sync TASK-001 >/dev/null
+check "issue created in the encoded project path"   "[ \"\$(gl '[.[]|select(.m==\"POST\" and (.p|endswith(\"/issues\")))|.p]|first')\" = '/api/v4/projects/acme%2Fapp/issues' ]"
+check "title and labels sent"                       "[ \"\$(gl '[.[]|select(.m==\"POST\" and (.p|endswith(\"/issues\")))|.form]|first|[.title, (.labels|contains(\"status:todo\") and contains(\"priority:P1\"))]|@csv')\" = '\"[TASK-001] Alpha feature\",true' ]"
+check "every request carried the token"             "[ \"\$(gl 'all(.[]; .token==\"secret-token\")')\" = true ]"
+check "labels are created first"                    "[ \"\$(gl '[.[]|select(.p|endswith(\"/labels\"))]|length')\" -ge 15 ]"
+check "number saved in .agent/tasks/.issues"        "grep -qx 'TASK-001=41' \"\$g/.agent/tasks/.issues\""
+: > "$WORK/gl.log"; gls sync TASK-001 >/dev/null
+check "second sync updates, adding/removing status" "[ \"\$(gl '[.[]|select(.m==\"PUT\")|.form]|first|[(.add_labels|contains(\"status:todo\")), (.remove_labels|contains(\"status:done\")), (.remove_labels|contains(\"status:todo\"))]|@csv')\" = 'true,true,false' ]"
+perl -pi -e 's/^status: todo/status: done/' "$g"/.agent/tasks/TASK-001-*.md; : > "$WORK/gl.log"; gls sync TASK-001 >/dev/null
+check "done → the GitLab issue is closed"           "[ \"\$(gl '[.[]|select(.form.state_event==\"close\")]|length')\" = 1 ]"
+perl -pi -e 's/^status: done/status: todo/' "$g"/.agent/tasks/TASK-001-*.md; : > "$WORK/gl.log"; gls sync TASK-001 >/dev/null
+check "back to todo → it is reopened"               "[ \"\$(gl '[.[]|select(.form.state_event==\"reopen\")]|length')\" = 1 ]"
+out="$(gls pull 7)"
+check "pull creates a task from the issue"          "ls \"\$g\"/.agent/tasks/TASK-002-*.md >/dev/null 2>&1 && grep -q '^type: fix' \"\$g\"/.agent/tasks/TASK-002-*.md && grep -q '^priority: P1' \"\$g\"/.agent/tasks/TASK-002-*.md && grep -q '^issue: 7' \"\$g\"/.agent/tasks/TASK-002-*.md && grep -q 'Users cannot log in' \"\$g\"/.agent/tasks/TASK-002-*.md && grep -q '^Source: gitlab issue #7' \"\$g\"/.agent/tasks/TASK-002-*.md"
+out="$(gls pull 7 || true)"
+check "pulling the same issue twice is refused"     "printf '%s\n' \"\$out\" | grep -q 'already linked'"
+kill "$GLPID" 2>/dev/null || true; wait "$GLPID" 2>/dev/null || true
+
+# GitHub keeps working through gh: the calls are the ones kit-task made before the provider refactor
+FB="$WORK/fakebin"; rm -rf "$FB"; mkdir -p "$FB"
+cat > "$FB/gh" <<'GH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_LOG"
+case "$1 $2" in
+  "issue create") echo "https://github.com/acme/app/issues/12" ;;
+  "issue view") if printf '%s' "$*" | grep -q 'json state'; then echo CLOSED; else printf '{"title":"T","body":"b","labels":[{"name":"bug"}]}\n'; fi ;;
+esac
+exit 0
+GH
+chmod +x "$FB/gh"
+gh_="$WORK/ghsync"; issue_project "$gh_" github "https://github.com/acme/app.git"
+(cd "$gh_" && .agent/scripts/kit-task new "Beta fix" --type fix >/dev/null)
+export GH_LOG="$WORK/gh.log"; : > "$GH_LOG"
+(cd "$gh_" && PATH="$FB:$PATH" .agent/scripts/kit-task sync TASK-001 >/dev/null 2>&1)
+check "github create: same flags as before"         "grep -qx 'issue create --title \[TASK-001\] Beta fix --body-file .* --label status:todo --label type:fix --label priority:P2' \"\$GH_LOG\""
+: > "$GH_LOG"; (cd "$gh_" && PATH="$FB:$PATH" .agent/scripts/kit-task sync-gh TASK-001 >/dev/null 2>&1)
+check "github update: add/remove labels as before"  "grep -q 'issue edit 12 --title \[TASK-001\] Beta fix --body-file .* --add-label status:todo,type:fix,priority:P2 --remove-label status:in-progress,status:review,status:done,status:abandoned' \"\$GH_LOG\""
+check "github: a closed issue is reopened (old name sync-gh works)" "grep -qx 'issue reopen 12' \"\$GH_LOG\""
+unset GH_LOG
 
 # ---------------------------------------------------------------- 2. CI task gate scope
 printf '\n== CI task gate: verify tasks this PR finishes, skip tasks finished on the base branch\n'

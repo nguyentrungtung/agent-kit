@@ -17,8 +17,10 @@ protected_regex: ^(main|master|develop|release/.*|hotfix/.*)$
 push_checkpoints: true       # push task branch to origin on every checkpoint (remote backup)
 
 # --- Tasks & Git hosting ---
+gitlab_url:                  # GitLab only, optional: https://gitlab.example.com (empty = taken from the git remote)
+gitlab_project:              # GitLab only, optional: group/subgroup/project (empty = taken from the git remote)
 git_provider:                # github | gitlab — where PRs/MRs are opened (empty = guess from the remote URL; set it for self-hosted GitLab)
-gh_project:                  # optional GitHub Project for kit-task sync-gh, as <owner>/<number> (e.g. @me/3 or my-org/7)
+gh_project:                  # optional GitHub Project for kit-task sync, as <owner>/<number> (e.g. @me/3 or my-org/7)
 
 # --- Commands (verified by the kit-onboard playbook; empty = skipped) ---
 # Steps: install format format_check lint typecheck arch test build audit docs up down logs

@@ -9,6 +9,8 @@
 #       --name <n> --lang vi|en   --yes (accept defaults, install dev deps, run module setup)
 #       --install-tools (install MISSING global tools without asking; never implied by --yes)
 #       --no-deps --no-setup --no-tools --force (overwrite) --no-git
+#       --hooks auto|kit|keep     git hooks: kit = core.hooksPath → .githooks; keep = leave Husky/lefthook/… alone and chain the kit's
+#                                 checks through .agent/scripts/kit-hook; auto (default) = keep when a manager is found, else kit
 #   kit add <module…> [--dir <project>] [--services …] [--yes]   add modules to an installed project
 #   kit doctor [dir] [--run]      check tools/configs of an installed project
 #   kit tools [dir] [install] [--yes]   tools the project needs; installs only the missing ones
@@ -665,11 +667,68 @@ run_module_setup() {
   done
 }
 
+# ---- git hooks: the kit owns them (core.hooksPath), or a manager the project already uses (Husky, lefthook, …) calls the kit
+KIT_HOOK_NAMES="pre-commit commit-msg pre-push"
+hook_manager() { # husky | lefthook | pre-commit | other — a hook setup the project already has; empty = none
+  local hp f; hp="$(git -C "$TARGET" config --get core.hooksPath 2>/dev/null || true)"
+  if [ -d "$TARGET/.husky" ] || grep -qs '"husky"' "$TARGET/package.json"; then echo husky; return 0; fi
+  for f in "$TARGET"/lefthook.* "$TARGET"/.lefthook.*; do [ ! -e "$f" ] || { echo lefthook; return 0; }; done
+  if [ -f "$TARGET/.pre-commit-config.yaml" ]; then echo pre-commit; return 0; fi
+  if [ -n "$hp" ] && [ "$hp" != .githooks ]; then echo other; fi
+  return 0
+}
+hook_call() { # the line a manager's hook file uses to call one kit hook
+  case "$1" in commit-msg) echo '.agent/scripts/kit-hook commit-msg "$1"' ;; pre-push) echo '.agent/scripts/kit-hook pre-push "$@"' ;; *) echo '.agent/scripts/kit-hook pre-commit' ;; esac
+}
+wire_husky() { # append the kit call to .husky/<hook> (create the file when missing); idempotent, keeps the existing commands
+  local h f
+  mkdir -p "$TARGET/.husky"
+  for h in $KIT_HOOK_NAMES; do
+    f="$TARGET/.husky/$h"
+    if [ -f "$f" ]; then
+      grep -qF 'kit-hook' "$f" && continue
+      [ -z "$(tail -c1 "$f")" ] || printf '\n' >> "$f"
+      printf '%s\n' "$(hook_call "$h")" >> "$f"
+    else
+      { printf '#!/usr/bin/env sh\n'; [ ! -f "$TARGET/.husky/_/husky.sh" ] || printf '. "$(dirname -- "$0")/_/husky.sh"\n'; printf '%s\n' "$(hook_call "$h")"; } > "$f"
+    fi
+    chmod +x "$f"
+  done
+  say "hooks: added the kit checks to .husky/pre-commit, commit-msg, pre-push (your commands there are untouched)"
+}
+hook_howto() { # what to add by hand for managers whose config the kit does not edit
+  case "$1" in
+    lefthook) printf '%s\n' "   - hooks: add to lefthook.yml (your lefthook keeps running; then:  lefthook install):" \
+      "       pre-commit:  { commands: { agent-kit: { run: .agent/scripts/kit-hook pre-commit } } }" \
+      "       commit-msg:  { commands: { agent-kit: { run: .agent/scripts/kit-hook commit-msg {1} } } }" \
+      "       pre-push:    { commands: { agent-kit: { use_stdin: true, run: .agent/scripts/kit-hook pre-push {1} {2} } } }" ;;
+    pre-commit) printf '%s\n' "   - hooks: add a local hook to .pre-commit-config.yaml per stage (pre-commit, commit-msg):" \
+      "       - repo: local" "         hooks: [{ id: agent-kit, name: agent-kit, entry: .agent/scripts/kit-hook pre-commit, language: system, pass_filenames: false, always_run: true }]" \
+      "     (the pre-push guard needs the refs on stdin, which pre-commit does not pass — protect the branches on the server too)" ;;
+    *) printf '%s\n' "   - hooks: your hook setup was left alone; from each hook call the kit (the same lines work for any manager):" \
+      "       pre-commit: .agent/scripts/kit-hook pre-commit" "       commit-msg: .agent/scripts/kit-hook commit-msg \"\$1\"" \
+      "       pre-push:   .agent/scripts/kit-hook pre-push \"\$@\"     (stdin must reach it)" ;;
+  esac
+}
+setup_hooks() {
+  local mode="$HOOKS" mgr; mgr="$(hook_manager)"
+  [ "$mode" != auto ] || { [ -n "$mgr" ] && mode=keep || mode=kit; }
+  if [ "$mode" = kit ]; then
+    [ -z "$mgr" ] || note "hooks: found $mgr — --hooks kit points core.hooksPath at .githooks, so its hooks stop running (use --hooks keep to chain instead)"
+    git config core.hooksPath .githooks
+  elif [ "$mgr" = husky ]; then wire_husky
+  else
+    say "hooks: keeping your ${mgr:-own} hook setup — the kit's checks are chained through .agent/scripts/kit-hook"
+    NOTES="$NOTES
+$(hook_howto "$mgr")"
+  fi
+}
+
 git_setup() {
   local cfg="$TARGET/.agent/project.yaml" mb
   cd "$TARGET"
   if ! git rev-parse --git-dir >/dev/null 2>&1; then git init -q -b main; say "git init (main)"; fi
-  git config core.hooksPath .githooks
+  setup_hooks
   if git rev-parse -q --verify HEAD >/dev/null; then
     if ! git show-ref -q --verify refs/heads/main && git show-ref -q --verify refs/heads/master; then
       sed -i.bak 's/^main_branch: main/main_branch: master/' "$cfg" && rm -f "$cfg.bak"; note "main branch is 'master' — project.yaml updated"
@@ -722,7 +781,7 @@ pick_interactive() {
 
 # ---------------------------------------------------------------- commands
 cmd_init() {
-  TARGET=""; PROJECT_NAME=""; LANG_DOCS=vi; YES=0; DEPS=ask; SETUP=ask; TOOLS=ask; GITSETUP=1
+  TARGET=""; PROJECT_NAME=""; LANG_DOCS=vi; YES=0; DEPS=ask; SETUP=ask; TOOLS=ask; GITSETUP=1; HOOKS=auto
   local stack_flag="" fw_flag=""; MODS_FLAG=""; SERVICES_FLAG=""; PRESET=app
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -741,6 +800,7 @@ cmd_init() {
       --install-tools) TOOLS=yes; shift ;;
       --force) FORCE=1; shift ;;
       --no-git) GITSETUP=0; shift ;;
+      --hooks) HOOKS="${2:-}"; case "$HOOKS" in auto|kit|keep) ;; *) die "--hooks takes auto, kit or keep" ;; esac; shift 2 ;;
       -h|--help) usage ;;
       -*) die "unknown option $1" ;;
       *) TARGET="$1"; shift ;;
@@ -811,7 +871,7 @@ Next steps
   3. Open your agent and say:
        existing code → "run the kit-onboard playbook"   (wires snippets, fixes commands, records baseline)
        new idea      → "run kit-ba, then kit-sa, then kit-plan"
-  4. GitHub: protect main + develop (require PR + the 'ci' checks).
+  4. Git host (GitHub / GitLab): protect main + develop (require a PR/MR + the CI checks).
 EOF
 }
 

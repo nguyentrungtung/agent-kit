@@ -16,7 +16,23 @@ problems=0
 echo "agent-kit doctor — $(cfg name "$(basename "$KIT_ROOT")") · components: $(cfg components "$(cfg stack)")"
 
 echo "Setup"
-if [ "$(git config --get core.hooksPath 2>/dev/null)" = ".githooks" ]; then ok "git hooks active (.githooks)"; else bad "git hooks NOT active — run: git config core.hooksPath .githooks"; fi
+hp="$(git config --get core.hooksPath 2>/dev/null || true)"
+if [ "$hp" = ".githooks" ]; then ok "git hooks active (.githooks)"
+else  # a hook manager (Husky, lefthook, …) may own the hooks and call the kit through kit-hook
+  missing=""
+  for h in pre-commit commit-msg pre-push; do
+    grep -qs 'kit-hook' ".husky/$h" 2>/dev/null || grep -qsE "kit-hook +$h" lefthook.* .lefthook.* .pre-commit-config.yaml 2>/dev/null || missing="$missing $h"
+  done
+  case "$missing" in
+    "") ok "git hooks chained through your hook manager (kit-hook)" ;;
+    " pre-push") ok "pre-commit + commit-msg chained through your hook manager (kit-hook)"; meh "pre-push is not chained — protected-branch pushes are then only stopped by the server" ;;
+    " pre-commit commit-msg pre-push") bad "git hooks NOT active — run: git config core.hooksPath .githooks   (or keep your hook manager and chain the kit: see .agent/scripts/kit-hook)" ;;
+    *) bad "kit hooks only partly chained — missing:$missing (see .agent/scripts/kit-hook)" ;;
+  esac
+  if [ -z "$hp" ] && [ ! -f .git/hooks/pre-commit ] && [ "$missing" != " pre-commit commit-msg pre-push" ]; then
+    meh "hooks are wired but not installed in git yet — run your manager's install (npm install for Husky, lefthook install)"
+  fi
+fi
 if grep -q 'TODO' .agent/context/PROJECT.md 2>/dev/null; then meh "PROJECT.md still has TODOs — run the kit-onboard (existing code) or kit-ba (new project) playbook"; else ok "context filled"; fi
 n_rules=$(find .agent/rules -name '*.md' 2>/dev/null | grep -vc README || true)
 if [ "${n_rules:-0}" -gt 0 ]; then ok "$n_rules rule file(s) in .agent/rules"; else bad "no rules in .agent/rules"; fi

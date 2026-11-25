@@ -9,7 +9,7 @@
 | Decisions | `docs/adr/` (create with `.agent/scripts/kit-new adr "<title>"`) |
 | Coding standards | `.agent/rules/` (project > stack > core), summary in `.agent/context/CONVENTIONS.md` |
 | Domain language | `GLOSSARY.md` (repo root) |
-| GitHub issues (optional) | linked via `.agent/tasks/.issues` (`TASK-NNN=<issue>`); create/update with `.agent/scripts/kit-task sync-gh` (asks first) |
+| GitHub / GitLab issues (optional) | linked via `.agent/tasks/.issues` (`TASK-NNN=<issue>`); create/update with `.agent/scripts/kit-task sync` (asks first) |
 
 Create new work items with `.agent/scripts/kit-task new "<title>" [--change <change>]` — never by hand, never directly on the tracker.
 Scratch notes go in the task file's Progress log, not in a `.scratch/` folder.

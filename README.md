@@ -229,9 +229,10 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 | `.agent/scripts/kit-openspec <args>` | OpenSpec CLI đúng version ghim trong `project.yaml` (dùng `npx` nếu máy chưa cài) |
 | `kit-task start TASK-NNN --worktree` | Task chạy trong worktree riêng `../<repo>-TASK-NNN` để nhiều agent làm song song |
 | `kit-task worktrees` / `cleanup TASK-NNN` | Liệt kê worktree / gỡ worktree (từ chối nếu còn việc chưa commit) |
-| `kit-task sync-gh [TASK-NNN\|--all]` / `pull-gh <issue#>` | Đồng bộ task ↔ GitHub Issues (label status/type/priority, tự đóng khi done, tuỳ chọn thêm vào GitHub Project) / tạo task từ issue |
+| `kit-task sync [TASK-NNN\|--all]` / `pull <issue#>` | Đồng bộ task ↔ Issues của **GitHub** (qua `gh`) hoặc **GitLab** (gitlab.com / tự host, qua API với `GITLAB_TOKEN`): label status/type/priority, tự đóng khi done / mở lại khi quay về todo; `pull` tạo task từ issue. Tên cũ `sync-gh` / `pull-gh` vẫn dùng được. Nhà cung cấp do `git_provider` quyết định |
 | `.agent/scripts/kit-trace [--strict] · kit-trace assumptions` | Bước "analyze": mọi id UC/US/BR/FR/NFR/ADR được nhắc tới phải tồn tại; cảnh báo story thiếu UC/AC/AC âm, FR không có story, thư mục module lệch `modules.md`, `ASSUMPTION:` chưa được người xác nhận. Chạy trong `kit-run check`, CI và `kit-task verify` |
 | `.agent/scripts/kit-review-bot [on\|off\|status]` | Bật/tắt review **tự động** của CodeRabbit cho repo (ghi `reviews.auto_review.enabled` vào `.coderabbit.yaml`, giữ nguyên các khoá khác). Tắt rồi vẫn gọi được khi cần: comment `@coderabbitai review` trên PR/MR; tạm dừng một PR/MR: `@coderabbitai pause`. Dùng được trên GitHub lẫn GitLab |
+| `.agent/scripts/kit-hook <pre-commit\|commit-msg\|pre-push>` | Một cửa gọi các kiểm tra git của kit (chặn commit lên nhánh protected, secret, Conventional Commits, kiểm tra trước push). Dùng khi repo đã có Husky/lefthook: hook manager của bạn gọi script này thay vì để kit chiếm `core.hooksPath`. Thuần git cục bộ, không phụ thuộc nhà cung cấp |
 | `.agent/scripts/kit-board [--json\|--html\|--open]` | Bảng kanban đọc trạng thái thật từ từng nhánh task; JSON cho UI/orchestrator; HTML tự chứa ở `.agent/local/board.html` |
 | `.agent/scripts/kit-doctor [--run]` | Kiểm tra hook, rules, tool cần cho từng `cmd_*` theo từng component, tool của module |
 | `.agent/scripts/kit-diagrams check\|export` | Render mọi sơ đồ Mermaid/PlantUML trong docs (module `ba`) |
@@ -269,7 +270,7 @@ OpenSpec được init cho `claude, codex, gemini, antigravity, dsh`. Ở harnes
    kit-task start TASK-008 --worktree ──▶ ../app-TASK-008  (agent B, nhánh feature/TASK-008-…)
                     │
    .agent/scripts/kit-board            ──▶ TODO · IN PROGRESS · REVIEW · DONE  (đọc file task trên từng nhánh)
-   kit-task sync-gh --all              ──▶ GitHub Issues (+ Project nếu đặt gh_project)
+   kit-task sync --all                 ──▶ GitHub/GitLab Issues (+ Project nếu GitHub và đặt gh_project)
    PR merge (Closes #N)                ──▶ issue tự đóng; kit-task cleanup TASK-007 gỡ worktree
 ```
 - File task (`.agent/tasks/*.md`) là **nguồn gốc duy nhất**. Board, GitHub Issues và mọi UI sau này chỉ là lớp hiển thị. Schema frontmatter cố định, xem `.agent/tasks/README.md`.
@@ -300,6 +301,18 @@ gh run list --limit 5
 gh run view <run_id> --log-failed
 ```
 
+### Repo đã có Husky / lefthook / hook manager khác
+
+`kit init --hooks auto|kit|keep` (mặc định `auto`):
+
+| Chế độ | Việc kit làm |
+|---|---|
+| `auto` | Có Husky / lefthook / pre-commit framework / `core.hooksPath` sẵn → như `keep`; không có → như `kit` |
+| `kit` | `git config core.hooksPath .githooks`. Hook manager cũ **ngừng chạy** (kit cảnh báo) |
+| `keep` | Không đụng `core.hooksPath`. **Husky:** tự thêm một dòng gọi `.agent/scripts/kit-hook …` vào `.husky/pre-commit`, `commit-msg`, `pre-push` (giữ nguyên lệnh của bạn, chạy lại không nhân đôi). **lefthook / pre-commit framework / khác:** in sẵn đoạn cần thêm, không tự sửa file cấu hình của bạn |
+
+Hook manager của bạn là **nguồn duy nhất** của git hook; kit chỉ là một lệnh nó gọi. Cách này giống nhau trên GitHub, GitLab (cloud hay tự host), Bitbucket, Gitea. `kit-doctor` nhận ra hook đã chain. Lưu ý: guard `pre-push` cần danh sách ref trên stdin; pre-commit framework không truyền nên chỉ chain được `pre-commit` và `commit-msg` (nhớ bật bảo vệ nhánh trên server).
+
 ### Dùng GitLab thay cho GitHub
 
 Đặt `git_provider: gitlab` trong `.agent/project.yaml` (để trống = đoán từ URL remote; GitLab tự host thì phải đặt).
@@ -308,7 +321,7 @@ gh run view <run_id> --log-failed
 |---|---|
 | Git hook (`pre-commit`, `commit-msg`, `pre-push`), hook Claude, `kit-trace`, `kit-task verify`, `kit-run check` | ✅ không phụ thuộc nhà cung cấp |
 | `kit-task finish` | ✅ mở Merge Request bằng `glab mr create` (cần `glab auth login`); thiếu `glab` thì chỉ nhắc mở MR bằng tay. Chưa được thử với `glab` thật |
-| `kit-task sync-gh` / `pull-gh` | ❌ chỉ GitHub Issues — trên GitLab lệnh báo lỗi rõ ràng; file task vẫn là nguồn gốc |
+| `kit-task sync` / `pull` (Issues) | ✅ qua REST API v4, chỉ cần `curl` + `jq` + biến môi trường `GITLAB_TOKEN` (token scope `api`, kit không lưu token). Host/project lấy từ remote; GitLab tự host có sub-path hoặc cổng riêng thì đặt `gitlab_url` + `gitlab_project` trong `project.yaml`. Đã thử với server giả, chưa thử với GitLab thật |
 | `.github/workflows/ci.yml` (guard, quality, security), `cd.yml`, `dependabot.yml`, template issue/PR | ❌ chỉ GitHub Actions. Trên GitLab không chạy; **chưa có `.gitlab-ci.yml` đi kèm** — pipeline của bạn cần gọi các script của kit (`kit-run ci`, `kit-trace`, `kit-task verify`) để giữ các gate |
 | Chặn merge ở server | Bật *Pipelines must succeed* và protected branch trên GitLab, tương đương branch protection |
 
