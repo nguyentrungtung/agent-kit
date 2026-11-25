@@ -139,7 +139,7 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 | Sự cố production + post-mortem không đổ lỗi | `kit-incident`, `kit-new postmortem "<tiêu đề>"` |
 | Checklist release (gồm DAST/pentest trên staging, rollback) | `.agent/checklists/release.md` |
 | Nâng cấp kit cho dự án đã cài | `kit upgrade <dir>`: file bạn chưa sửa thì cập nhật, file bạn đã sửa thì giữ nguyên + `*.kit-new`, file bạn đã xoá thì không tạo lại; thêm key mới vào `project.yaml` (dựa trên `.agent/kit.manifest`) |
-| Lên 0.12.0 (repo có sẵn, GitLab) | `kit init` đoán Git host và ghi `git_provider:`; repo GitLab không còn nhận `.github/` (kit giữ nguyên file `.github/` đã cài, chỉ ngừng cập nhật) mà nhận `.gitlab-ci.yml` / `.gitlab-ci.kit.yml` + template MR. Gate CI chuyển vào `.agent/scripts/kit-ci`: `.github/workflows/ci.yml` mới gọi script này (nếu bạn đã sửa `ci.yml`, bản mới ở `ci.yml.kit-new`). Repo có sẵn mà chưa có `develop` giờ mặc định trunk-based. Module `perf` tách khỏi `devops` (project cũ giữ nguyên file `perf/`). `kit-task sync-gh` / `pull-gh` đổi tên `sync` / `pull` (tên cũ vẫn chạy) và hỗ trợ GitLab |
+| Lên 0.12.0 (repo có sẵn, GitLab) | `kit init` đoán Git host và ghi `git_provider:`; repo GitLab không còn nhận `.github/` (kit giữ nguyên file `.github/` đã cài, chỉ ngừng cập nhật) mà nhận `.gitlab-ci.yml` / `.gitlab-ci.kit.yml` + template MR. Gate CI chuyển vào `.agent/scripts/kit-ci`: `.github/workflows/ci.yml` mới gọi script này (nếu bạn đã sửa `ci.yml`, bản mới ở `ci.yml.kit-new`). Repo có sẵn mà chưa có `develop` giờ mặc định trunk-based. `kit init` trên repo đã có commit chạy chế độ repo có sẵn (`--mode new` để cài đầy đủ như trước); `kit upgrade` không đổi `cmd_*` đã có. Module `perf` tách khỏi `devops` (project cũ giữ nguyên file `perf/`). `kit-task sync-gh` / `pull-gh` đổi tên `sync` / `pull` (tên cũ vẫn chạy) và hỗ trợ GitLab |
 | Lên 0.11.0 (anti-drift gates) | Task đang làm dở (không có `template: 2` trong front matter) giữ luật cũ — các gate mới (checklist §2, nguồn §1, assumption, review, tài liệu sống) chỉ áp dụng cho task tạo sau khi nâng cấp. Chạy `.agent/scripts/kit-trace` một lần để dọn id UC/US/BR/FR/ADR không tồn tại (kể cả id mẫu còn sót từ template BA). `ASSUMPTION:` trong `docs/ba/BRIEF.md` / `docs/architecture/SOLUTION.md` phải được người đổi thành `CONFIRMED:`. CI của dự án giờ chặn PR từ branch `feature/`·`fix/`·`hotfix/`·`refactor/` không có `TASK-NNN` — PR đang mở theo kiểu cũ cần đổi tên branch hoặc gắn task. Skeleton framework chuyển sang `.agent/stack/<stack>/skeletons/<framework>/`; skeleton bạn đã sửa được `kit upgrade` mang sang (bản kit ở `.kit-new`) |
 | Kit tự test chính nó | `.github/workflows/kit-ci.yml`: lint shell + actionlint + gitleaks, `tests/smoke.sh` (init 14 dự án mẫu), `tests/e2e-workflow.sh` (luồng OpenSpec → task → finish) |
 
@@ -336,15 +336,23 @@ Runner không ra được Internet (GitLab tự host trong mạng kín): `kit-ci
 
 ### Áp dụng vào repo có sẵn: kit không áp đặt
 
-Rút ra từ lần chạy thật trên một repo data (Python + dbt) trên GitLab tự host:
+Rút ra từ lần chạy thật trên một repo data (Python + dbt) trên GitLab tự host. Repo đã có commit được cài ở **chế độ repo có sẵn**
+(`--mode existing`, tự bật; `--mode new` để cài đầy đủ như project mới): repo là chuẩn, kit chỉ bật gate cho công cụ repo đang dùng.
 
 | Tình huống | Kit làm gì |
 |---|---|
+| Gate cho công cụ repo chưa dùng (mypy, pip-audit, sqlfluff, eslint…: không có trong dependencies, file cấu hình, CI hay hook) | Để trống `cmd_*` đó, không thêm file cấu hình (`mypy.ini`, `.sqlfluff`), không sửa dependencies của repo; `kit upgrade` cũng không đem lại. Muốn dùng: thêm tool vào repo rồi đặt `cmd_*` |
+| `pytest` trong CI có `--ignore=…` (test gọi API thật) | `cmd_test` / `cmd_coverage` dùng đúng các cờ đó |
+| Dev tool khai báo ở `[project.optional-dependencies] dev` | `uv sync --extra dev` |
+| dbt cài trong môi trường uv của component khác (`ingestion/pyproject.toml` có `dbt-core`) | `uv run --project ../ingestion dbt …` |
+| `profiles.yml` không có target `ci` / `packages.yml` không có `dbt_project_evaluator` | Không sinh lệnh `--target ci` (sẽ chạy nhầm vào warehouse khác) / để trống `cmd_arch`, và ghi rõ trong phần "to do" |
+| `.gitignore` đã phủ `.env`, `.venv/`… (kể cả dạng `**/`) | Chỉ thêm dòng chưa được phủ (hỏi chính git); không tạo `.env.example` ở gốc khi repo đã có file mẫu env ở chỗ khác |
 | Repo chưa có nhánh `develop` | Chạy **trunk-based**: `develop_branch: main`, task rẽ từ `main`, MR vào `main`, không tạo `develop` (`--flow gitflow` để dùng `develop`). Repo mới tinh vẫn mặc định gitflow |
 | Có `ruff.toml` / `.editorconfig` / `.sqlfluff` / `.prettierrc` ở thư mục cha | Không đặt bản thứ hai trong thư mục con (tool lấy file gần nhất nên sẽ âm thầm thay cấu hình của bạn) |
 | Component đã có `Dockerfile*` (kể cả `docker/Dockerfile`) hoặc repo đã có file compose | Không thêm Dockerfile / `compose.yaml` chung chung; `cmd_up/down/logs` để trống cho bạn tự đặt |
 | Hook thô trong `.git/hooks` hoặc Husky / lefthook / pre-commit framework | Không chiếm `core.hooksPath`, in cách nối vào `.agent/scripts/kit-hook` |
-| `.gitignore` của repo đang ẩn `AGENTS.md`, `.claude/`… | Cảnh báo khi cài và trong `kit-doctor`: các file đó chỉ nằm trên máy bạn, đồng đội và CI không thấy |
+| `.gitignore` của repo đang ẩn `AGENTS.md`, `.claude/`, cả `docs/`… | Cảnh báo khi cài và trong `kit-doctor` (mọi file kit ghi, gom theo thư mục): các file đó chỉ nằm trên máy bạn, đồng đội và CI không thấy |
+| `kit-doctor` với `uv run <tool>` | Báo lỗi khi `.venv` của project có mà thiếu tool đó (trước đây chỉ kiểm `uv`) |
 | Lệnh `cmd_*` sinh ra khác CI thật của repo | `kit-onboard` lấy **lệnh trong file CI của repo làm chuẩn** (ví dụ `--ignore=tests/live`, phiên bản ghim); `kit-doctor` báo khi `dbt --target ci` mà `profiles.yml` không có target `ci` |
 | `perf/` k6 | Chỉ ở preset `app` (module `perf`), không ép vào repo dữ liệu |
 

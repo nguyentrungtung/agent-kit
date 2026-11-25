@@ -14,6 +14,9 @@
 #       --flow gitflow|trunk|auto   gitflow = tasks branch from develop; trunk = from main (auto: trunk when an existing repo has no develop)
 #       --hooks auto|kit|keep     git hooks: kit = core.hooksPath → .githooks; keep = leave Husky/lefthook/… alone and chain the kit's
 #                                 checks through .agent/scripts/kit-hook; auto (default) = keep when a manager is found, else kit
+#       --mode auto|new|existing  existing = adopt a repo that already has code: the repo is the reference — only gates for tools it
+#                                 already uses, commands taken from its CI, no tool config it does not have (auto: existing when the
+#                                 repo has commits). new = the full kit set-up (every gate, every config)
 #   kit add <module…> [--dir <project>] [--services …] [--yes]   add modules to an installed project
 #   kit doctor [dir] [--run]      check tools/configs of an installed project
 #   kit tools [dir] [install] [--yes]   tools the project needs; installs only the missing ones
@@ -31,7 +34,7 @@ if [ -t 2 ]; then G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; B=$'\033[1m'; D=$
 say()  { printf '%s[kit]%s %s\n' "$G" "$N" "$*" >&2; }
 note() { printf '%s[kit]%s %s\n' "$Y" "$N" "$*" >&2; }
 die()  { printf '%s[kit] ERROR:%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
-usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,/^set -e/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 # ---------------------------------------------------------------- yaml-ish helpers
 yget() { # yget <file> <key> — flat "key: value" (inline " # comment" stripped)
@@ -166,8 +169,10 @@ $rel"                                                                           
         [ "$(sha "$s")" = "$mh" ] || { cp "$s" "$d.kit-new"; CONFLICTS="$CONFLICTS $rel"; }      # .kit-new only if the kit changed it too
       fi
     else cp "$s" "$d.kit-new"; CONFLICTS="$CONFLICTS $rel"; fi
-  elif [ $UPGRADE -eq 1 ] && [ -n "$(manifest_hash "$rel")" ]; then
-    return 0   # installed before and deleted by the user: respect the deletion
+  elif [ $UPGRADE -eq 1 ] && mh="$(manifest_hash "$rel")" && [ -n "$mh" ]; then
+    BASELINES="$BASELINES
+$mh  $rel"   # installed before and deleted by the user (or skipped on purpose): respect it — and remember it for the next upgrade
+    return 0
   else
     cp "$s" "$d"; CREATED=$((CREATED+1)); record "$rel"
   fi
@@ -190,6 +195,31 @@ append_block() { # append_block <src> <dest>  (once, marker ">>> agent-kit")
 append_lines_missing() { # append_lines_missing <src> <dest>  — each line once
   local l
   while IFS= read -r l; do [ -z "$l" ] && continue; grep -qxF "$l" "$2" 2>/dev/null || echo "$l" >> "$2"; done < "$1"
+}
+gi_needed() { # gi_needed <src> <dest .gitignore> — the patterns of <src> the existing rules do not already cover (asked to git itself,
+  # so `**/.venv/` in the repo covers the kit's `.venv/`); a negation is kept only when its path is ignored at that point
+  local tmp l probe
+  tmp="$(mktemp -d)"
+  if ! git -C "$tmp" init -q >/dev/null 2>&1; then grep -vE '^[[:space:]]*(#|$)' "$1" || true; rm -rf "$tmp"; return 0; fi
+  if [ -f "$2" ]; then cp "$2" "$tmp/.gitignore"; else : > "$tmp/.gitignore"; fi
+  while IFS= read -r l; do
+    case "$l" in ''|'#'*) continue ;; esac
+    probe="${l#!}"; probe="${probe#/}"; probe="${probe#\*\*/}"
+    case "$probe" in */) probe="${probe%/}/x" ;; esac   # a folder pattern: probe a file inside it
+    probe="$(printf '%s' "$probe" | sed -e 's/\[[^]]*\]/c/g' -e 's/[*?]/x/g')"
+    if [ "${l#!}" != "$l" ]; then git -C "$tmp" check-ignore -q --no-index -- "$probe" 2>/dev/null || continue
+    else ! git -C "$tmp" check-ignore -q --no-index -- "$probe" 2>/dev/null || continue; fi
+    printf '%s\n' "$l"; printf '\n%s\n' "$l" >> "$tmp/.gitignore"
+  done < "$1"
+  rm -rf "$tmp"
+}
+append_gitignore() { # append_gitignore <src> <dest> [block] — only what the repo's .gitignore does not cover; block = inside ">>> agent-kit" markers
+  local need
+  if [ "${3:-}" = block ] && [ -f "$2" ] && grep -q '>>> agent-kit' "$2"; then return 0; fi
+  need="$(gi_needed "$1" "$2")"
+  [ -n "$need" ] || return 0
+  [ -f "$2" ] && [ -n "$(tail -c1 "$2")" ] && echo >> "$2"
+  if [ "${3:-}" = block ]; then printf '# >>> agent-kit\n%s\n# <<< agent-kit\n' "$need" >> "$2"; else printf '%s\n' "$need" >> "$2"; fi
 }
 
 merge_settings() {
@@ -241,9 +271,87 @@ components_str() { local i o=""; for i in "${!C_PATH[@]}"; do o="$o ${C_PATH[$i]
 describe_components() { local i; for i in "${!C_PATH[@]}"; do printf '   - %-12s %s%s\n' "${C_PATH[$i]}" "${C_STACK[$i]}" "$( [ -n "${C_FW[$i]}" ] && echo " + ${C_FW[$i]}")" >&2; done; }
 slug() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//'; }
 
-# value of a step for one component: framework override > stack; then tool-specific adjustments
+# ---- adopting a repo that already has code (EXISTING=1): the repo is the reference, not the kit's defaults
+EXISTING=0; REPO_SNAP=""
+CORE_TOOLS=" uv pip pip3 npm pnpm yarn bun npx dbt mvn mvnw gradle gradlew go gofmt cargo dotnet composer php bundle make node python python3 bash sh test java kit-diagrams "
+repo_snapshot() { # what the repo uses today, taken BEFORE the kit writes anything: file names + dependency / CI / hook files
+  REPO_SNAP="$(mktemp)"
+  local f man="$TARGET/.agent/kit.manifest"
+  ( cd "$TARGET" && find . -maxdepth 4 \( -name .git -o -name node_modules -o -name .venv -o -name venv -o -name .agent -o -name .agents \
+      -o -name dbt_packages -o -name target -o -name vendor \) -prune -o -type f -print 2>/dev/null ) | sed 's#^\./##' > "$REPO_SNAP.files"
+  if [ -f "$man" ]; then   # a re-run: files the kit installed before do not count as "the repo uses it"
+    awk '{print $2}' "$man" | grep -vxFf - "$REPO_SNAP.files" > "$REPO_SNAP.tmp" || true; mv "$REPO_SNAP.tmp" "$REPO_SNAP.files"
+  fi
+  { cat "$REPO_SNAP.files"
+    while IFS= read -r f; do
+      case "${f##*/}" in
+        pyproject.toml|requirements*.txt|setup.cfg|tox.ini|noxfile.py|Pipfile|.pre-commit-config.yaml|.gitlab-ci.yml|Makefile|package.json|composer.json|*.csproj|Cargo.toml|go.mod|pom.xml|build.gradle*|lefthook.yml) cat "$TARGET/$f" 2>/dev/null || true ;;
+      esac
+      case "$f" in .github/workflows/*|.husky/*) cat "$TARGET/$f" 2>/dev/null || true ;; esac
+    done < "$REPO_SNAP.files"; } > "$REPO_SNAP"
+}
+tool_used() { # tool_used <tool> — the repo mentions it (dependency, config file, CI, hook)
+  local re="$1"
+  case "$1" in lint-imports) re='import-linter|lint-imports|importlinter' ;; esac
+  [ -n "$REPO_SNAP" ] && grep -qiE -- "(^|[^a-z0-9_-])($re)([^a-z0-9_-]|\$)" "$REPO_SNAP"
+}
+seg_tool() { # seg_tool "<command>" — the program a command really runs (wrappers such as `uv run`, `npx` stripped)
+  local t; set -f; set -- $1; set +f
+  case "${1:-}" in
+    uv|poetry|pdm|hatch|pipenv|rye) if [ "${2:-}" = run ]; then shift 2
+        while [ -n "${1:-}" ] && [ "${1#-}" != "$1" ]; do case "$1" in --project|--directory|--with|--group|--extra|--python) shift 2 ;; *) shift ;; esac; done; fi ;;
+    npx) shift; while [ -n "${1:-}" ] && [ "${1#-}" != "$1" ]; do shift; done ;;
+    pnpm) [ "${2:-}" = exec ] && shift 2 ;;
+    python|python3) [ "${2:-}" = -m ] && shift 2 ;;
+  esac
+  t="${1:-}"; t="${t##*/}"; t="${t%%@*}"; printf '%s' "$t"
+}
+uv_project_with() { # uv_project_with <package> — a folder (relative to the repo) whose uv project depends on it, e.g. ingestion
+  local f
+  while IFS= read -r f; do
+    [ -f "$(dirname "$f")/uv.lock" ] && grep -qiE "^[[:space:]]*\"$1([^a-z0-9_-]|\")" "$f" && { f="${f#"$TARGET"/}"; f="$(dirname "$f")"; printf '%s' "$f"; return 0; }
+  done < <(find "$TARGET" -maxdepth 3 -name pyproject.toml -not -path '*/.venv/*' -not -path '*/node_modules/*' 2>/dev/null | sort)
+  return 0
+}
+rel_from() { # rel_from <component path> <repo-relative path> — the second path as seen from inside the component
+  [ "$1" = . ] && { printf '%s' "$2"; return; }
+  local up; up="$(printf '%s' "$1" | sed 's#[^/][^/]*#..#g')"
+  [ "$2" = . ] && printf '%s' "$up" || printf '%s/%s' "$up" "$2"
+}
+ci_pytest_flags() { # --ignore=… flags the repo's own CI passes to pytest (e.g. tests that call real APIs)
+  local f man="$TARGET/.agent/kit.manifest"
+  for f in "$TARGET/.gitlab-ci.yml" "$TARGET"/.github/workflows/*.yml "$TARGET"/.github/workflows/*.yaml; do
+    [ -f "$f" ] || continue
+    [ -f "$man" ] && awk '{print $2}' "$man" | grep -qxF "${f#"$TARGET"/}" && continue
+    grep -E 'pytest' "$f" | grep -oE -- '--ignore[= ][^ "'"'"']+' || true
+  done | sed 's/^--ignore /--ignore=/' | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ $//'
+}
+dbt_has_ci_target() { [ ! -f "$1/profiles.yml" ] || grep -qE '^[[:space:]]+ci:[[:space:]]*$' "$1/profiles.yml"; }
+has_dbt_evaluator() { local p; for p in "$1/packages.yml" "$1/dependencies.yml"; do [ -f "$p" ] && { grep -q dbt_project_evaluator "$p"; return; }; done; return 0; }
+
+# value of a step for one component; in an existing repo a gate whose tool the repo does not use is left empty
 comp_value() { # comp_value <idx> <key>
-  local i="$1" k="$2" s="${C_STACK[$1]}" f="${C_FW[$1]}" d v sy
+  local v t
+  v="$(comp_raw "$@")"
+  if [ $EXISTING -eq 1 ] && [ -n "$v" ]; then
+    t="$(seg_tool "$v")"
+    case "$CORE_TOOLS" in *" $t "*) ;; *) tool_used "$t" || v="" ;; esac
+  fi
+  printf '%s' "$v"
+}
+comp_unused() { # tools of a component's gates the repo does not use (only meaningful when EXISTING=1)
+  local i="$1" step v t out=""
+  for step in $STEPS; do
+    v="$(comp_raw "$i" "cmd_$step")"; [ -n "$v" ] || continue
+    t="$(seg_tool "$v")"
+    case "$CORE_TOOLS" in *" $t "*) continue ;; esac
+    tool_used "$t" || case " $out " in *" $t "*) ;; *) out="$out $t" ;; esac
+  done
+  printf '%s' "${out# }"
+}
+# framework override > stack; then tool-specific adjustments
+comp_raw() { # comp_raw <idx> <key>
+  local i="$1" k="$2" s="${C_STACK[$1]}" f="${C_FW[$1]}" d v sy tool proj pf
   sy="$(stack_yaml "$s")"; v="$(yget "$sy" "$k")"
   if [ -n "$f" ]; then d="$(fw_dir "$s" "$f")"; yhas "$d/framework.yaml" "$k" && v="$(yget "$d/framework.yaml" "$k")"; fi
   [ -n "$v" ] || { echo ""; return; }
@@ -262,8 +370,30 @@ comp_value() { # comp_value <idx> <key>
     python)
       if [ -f "$dir/uv.lock" ]; then
         v="$(printf '%s' "$v" | sed -E -e 's#^pip install -r requirements.txt$#uv sync#' -e 's#^pip install #uv add --dev #' -e 's#^(ruff|mypy|pytest|pip-audit|lint-imports)#uv run \1#')"
+        # dev tools declared as [project.optional-dependencies] dev are only installed with --extra dev
+        if [ "$v" = "uv sync" ] && awk '/^\[project\.optional-dependencies\]/{f=1;next} /^\[/{f=0} f && /^dev[[:space:]]*=/{x=1} END{exit !x}' "$dir/pyproject.toml" 2>/dev/null; then
+          v="uv sync --extra dev"
+        fi
       elif [ -f "$dir/pyproject.toml" ] && [ ! -f "$dir/requirements.txt" ]; then
         v="$(printf '%s' "$v" | sed 's#^pip install -r requirements.txt$#pip install -e ".[dev]"#')"
+      fi
+      # the flags the repo's CI gives pytest (e.g. --ignore=tests/live: tests that need real credentials)
+      if [ $EXISTING -eq 1 ]; then case "$v" in *pytest*) pf="$(ci_pytest_flags)"; [ -z "$pf" ] || v="$(printf '%s' "$v" | sed "s#pytest -q#pytest -q $pf#")" ;; esac; fi ;;
+    dbt)
+      # dbt (or sqlfluff) installed in another component's uv project, e.g. ingestion/pyproject.toml lists dbt-core
+      tool="${v%% *}"
+      case "$tool" in dbt|sqlfluff)
+        pf="$tool"; [ "$tool" = dbt ] && pf=dbt-core
+        if ! grep -qsiE "(^|[^a-z0-9_-])$pf" "$dir/pyproject.toml" "$dir"/requirements*.txt && proj="$(uv_project_with "$pf")" && [ -n "$proj" ]; then
+          v="uv run --project $(rel_from "${C_PATH[$i]}" "$proj") $v"
+        fi ;;
+      esac
+      # `--target ci` only works when profiles.yml has that target (otherwise dbt would run against another, maybe a real warehouse)
+      case "$v" in *"--target ci"*) dbt_has_ci_target "$dir" || v="" ;; esac
+      # the dbt_project_evaluator gate only when the project installs that package
+      if ! has_dbt_evaluator "$dir"; then
+        case "$v" in *"--select package:dbt_project_evaluator"*) v="" ;; esac
+        v="${v/ --exclude package:dbt_project_evaluator/}"
       fi ;;
   esac
   printf '%s' "$v"
@@ -311,16 +441,20 @@ install_core() {
         if [ -f "$TARGET/.gitlab-ci.yml" ] && [ -z "$(manifest_hash .gitlab-ci.yml)" ]; then
           copy_file "$f" "$TARGET/.gitlab-ci.kit.yml"
           NOTES="$NOTES
-   - CI: your .gitlab-ci.yml was left alone. Add this at its top to run the kit's gates too:   include: [{ local: .gitlab-ci.kit.yml }]   (and stages: guard, quality, security)"
+   - CI: your .gitlab-ci.yml was left alone. Add this at its top to run the kit's gates too:   include: [{ local: .gitlab-ci.kit.yml }]   (its jobs use the stages .pre and test — keep test in your stages:)"
         else copy_file "$f" "$TARGET/.gitlab-ci.yml"; fi
         continue ;;
     esac
     copy_file "$f" "$TARGET/$rel"
   done < <(find "$CORE" -type f -print0)
   merge_settings
-  append_block "$CORE/gitignore.kit" "$TARGET/.gitignore"
+  append_gitignore "$CORE/gitignore.kit" "$TARGET/.gitignore" block
   append_block "$CORE/gitattributes.kit" "$TARGET/.gitattributes"
-  [ -f "$TARGET/.env.example" ] || cp "$CORE/env.example.kit" "$TARGET/.env.example"
+  # an env template the repo keeps somewhere else (platform/.env.example, app.env.example…) is enough — no second one at the root
+  if [ ! -f "$TARGET/.env.example" ] && [ -z "$(find "$TARGET" -maxdepth 3 \( -name .git -o -name node_modules -o -name .venv \) -prune -o \
+       -type f \( -name '.env.example' -o -name '*.env.example' -o -name '.env.sample' -o -name '.env.template' \) -print 2>/dev/null | head -n1)" ]; then
+    cp "$CORE/env.example.kit" "$TARGET/.env.example"
+  fi
 }
 
 # A nested component (path != .) must not add a second copy of a tool config the repo already has in a parent folder: tools such as ruff
@@ -340,11 +474,25 @@ config_above() { # config_above <component path> <relative file>
   done
   return 1
 }
+# Existing repo: no config for a tool whose gate is off (mypy.ini without mypy, .sqlfluff without sqlfluff). The kit's version goes into
+# the manifest as a baseline, so `kit upgrade` treats it like a file the user deleted and does not bring it back.
+unused_config() { # unused_config <src> <dest> "<unused tools>" — true = skip
+  local t b="${1##*/}"
+  [ ! -e "$2" ] || return 1
+  for t in $3; do
+    case "$b" in *"$t"*)
+      BASELINES="$BASELINES
+$(sha "$1")  ${2#"$TARGET"/}"; return 0 ;;
+    esac
+  done
+  return 1
+}
 install_component() { # install_component <idx>
   local i="$1" p="${C_PATH[$1]}" s="${C_STACK[$1]}" f="${C_FW[$1]}" fd="" src rel files dest tmp globs g paths="" note own
   dest="$TARGET"; [ "$p" != "." ] && dest="$TARGET/$p"
   mkdir -p "$dest"
   [ -n "$f" ] && fd="$(fw_dir "$s" "$f")"
+  local unused=""; [ $EXISTING -eq 1 ] && unused="$(comp_unused "$i")"
   # 1. tool configs: stack files, framework files win on the same path
   files="$(stack_asset "$s" files)"
   if [ -n "$files" ]; then
@@ -352,6 +500,7 @@ install_component() { # install_component <idx>
       rel="${src#"$files"/}"
       [ -n "$fd" ] && in_list "$rel" "$(yget "$fd/framework.yaml" exclude_files)" && continue
       config_above "$p" "$rel" && continue
+      unused_config "$src" "$dest/$rel" "$unused" && continue
       if [ -n "$fd" ] && [ -f "$fd/files/$rel" ]; then copy_file "$fd/files/$rel" "$dest/$rel"; else copy_file "$src" "$dest/$rel"; fi
     done < <(find "$files" -type f -print0)
   fi
@@ -359,12 +508,13 @@ install_component() { # install_component <idx>
     while IFS= read -r -d '' src; do
       rel="${src#"$fd/files"/}"; [ -n "$files" ] && [ -f "$files/$rel" ] && continue
       config_above "$p" "$rel" && continue
+      unused_config "$src" "$dest/$rel" "$unused" && continue
       copy_file "$src" "$dest/$rel"
     done < <(find "$fd/files" -type f -print0)
   fi
   # 1b. ignore build/dependency output of this stack (patterns match at any depth)
-  src="$(stack_asset "$s" gitignore.add)"; [ -n "$src" ] && append_lines_missing "$src" "$TARGET/.gitignore"
-  [ -n "$fd" ] && [ -f "$fd/gitignore.add" ] && append_lines_missing "$fd/gitignore.add" "$TARGET/.gitignore"
+  src="$(stack_asset "$s" gitignore.add)"; [ -n "$src" ] && append_gitignore "$src" "$TARGET/.gitignore"
+  [ -n "$fd" ] && [ -f "$fd/gitignore.add" ] && append_gitignore "$fd/gitignore.add" "$TARGET/.gitignore"
   # 2. rules + snippets
   src="$(stack_asset "$s" rules.md)"; [ -n "$src" ] && copy_file "$src" "$TARGET/.agent/rules/stack/$s.md"
   [ -n "$fd" ] && [ -f "$fd/rules.md" ] && copy_file "$fd/rules.md" "$TARGET/.agent/rules/stack/$f.md"
@@ -451,7 +601,7 @@ install_module_files() { # install_module_files <module>
   local m="$1" md="$MODULES/$1"
   [ -d "$md" ] || die "unknown module '$m' (kit list)"
   copy_tree "$md/files" "$TARGET"
-  [ -f "$md/gitignore.add" ] && append_lines_missing "$md/gitignore.add" "$TARGET/.gitignore"
+  [ -f "$md/gitignore.add" ] && append_gitignore "$md/gitignore.add" "$TARGET/.gitignore"
   if [ "$m" = devops ]; then copy_tree "$md/catalog" "$TARGET/.agent/docker/catalog"; fi
   return 0
 }
@@ -701,8 +851,27 @@ insert_ci_setup() {
   rm -f "$gl"
 }
 
+note_existing_gaps() { # existing repo: say which gates stayed empty and why, so kit-onboard (or a human) can decide
+  local i p u d
+  for i in "${!C_PATH[@]}"; do
+    p="${C_PATH[$i]}"; d="$TARGET/$p"
+    u="$(comp_unused "$i")"
+    [ -z "$u" ] || NOTES="$NOTES
+   - [$p] this repo does not use: $u — their gates stay empty (no config added). To adopt one: add it to the repo, then set its cmd_* in .agent/project.yaml"
+    if [ "${C_STACK[$i]}" = dbt ]; then
+      dbt_has_ci_target "$d" || NOTES="$NOTES
+   - [$p · dbt] profiles.yml has no 'ci' target — the dbt gates (parse/build/docs) stay empty instead of running against another target. Add a ci target (.agent/stack/dbt/snippets/profiles.example.yml) and set them"
+      has_dbt_evaluator "$d" || NOTES="$NOTES
+   - [$p · dbt] dbt_project_evaluator is not in packages.yml — cmd_arch stays empty (add the package to turn the layer checks on)"
+    fi
+  done
+  return 0
+}
 run_dev_deps() {
   local i p s cmd add dir tool
+  if [ $EXISTING -eq 1 ]; then   # adding the kit's dev tools would change the project's own dependency files
+    say "existing repo: dev dependencies are not changed — kit-run install uses the project's own (cmd_install)"; return 0
+  fi
   for i in "${!C_PATH[@]}"; do
     p="${C_PATH[$i]}"; s="${C_STACK[$i]}"; dir="$TARGET/$p"
     cmd="$(comp_value "$i" dev_deps)"; add="$(comp_value "$i" dev_deps_add)"
@@ -781,9 +950,14 @@ hook_howto() { # what to add by hand for managers whose config the kit does not 
       "       pre-commit:  { commands: { agent-kit: { run: .agent/scripts/kit-hook pre-commit } } }" \
       "       commit-msg:  { commands: { agent-kit: { run: .agent/scripts/kit-hook commit-msg {1} } } }" \
       "       pre-push:    { commands: { agent-kit: { use_stdin: true, run: .agent/scripts/kit-hook pre-push {1} {2} } } }" ;;
-    pre-commit) printf '%s\n' "   - hooks: add a local hook to .pre-commit-config.yaml per stage (pre-commit, commit-msg):" \
-      "       - repo: local" "         hooks: [{ id: agent-kit, name: agent-kit, entry: .agent/scripts/kit-hook pre-commit, language: system, pass_filenames: false, always_run: true }]" \
-      "     (the pre-push guard needs the refs on stdin, which pre-commit does not pass — protect the branches on the server too)" ;;
+    pre-commit) printf '%s\n' "   - hooks: in .pre-commit-config.yaml add (then run: pre-commit install — it installs both hook types):" \
+      "       default_install_hook_types: [pre-commit, commit-msg]      # top level, next to repos:" \
+      "       repos:" \
+      "         - repo: local" \
+      "           hooks:" \
+      "             - { id: agent-kit, name: agent-kit, entry: .agent/scripts/kit-hook pre-commit, language: system, pass_filenames: false, always_run: true, stages: [pre-commit] }" \
+      "             - { id: agent-kit-msg, name: agent-kit commit message, entry: .agent/scripts/kit-hook commit-msg, language: system, always_run: true, stages: [commit-msg] }" \
+      "     (pre-push is not chained: pre-commit does not pass git's refs on stdin — protect main on the server)" ;;
     *) printf '%s\n' "   - hooks: your hook setup was left alone; from each hook call the kit (the same lines work for any manager):" \
       "       pre-commit: .agent/scripts/kit-hook pre-commit" "       commit-msg: .agent/scripts/kit-hook commit-msg \"\$1\"" \
       "       pre-push:   .agent/scripts/kit-hook pre-push \"\$@\"     (stdin must reach it)" ;;
@@ -868,7 +1042,7 @@ pick_interactive() {
 # ---------------------------------------------------------------- commands
 cmd_init() {
   TARGET=""; PROJECT_NAME=""; LANG_DOCS=vi; YES=0; DEPS=ask; SETUP=ask; TOOLS=ask; GITSETUP=1; HOOKS=auto; PROVIDER=auto; FLOW=auto
-  local stack_flag="" fw_flag=""; MODS_FLAG=""; SERVICES_FLAG=""; PRESET=app
+  local stack_flag="" fw_flag="" mode=auto; MODS_FLAG=""; SERVICES_FLAG=""; PRESET=app
   while [ $# -gt 0 ]; do
     case "$1" in
       --stack) stack_flag="$2"; shift 2 ;;
@@ -889,6 +1063,7 @@ cmd_init() {
       --provider) PROVIDER="${2:-}"; case "$PROVIDER" in github|gitlab|none|auto) ;; *) die "--provider takes github, gitlab, none or auto" ;; esac; shift 2 ;;
       --flow) FLOW="${2:-}"; case "$FLOW" in gitflow|trunk|auto) ;; *) die "--flow takes gitflow, trunk or auto" ;; esac; shift 2 ;;
       --hooks) HOOKS="${2:-}"; case "$HOOKS" in auto|kit|keep) ;; *) die "--hooks takes auto, kit or keep" ;; esac; shift 2 ;;
+      --mode) mode="${2:-}"; case "$mode" in auto|new|existing) ;; *) die "--mode takes auto, new or existing" ;; esac; shift 2 ;;
       -h|--help) usage ;;
       -*) die "unknown option $1" ;;
       *) TARGET="$1"; shift ;;
@@ -899,6 +1074,11 @@ cmd_init() {
   mkdir -p "$TARGET"; TARGET="$(cd "$TARGET" && pwd)"
   [ "$TARGET" = "$KIT_SRC" ] && die "target is the kit itself"
   PROJECT_NAME="${PROJECT_NAME:-$(basename "$TARGET")}"
+  case "$mode" in
+    existing) EXISTING=1 ;; new) EXISTING=0 ;;
+    *) git -C "$TARGET" rev-parse -q --verify HEAD >/dev/null 2>&1 && EXISTING=1 || EXISTING=0 ;;
+  esac
+  [ $EXISTING -eq 0 ] || repo_snapshot   # before the kit writes a single file
 
   [ -n "$stack_flag" ] && parse_stack_flag "$stack_flag"
   [ -n "$fw_flag" ] && [ ${#C_PATH[@]} -eq 1 ] && { C_FW[0]="$fw_flag"; [ -n "$(fw_dir "${C_STACK[0]}" "$fw_flag")" ] || die "unknown framework $fw_flag"; }
@@ -920,6 +1100,8 @@ cmd_init() {
 
   printf '\n' >&2; say "target:     $TARGET"; say "components:"; describe_components
   say "modules:    ${MODS:-none}"; has_module devops && say "services:   ${SERVICES:-none}"; say "docs:       $LANG_DOCS"
+  if [ $EXISTING -eq 1 ]; then say "mode:       existing repo — gates only for tools it already uses (--mode new = the full set-up)"
+  else say "mode:       new project — full set-up"; fi
   if [ $INTERACTIVE -eq 1 ]; then ui_confirm "Install with this selection?" y || die "aborted"; fi
 
   resolve_provider; say "git host:  $PROVIDER"
@@ -927,6 +1109,7 @@ cmd_init() {
   local i; for i in "${!C_PATH[@]}"; do install_component "$i"; done
   for m in $MODS; do install_module_files "$m"; done
   build_commands
+  [ $EXISTING -eq 0 ] || note_existing_gaps
   write_project_yaml
   apply_project_add
   render_module_placeholders
@@ -947,10 +1130,12 @@ cmd_init() {
 }
 
 warn_ignored_kit_files() { # kit files the project's own .gitignore hides would exist on this machine only
-  local f ign=""
-  for f in AGENTS.md CLAUDE.md .claude/settings.json .agent/project.yaml .githooks/pre-commit .agents/skills; do
-    if [ -e "$TARGET/$f" ] && git -C "$TARGET" check-ignore -q -- "$f" 2>/dev/null; then ign="$ign $f"; fi
-  done
+  # every file the kit wrote (and the files it kept), grouped by folder: docs/ ignored as a whole hides ADRs, specs and the BA docs too
+  local ign c
+  git -C "$TARGET" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  ign="$( { printf '%s\n' "$RECORDED"; for c in $CONFLICTS; do printf '%s\n' "$c"; done; } | awk 'NF && !seen[$0]++' \
+          | git -C "$TARGET" check-ignore --stdin 2>/dev/null \
+          | awk -F/ '{ k = (NF > 1 ? $1 "/" : $1); if (!seen[k]++) printf " %s", k }' || true)"
   [ -z "$ign" ] || note "your .gitignore ignores kit files:$ign — they stay on this machine only (teammates and CI never see them). Remove those lines to share the kit with the team, or keep them to use it personally."
   return 0
 }
@@ -963,16 +1148,27 @@ report() {
   [ -n "$NOTES" ] && { note "to do:"; printf '%s\n' "$NOTES" | sed '/^$/d' >&2; }
   warn_ignored_kit_files
   if [ -x "$TARGET/.agent/scripts/kit-doctor" ]; then printf '\n' >&2; (cd "$TARGET" && .agent/scripts/kit-doctor >&2) || true; fi
-  cat >&2 <<EOF
-
-Next steps
-  1. cd $TARGET   — review *.kit-new files (if any)
-  2. Commit:  git add -A && git commit -m "chore: add agent-kit"   (existing repo: on branch chore/agent-kit-setup → PR into develop)
-  3. Open your agent and say:
-       existing code → "run the kit-onboard playbook"   (wires snippets, fixes commands, records baseline)
-       new idea      → "run kit-ba, then kit-sa, then kit-plan"
-  4. Git host (GitHub / GitLab): protect main + develop (require a PR/MR + the CI checks).
-EOF
+  local mb db cur protect pr; mb="$(yget "$TARGET/.agent/project.yaml" main_branch)"; mb="${mb:-main}"
+  db="$(yget "$TARGET/.agent/project.yaml" develop_branch)"; db="${db:-develop}"
+  cur="$(git -C "$TARGET" branch --show-current 2>/dev/null || true)"
+  if [ "$db" = "$mb" ]; then protect="$mb"; else protect="$mb + $db"; fi
+  case "$PROVIDER" in gitlab) pr="MR" ;; github) pr="PR" ;; *) pr="review" ;; esac
+  printf '\nNext steps\n' >&2
+  if [ $EXISTING -eq 1 ]; then
+    case "$cur" in
+      *kit*) printf '  1. you are on %s — keep the kit set-up on this branch until its %s is merged\n' "$cur" "$pr" >&2 ;;
+      *) printf '  1. git switch -c chore/agent-kit-setup   — the kit set-up gets its own branch and %s (not %s)\n' "$pr" "${cur:-$mb}" >&2 ;;
+    esac
+    printf '  2. Merge every *.kit-new into your file (or ask the agent), then delete the *.kit-new files — they are not committed\n' >&2
+    printf '  3. Open your agent and say: "run kit-onboard"   (moves your old agent rules/docs into the kit, aligns cmd_* with your CI, records baseline debt)\n' >&2
+    printf '  4. Commit: git add -A && git commit -m "chore: add agent-kit" → %s into %s\n' "$pr" "$db" >&2
+  else
+    printf '  1. cd %s — commit: git add -A && git commit -m "chore: add agent-kit"\n' "$TARGET" >&2
+    printf '  2. Open your agent and say: "run kit-ba, then kit-sa, then kit-plan"\n' >&2
+  fi
+  [ "$PROVIDER" = none ] || printf '  %s. On %s: protect %s (require a %s + the CI checks).\n' "$( [ $EXISTING -eq 1 ] && echo 5 || echo 3)" \
+    "$( [ "$PROVIDER" = gitlab ] && echo GitLab || echo GitHub)" "$protect" "$pr" >&2
+  return 0
 }
 
 cmd_add() {

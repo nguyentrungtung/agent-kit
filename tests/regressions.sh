@@ -355,10 +355,52 @@ UB="$WORK/uvbin"; rm -rf "$UB"; mkdir -p "$UB"; printf '#!/bin/sh\nexit 0\n' > "
 A="$WORK/ad-doctor"; ad "$A" 'mkdir -p ingestion transform && printf "[project]\nname=\"i\"\n" > ingestion/pyproject.toml && touch ingestion/uv.lock && printf "name: t\n" > transform/dbt_project.yml && printf "t:\n  outputs:\n    prod:\n      type: trino\n" > transform/profiles.yml' --stack python:ingestion,dbt:transform
 out="$(cd "$A" && PATH="$UB:$PATH" .agent/scripts/kit-doctor 2>&1 || true)"
 check "uv run <tool>: only uv is checked"            "! printf '%s\n' \"\$out\" | grep -q \"'ruff'\""
-check "dbt without a ci target is flagged"           "printf '%s\n' \"\$out\" | grep -q \"no 'ci' target in profiles.yml\""
+check "init leaves --target ci gates empty without a ci target" "! grep -q -- '--target ci' \"\$A/.agent/project.yaml\""
+sed -i.bak 's#^cmd_build:.*#cmd_build: (cd transform \&\& dbt docs generate --target ci)#' "$A/.agent/project.yaml" && rm -f "$A/.agent/project.yaml.bak"
+out="$(cd "$A" && PATH="$UB:$PATH" .agent/scripts/kit-doctor 2>&1 || true)"
+check "a hand-set --target ci without the target is flagged" "printf '%s\n' \"\$out\" | grep -q \"no 'ci' target in profiles.yml\""
 printf "t:\n  outputs:\n    ci:\n      type: duckdb\n" > "$A/transform/profiles.yml"
 out="$(cd "$A" && PATH="$UB:$PATH" .agent/scripts/kit-doctor 2>&1 || true)"
 check "with a ci target it is not"                   "! printf '%s\n' \"\$out\" | grep -q \"no 'ci' target in profiles.yml\""
+check "a new project keeps every gate (mypy + its config)" "grep -q '^cmd_typecheck:.*mypy' \"\$WORK/ad-nodup/.agent/project.yaml\" && [ -f \"\$WORK/ad-nodup/ingestion/mypy.ini\" ]"
+
+# --- existing repo (has commits): the repo is the reference — gates only for tools it uses, commands from its CI
+printf '\n== kit init --mode existing: gates for the tools the repo uses, commands from its CI, no duplicate ignores\n'
+EX_SETUP='mkdir -p ingestion transform platform tools && touch ingestion/uv.lock \
+  && printf "[project]\nname = \"i\"\ndependencies = [\n  \"dbt-core>=1.8\",\n]\n[project.optional-dependencies]\ndev = [\n  \"pytest>=8\",\n  \"ruff>=0.5\",\n]\n" > ingestion/pyproject.toml \
+  && printf "name: t\nprofile: t\n" > transform/dbt_project.yml && printf "t:\n  outputs:\n    prod:\n      type: trino\n" > transform/profiles.yml \
+  && printf "packages:\n  - package: dbt-labs/dbt_utils\n    version: 1.1.1\n" > transform/packages.yml \
+  && printf "stages: [lint, test]\npytest:\n  stage: test\n  script:\n    - cd ingestion\n    - uv run pytest -q --ignore=tests/live\n" > .gitlab-ci.yml \
+  && printf "**/.venv/\n**/__pycache__/\n.env\n.env.*\n**/.env\n!**/.env.example\ndocs/\n" > .gitignore && printf "A=1\n" > platform/.env.example \
+  && printf "repos:\n  - repo: local\n    hooks: []\n" > .pre-commit-config.yaml \
+  && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify'
+A="$WORK/ex-data"; ad "$A" "$EX_SETUP" --stack python:ingestion,dbt:transform
+check "a repo with commits is adopted as existing"   "grep -q 'mode:       existing repo' \"\$A.log\""
+check "mypy / pip-audit not used → gates empty, no mypy.ini" "[ -z \"\$(yv \"\$A\" cmd_typecheck)\" ] && [ -z \"\$(yv \"\$A\" cmd_audit)\" ] && [ ! -e \"\$A/ingestion/mypy.ini\" ] && grep -q 'does not use: mypy pip-audit' \"\$A.log\""
+check "sqlfluff not used → no lint gate, no .sqlfluff" "! grep -q sqlfluff \"\$A/.agent/project.yaml\" && [ ! -e \"\$A/transform/.sqlfluff\" ]"
+check "tools the repo uses keep their gates"        "grep -q '^cmd_lint:.*uv run ruff check' \"\$A/.agent/project.yaml\""
+check "dev extra installed: uv sync --extra dev"     "grep -q '^cmd_install: (cd ingestion && uv sync --extra dev)' \"\$A/.agent/project.yaml\""
+check "pytest gets the CI's --ignore flags"         "grep -q '^cmd_test:.*pytest -q --ignore=tests/live' \"\$A/.agent/project.yaml\""
+check "dbt runs from the uv project that has dbt-core" "grep -q 'cd transform && uv run --project ../ingestion dbt deps' \"\$A/.agent/project.yaml\""
+check "no ci target → no --target ci gates, said so" "! grep -q -- '--target ci' \"\$A/.agent/project.yaml\" && grep -q \"has no 'ci' target\" \"\$A.log\""
+check "no evaluator package → cmd_arch empty"        "[ -z \"\$(yv \"\$A\" cmd_arch)\" ] && grep -q 'dbt_project_evaluator is not in packages.yml' \"\$A.log\""
+check "env template elsewhere → no root .env.example" "[ ! -e \"\$A/.env.example\" ]"
+check ".gitignore: covered patterns not repeated"     "! grep -qx '.venv/' \"\$A/.gitignore\" && ! grep -qx '__pycache__/' \"\$A/.gitignore\" && [ \"\$(grep -cx '.env' \"\$A/.gitignore\")\" = 1 ] && grep -qx '.agent/local/' \"\$A/.gitignore\""
+check "the whole ignored docs/ is reported"          "grep 'ignores kit files' \"\$A.log\" | grep -q ' docs/'"
+check "pre-commit howto installs commit-msg too"     "grep -q 'default_install_hook_types: \[pre-commit, commit-msg\]' \"\$A.log\" && grep -q 'stages: \[commit-msg\]' \"\$A.log\""
+out="$(cd "$A" && .agent/scripts/kit-doctor 2>&1 || true)"
+check "doctor points at the hook manager"           "printf '%s\n' \"\$out\" | grep -q 'hook manager does not call the kit'"
+check "next steps: own branch, MR into main, no develop" "grep -q 'git switch -c chore/agent-kit-setup' \"\$A.log\" && grep -q 'MR into main' \"\$A.log\" && grep -q 'protect main (' \"\$A.log\""
+mkdir -p "$A/ingestion/.venv/bin" && printf '#!/bin/sh\n' > "$A/ingestion/.venv/bin/ruff" && chmod +x "$A/ingestion/.venv/bin/ruff"
+sed -i.bak 's#^cmd_typecheck:.*#cmd_typecheck: (cd ingestion \&\& uv run mypy .)#' "$A/.agent/project.yaml" && rm -f "$A/.agent/project.yaml.bak"
+out="$(cd "$A" && PATH="$UB:$PATH" .agent/scripts/kit-doctor 2>&1 || true)"
+check "doctor: uv run <tool> missing from .venv is flagged" "printf '%s\n' \"\$out\" | grep -q \"'mypy' is not in the uv environment of ingestion\" && ! printf '%s\n' \"\$out\" | grep -q \"'ruff' is not in\""
+rm -rf "$A/ingestion/.venv"
+(cd "$A" && git add -A && git reset -q -- '*.kit-new' && git -c core.hooksPath=/dev/null commit -qm "chore: add agent-kit" --no-verify && rm -f ./*.kit-new docs/*.kit-new)
+"$KIT" upgrade "$A" --allow-dirty >"$A.up1.log" 2>&1 || true; "$KIT" upgrade "$A" --allow-dirty >"$A.up2.log" 2>&1 || true
+check "kit upgrade (twice) does not bring skipped configs back" "[ ! -e \"\$A/ingestion/mypy.ini\" ] && [ ! -e \"\$A/transform/.sqlfluff\" ]"
+A="$WORK/ex-new"; ad "$A" "$EX_SETUP" --stack python:ingestion,dbt:transform --mode new
+check "--mode new: full set-up in an existing repo"  "grep -q '^cmd_typecheck:.*mypy' \"\$A/.agent/project.yaml\" && [ -f \"\$A/ingestion/mypy.ini\" ]"
 
 # ---------------------------------------------------------------- issue sync: GitLab (REST) and GitHub (gh) behind one interface
 printf '\n== kit-task sync / pull: GitLab through its REST API (fake server), GitHub through gh (fake gh)\n'

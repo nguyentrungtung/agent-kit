@@ -66,7 +66,7 @@ kit init .
 cd /path/to/du-an-hien-tai
 kit init .
 ```
-Với repo có sẵn kit chỉ **thêm** những gì repo chưa có: tự nhận Git host (GitHub hay GitLab tự host), chạy trunk-based nếu repo chưa có `develop`, không đặt cấu hình trùng với cái đã có ở thư mục cha, không chiếm hook Husky/lefthook, và cảnh báo nếu `.gitignore` của bạn đang ẩn file của kit. Chi tiết: README mục "Áp dụng vào repo có sẵn". Sau khi cài, mở agent và nói **"run the kit-onboard playbook"**; nó lấy lệnh build/test từ file CI của repo làm chuẩn.
+Với repo có sẵn (đã có commit; `--mode new` để cài đầy đủ) kit lấy repo làm chuẩn: chỉ bật gate cho công cụ repo đang dùng (không mypy/sqlfluff nếu repo chưa dùng), lấy cờ pytest từ CI, và chỉ **thêm** những gì repo chưa có: tự nhận Git host (GitHub hay GitLab tự host), chạy trunk-based nếu repo chưa có `develop`, không đặt cấu hình trùng với cái đã có ở thư mục cha, không chiếm hook Husky/lefthook, và cảnh báo nếu `.gitignore` của bạn đang ẩn file của kit. Chi tiết: README mục "Áp dụng vào repo có sẵn". Sau khi cài, mở agent và nói **"run the kit-onboard playbook"**; nó lấy lệnh build/test từ file CI của repo làm chuẩn.
 
 ### Chạy nhanh không cần hỏi qua menu (Dành cho script hoặc CI):
 ```bash
