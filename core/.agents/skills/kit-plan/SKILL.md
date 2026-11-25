@@ -7,6 +7,8 @@ description: Plan from business analysis to executable work — group user stori
 ## 1. Read
 `PROJECT.md` (goals), `docs/ba/` (UC, US, BR, NFR, RTM), `docs/architecture/` + ADRs, `openspec/specs/` (what already exists),
 `kit-task list`, `STATE.md`. Missing BA → run kit-ba first. Undecided architecture → kit-sa first.
+Gate before planning: `.agent/scripts/kit-trace` has 0 errors, and `kit-trace assumptions` is shown to the human — every
+assumption that changes scope is CONFIRMED first (plans built on guesses multiply the error into every task).
 
 ## 2. Milestones
 2–5 usable increments; first a **walking skeleton** (thin end-to-end slice through every layer), then features, then hardening.

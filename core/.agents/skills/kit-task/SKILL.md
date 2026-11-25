@@ -22,12 +22,15 @@ capability (`.agent/scripts/kit-openspec show <capability> --type spec`), the st
 Write the problem in your own words + links. Do NOT read archived tasks to learn the system.
 
 ## 3. Clarify (task §2)
-Walk the ambiguity checklist. Ask the human in rounds — with module eng-skills use **mp-grilling** (numbered questions, your
-recommended answer each, only the questions whose prerequisites are settled); record Q | A | who/date. "None" if all clear.
-A blocking question without an answer → stop the task (kit-handoff), don't guess.
+Tick every item of the ambiguity checklist in §2 (write n/a when it does not apply); add task-specific items when the task needs them. Ask the human in rounds — with module eng-skills use **mp-grilling** (numbered questions, your
+recommended answer each, only the questions whose prerequisites are settled); record Q | A | who/date. Nothing to ask → every checklist item is still ticked (with "n/a: <why>" where it does not apply).
+A blocking question without an answer → stop the task (kit-handoff), don't guess. Low-risk unknown → `ASSUMPTION: …` line;
+`kit-task verify` blocks until the human rewrites it as `CONFIRMED: …`. Never cite an id, file or API you have not seen.
 
 ## 4. Solution (task §3)
 `codegraph explore "<area>"` / `codegraph impact <symbol>` → reuse existing code, know the blast radius.
+Place files by `docs/architecture/project-structure.md`; respect `.agent/rules/project/modules.md` (new module or dependency → stop, ask SA/human).
+Hard rule from SOLUTION.md §7b (hotspot)? → implement the chosen pattern/algorithm, not an ad-hoc one.
 Approach, rejected alternatives, files/modules, data + API changes (details belong in the change's `design.md`).
 Project-wide choice → `kit-new adr "<title>"` then the kit-adr playbook.
 
@@ -42,9 +45,16 @@ Small steps: minimal code to turn tests green → `.agent/scripts/kit-run check`
 Same error 3× or the approach no longer fits → STOP, `kit-task rollback`, add to LESSONS.md, re-plan.
 Tick tasks.md items of the change as their verification passes.
 
+## 6b. UI hat (task tag `ui`, or the slice has a screen)
+Order inside the slice: contract (`docs/api/openapi.yaml`) → `kit-run apigen` → backend + tests → feature hook on the generated types →
+components/pages. Use only tokens/components from `docs/architecture/ui-design-system.md`; implement the story's wireframe and all
+4 states (empty/loading/error/success); keyboard + labels + contrast (a11y); component tests per state, one e2e per user journey.
+
 ## 7. Verify
 All tests green, `kit-review` (two-axis review via **mp-code-review** against `kit/TASK-NNN/base`; fix BLOCKER/MAJOR), `kit-security` if input/auth/data/files/network/deps/config changed,
-walk `.agent/checklists/definition-of-done.md`, tick each AC proven by a test. Then `.agent/scripts/kit-task verify`.
+record it: `.agent/scripts/kit-task review "BLOCKER 0 · MAJOR 1 fixed · MINOR 2 → TASK-031 — by code-reviewer"` (verify blocks
+without it, and on any BLOCKER/MAJOR marked open), walk `.agent/checklists/definition-of-done.md`, tick each AC proven by a test.
+Then `.agent/scripts/kit-task verify`.
 
 ## 8. Document (task §7)
 Update living docs in this PR: spec deltas in the change, `docs/api` (OpenAPI), `docs/architecture`, README.

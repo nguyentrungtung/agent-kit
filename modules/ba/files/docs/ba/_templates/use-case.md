@@ -1,4 +1,6 @@
 # Use cases: <area>
+<!-- Example ids (UC-01, US-04, BR-01, FR-01 …) are illustrations: replace them with real ones after copying. kit-trace fails on
+     every id that is referenced but not defined, so a copied example blocks `kit-run check` until it is adapted. -->
 
 ```plantuml
 left to right direction

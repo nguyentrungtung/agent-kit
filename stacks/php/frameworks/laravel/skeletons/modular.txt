@@ -1,4 +1,5 @@
 # Laravel modular monolith: one folder per module, hexagonal inside. Other modules use only Contracts/ and events.
+# deptrac (kit-run arch): use .agent/stack/php/skeletons/laravel/deptrac-modular.yaml (Laravel paths), not the plain-PHP one beside skeletons/.
 app/Modules/{{Module}}/Contracts/              # PUBLIC API of the module: interfaces + DTOs other modules may use. Nothing else is public.
 app/Modules/{{Module}}/Http/Controllers/       # Thin controllers → Application actions.
 app/Modules/{{Module}}/Http/Requests/          # Validation + authorization.

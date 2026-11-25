@@ -10,18 +10,18 @@ Mọi yêu cầu chức năng viết theo chuẩn EARS (Easy Approach to Require
 -->
 | ID | Requirement (EARS) | Pattern | Priority (MoSCoW) | Goal | Stories |
 |---|---|---|---|---|---|
-| FR-01 | WHEN user submits valid credentials, the system SHALL authenticate and issue an active session. | Event-driven | Must | G1 | US-01 |
-| FR-02 | IF 5 consecutive failed login attempts occur, THEN the system SHALL lock the account for 15 minutes. | Unwanted | Must | G1 | US-01 |
+| FR-01 | WHEN `<trigger>`, the system SHALL `<response>`. | Event-driven | Must | G1 | `<US-NN>` |
+| FR-02 | IF `<unwanted condition>`, THEN the system SHALL `<safe response>`. | Unwanted | Must | G1 | `<US-NN>` |
 
 ## Non-functional requirements
 | ID | Category | Requirement | Measure |
 |---|---|---|---|
-| NFR-01 | Performance | | p95 < … ms |
-| NFR-02 | Security | | |
-| NFR-03 | Availability | | |
+| NFR-01 | Performance | `<requirement>` | `<p95 < … ms>` |
+| NFR-02 | Security | `<requirement>` | `<measure>` |
+| NFR-03 | Availability | `<requirement>` | `<measure>` |
 
 ## User stories
-### US-01 — <title>
+### US-NN — `<title>`
 **As a** … **I want** … **so that** …
 **Acceptance criteria**
 - Given … When … Then …
@@ -29,7 +29,7 @@ Mọi yêu cầu chức năng viết theo chuẩn EARS (Easy Approach to Require
 ## Business rules
 | ID | Rule |
 |---|---|
-| BR-01 | |
+| BR-01 | `<rule>` |
 
 ## Traceability
 Goal → FR → US → TASK → Test case (cập nhật bởi kit-plan / kit-testcases)

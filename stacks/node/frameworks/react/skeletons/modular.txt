@@ -1,0 +1,6 @@
+# React feature-based (1 feature ↔ 1 backend module, see docs/architecture/project-structure.md); features import each other only via index.ts.
+src/features/{{module}}/                # index.ts = PUBLIC API of the feature (routes, components, hooks other features may use).
+src/features/{{module}}/api/            # Data hooks (TanStack Query/SWR) calling the backend through the GENERATED client in src/shared/api — no hand-written types.
+src/features/{{module}}/components/     # Presentational components; every data view implements empty / loading / error / success.
+src/features/{{module}}/pages/          # Route-level screens from the BA wireframes (docs/ba/stories).
+src/features/{{module}}/__tests__/      # Component + hook tests (Testing Library); user journeys in e2e/.

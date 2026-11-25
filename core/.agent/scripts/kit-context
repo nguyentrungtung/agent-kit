@@ -57,6 +57,13 @@ if [ -n "$query_tags" ] && [ -f "$KIT_DIR/memory/LESSONS.md" ]; then
   fi
 fi
 
+n_lessons="$(grep -c '^- ' "$KIT_DIR/memory/LESSONS.md" 2>/dev/null || true)"
+if [ "${n_lessons:-0}" -gt 60 ]; then
+  section "MAINTENANCE"
+  echo "LESSONS.md has $n_lessons entries (append-only — never edit or delete them). Promote lessons that repeat into a rule in"
+  echo ".agent/rules/project/ (enforced by a tool where possible) and rely on 'kit-context --topic <tag>' to load only the relevant ones."
+fi
+
 section "OPEN TASKS"
 for t in "$KIT_TASKS"/TASK-*.md; do
   [ -f "$t" ] || continue

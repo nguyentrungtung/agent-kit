@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# kit-review-bot [on|off|status] — switch CodeRabbit's AUTOMATIC review of every PR / MR on or off for this repo.
+#   off     reviews.auto_review.enabled: false in .coderabbit.yaml — no automatic review; ask for one when you want it by
+#           commenting  @coderabbitai review  on the PR / MR (works on GitHub and GitLab)
+#   on      enabled: true
+#   status  prints the current setting (no .coderabbit.yaml = whatever the CodeRabbit app / organisation setting says)
+# Then commit .coderabbit.yaml (on the default branch to cover every PR / MR). Pause a single PR / MR instead: comment @coderabbitai pause.
+# Edits only that one key, keeps the rest of the file. An existing `reviews:` block without `auto_review:` is not rewritten blindly.
+. "$(dirname "$0")/lib.sh"
+F="$KIT_ROOT/.coderabbit.yaml"
+
+state() { # on | off | default
+  [ -f "$F" ] || { echo default; return 0; }
+  awk 'function ind(s){ match(s, /^ */); return RLENGTH }
+       /^[ \t]*(#|$)/ { next }
+       /^reviews:/ { r = 1; next }
+       r && ind($0) == 0 { r = 0 }
+       r && /^  auto_review:/ { a = 1; next }
+       r && a && ind($0) <= 2 { a = 0 }
+       r && a && /^    enabled:/ { v = $2; sub(/\r$/, "", v); print (v == "false" ? "off" : "on"); found = 1; exit }
+       END { if (!found) print "default" }' "$F"
+}
+
+set_state() { # set_state true|false
+  local v="$1" cur tmp; cur="$(state)"
+  if [ ! -f "$F" ] || ! grep -q '[^[:space:]]' "$F"; then
+    printf '# CodeRabbit (https://docs.coderabbit.ai) — switch automatic reviews with .agent/scripts/kit-review-bot on|off\nreviews:\n  auto_review:\n    enabled: %s\n' "$v" > "$F"
+  elif [ "$cur" != default ]; then
+    tmp="$F.tmp"
+    awk -v v="$v" 'function ind(s){ match(s, /^ */); return RLENGTH }
+      /^reviews:/ { r = 1 }
+      r && ind($0) == 0 && !/^reviews:/ && !/^[ \t]*(#|$)/ { r = 0 }
+      r && /^  auto_review:/ { a = 1 }
+      r && a && ind($0) <= 2 && !/^  auto_review:/ && !/^[ \t]*(#|$)/ { a = 0 }
+      r && a && /^    enabled:/ && !done { sub(/enabled:[ \t]*[A-Za-z]*/, "enabled: " v); done = 1 }
+      { print }' "$F" > "$tmp" && mv "$tmp" "$F"
+  elif ! grep -q '^reviews:' "$F"; then
+    printf '\nreviews:\n  auto_review:\n    enabled: %s\n' "$v" >> "$F"
+  else
+    die "$F has a 'reviews:' block without 'auto_review: enabled:' — add  reviews.auto_review.enabled: $v  by hand (not rewriting your file blindly)"
+  fi
+}
+
+case "${1:-status}" in
+  on)  set_state true;  info "CodeRabbit automatic review: on  — commit .coderabbit.yaml" ;;
+  off) set_state false; info "CodeRabbit automatic review: off — ask for one with  @coderabbitai review  in a PR / MR comment; commit .coderabbit.yaml" ;;
+  status) case "$(state)" in
+      on) info "CodeRabbit automatic review: on  (.coderabbit.yaml)" ;;
+      off) info "CodeRabbit automatic review: off (.coderabbit.yaml)" ;;
+      *) info "CodeRabbit automatic review: not set here (no reviews.auto_review.enabled in .coderabbit.yaml) — the CodeRabbit app / organisation default applies" ;; esac ;;
+  *) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

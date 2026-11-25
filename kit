@@ -142,7 +142,7 @@ ui_many() { # ui_many <prompt> "<default values>" <opt…>  → space-separated 
 }
 
 # ---------------------------------------------------------------- copying (never clobber unless --force)
-FORCE=0; CREATED=0; UPDATED=0; CONFLICTS=""; UPGRADE=0; RECORDED=""; KEPT=""
+FORCE=0; CREATED=0; UPDATED=0; CONFLICTS=""; UPGRADE=0; RECORDED=""; KEPT=""; BASELINES=""   # BASELINES: "sha  rel" lines
 sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1; else sha256sum "$1" | cut -d' ' -f1; fi; }
 manifest_hash() { [ -f "$TARGET/.agent/kit.manifest" ] && awk -v p="$1" '$2 == p {print $1}' "$TARGET/.agent/kit.manifest" | head -n1; return 0; }
 record() { RECORDED="$RECORDED
@@ -323,13 +323,41 @@ install_component() { # install_component <idx>
   [ -n "$fd" ] && [ -f "$fd/rules.md" ] && copy_file "$fd/rules.md" "$TARGET/.agent/rules/stack/$f.md"
   src="$(stack_asset "$s" snippets)"; [ -n "$src" ] && copy_tree "$src" "$TARGET/.agent/stack/$s/snippets"
   [ -n "$fd" ] && [ -d "$fd/snippets" ] && copy_tree "$fd/snippets" "$TARGET/.agent/stack/$s/snippets"
-  # architecture skeletons (kit-new module): framework definitions win over the stack's
-  if [ -n "$fd" ] && [ -d "$fd/skeletons" ]; then copy_tree "$fd/skeletons" "$TARGET/.agent/stack/$s/skeletons"; fi
+  # architecture skeletons (kit-new module): the stack's own in skeletons/, each framework's in skeletons/<framework>/,
+  # so two components of one stack (node+nestjs backend, node+react frontend, plain node) never overwrite each other
+  # Upgrade from < 0.11 (skeletons/<framework>/ does not exist yet): the framework's skeleton used to live in the shared folder.
+  # If the shared file WAS this framework's (its manifest baseline is one of the framework's shipped versions, listed in
+  # stacks/skeleton-hashes.txt) and the user edited it, carry the edit into skeletons/<framework>/ (kit's file → .kit-new) and give
+  # the shared folder back to the stack's own skeleton. A shared file that came from the stack or another framework is not moved.
+  if [ -n "$fd" ] && [ -d "$fd/skeletons" ]; then
+    local sk nm shd sbd mh stk fkey
+    fkey="$(printf '%s' "${fd#"$STACKS"/}" | sed 's#/frameworks/#/#')"   # owning stack/framework (java-gradle reuses java-maven/spring)
+    for sk in "$fd/skeletons"/*; do
+      [ -f "$sk" ] || continue
+      nm="$(basename "$sk")"; shd="$TARGET/.agent/stack/$s/skeletons/$nm"; sbd="$TARGET/.agent/stack/$s/skeletons/$f/$nm"
+      stk="$(stack_asset "$s" skeletons)"; [ -n "$stk" ] && stk="$stk/$nm"
+      mh=""; [ $UPGRADE -eq 1 ] && [ ! -e "$sbd" ] && [ -f "$shd" ] && mh="$(manifest_hash "${shd#"$TARGET"/}")"
+      if [ -n "$mh" ] && [ "$mh" != "$(sha "$shd")" ] && { [ "$mh" = "$(sha "$sk")" ] || grep -qx "$mh  $fkey/$nm" "${KIT_SKELETON_HASHES:-$KIT_SRC/stacks/skeleton-hashes.txt}" 2>/dev/null; }; then
+        mkdir -p "$(dirname "$sbd")"; cp "$shd" "$sbd"; cp "$sk" "$sbd.kit-new"
+        BASELINES="$BASELINES
+$(sha "$sk")  ${sbd#"$TARGET"/}"; CONFLICTS="$CONFLICTS ${sbd#"$TARGET"/}"   # baseline = kit's file, so later upgrades see the edit
+        if [ -n "$stk" ] && [ -f "$stk" ]; then cp "$stk" "$shd"; else rm -f "$shd"; fi   # shared slot back to the stack (recorded below)
+        # another component of this stack may already have kept the edited shared file as a conflict: that is resolved now
+        rm -f "$shd.kit-new"; KEPT="$(printf '%s\n' "$KEPT" | grep -vxF "${shd#"$TARGET"/}" || true)"
+        CONFLICTS="$(printf '%s' " $CONFLICTS " | sed "s# ${shd#"$TARGET"/} # #g")"
+        note "kept your customised skeleton: ${shd#"$TARGET"/} → ${sbd#"$TARGET"/} (kit's version: $nm.kit-new)"
+      else
+        if [ -n "$mh" ] && [ "$mh" != "$(sha "$shd")" ] && ! { [ -n "$stk" ] && [ -f "$stk" ] && cmp -s "$stk" "$shd"; }; then
+          note "your edited ${shd#"$TARGET"/} is not $f's skeleton — $f now uses ${sbd#"$TARGET"/}; compare and port your edits if they were meant for $f"
+        fi
+        copy_file "$sk" "$sbd"
+      fi
+    done
+  fi
   src="$(stack_asset "$s" skeletons)"
   if [ -n "$src" ]; then
     for rel in "$src"/*; do
       [ -f "$rel" ] || continue
-      [ -n "$fd" ] && [ -f "$fd/skeletons/$(basename "$rel")" ] && continue
       copy_file "$rel" "$TARGET/.agent/stack/$s/skeletons/$(basename "$rel")"
     done
   fi
@@ -385,7 +413,11 @@ apply_project_add() { # put module cmd_* lines into project.yaml (fill empty key
     [ -f "$MODULES/$m/project.add" ] || continue
     while IFS= read -r l; do
       k="${l%%:*}"; [ -z "$k" ] && continue
-      if grep -q "^$k:[[:space:]]*$" "$cfg"; then sed -i.bak "s#^$k:[[:space:]]*\$#$l#" "$cfg" && rm -f "$cfg.bak"
+      if grep -q "^$k:[[:space:]]*$" "$cfg"; then   # literal replacement: the line may contain # & / \ (comments, URLs)
+        K="$k" L="$l" awk 'BEGIN { k = ENVIRON["K"] ":"; n = length(k); l = ENVIRON["L"] }
+          { line = $0; cr = ""; if (sub(/\r$/, "", line)) cr = "\r"
+            if (substr(line, 1, n) == k && substr(line, n + 1) ~ /^[ \t]*$/) print l cr; else print }' "$cfg" > "$cfg.tmp" \
+          && mv "$cfg.tmp" "$cfg"   # awk = literal match (no regex/escape surprises), keeps a CRLF ending
       elif ! grep -q "^$k:" "$cfg"; then echo "$l" >> "$add"; fi
     done < "$MODULES/$m/project.add"
   done
@@ -540,7 +572,8 @@ write_manifest() { # sha256 of every kit-managed file as it is now (after render
       # files the user edited keep the kit's original hash, so later upgrades still recognise the edit
       printf '%s\n' "$KEPT" | awk 'NF && !seen[$0]++' | while IFS= read -r rel; do
         printf '%s  %s\n' "$(manifest_hash "$rel")" "$rel"
-      done; } | sort -k2 -u; } > "$out.tmp" && mv "$out.tmp" "$out"
+      done
+      printf '%s\n' "$BASELINES" | awk 'NF'; } | sort -k2 -u; } > "$out.tmp" && mv "$out.tmp" "$out"
 }
 
 sync_project_keys() { # add keys that newer kits introduced; never change values the project already has

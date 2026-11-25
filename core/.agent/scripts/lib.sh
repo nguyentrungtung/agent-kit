@@ -37,6 +37,14 @@ is_protected() { # is_protected <branch>
   return 1
 }
 
+git_provider() { # github | gitlab — project.yaml git_provider, else guessed from the remote URL (self-hosted GitLab: set git_provider)
+  local p; p="$(cfg git_provider)"
+  if [ -z "$p" ]; then
+    case "$(git remote get-url "${KIT_REMOTE:-origin}" 2>/dev/null || true)" in *gitlab*) p=gitlab ;; *) p=github ;; esac
+  fi
+  printf '%s' "$p"
+}
+
 current_branch() { git rev-parse --abbrev-ref HEAD 2>/dev/null || echo ""; }
 
 # Task id from branch name, e.g. feature/TASK-012-login -> TASK-012

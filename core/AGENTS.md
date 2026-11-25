@@ -13,7 +13,7 @@
 | Need | File |
 |---|---|
 | Goals, scope, users, non-goals | `.agent/context/PROJECT.md` |
-| Architecture, modules, boundaries | `.agent/context/ARCHITECTURE.md` |
+| Architecture, modules, boundaries | `.agent/context/ARCHITECTURE.md` → `docs/architecture/` (SOLUTION, project-structure, ui-design-system), `.agent/rules/project/modules.md` |
 | **Rules** — core, per language/framework, project | `.agent/rules/` (`core/` · `stack/` · `project/`) — read the stack file before editing code |
 | Coding conventions summary (rule → enforcing tool) | `.agent/context/CONVENTIONS.md` |
 | Domain terms | `GLOSSARY.md` |
@@ -38,13 +38,15 @@ idea ─▶ kit-ba (UC/US/BR) ─▶ kit-sa (solution) ─▶ kit-devops · kit-
                      ▲                                  │
                      └──────── kit-task rollback ◀──────┘   (wrong direction? back to a restore point)
 ```
-- **No code without a task. No task without acceptance criteria. Unclear → ask, never guess.**
+- **No code without a task. No task without acceptance criteria. Unclear → ask, never guess.** Low-risk unknown → `ASSUMPTION:` line; only a human marks it `CONFIRMED:`.
+- Never cite an id (UC/US/BR/FR/ADR), file, function or library API you have not seen — `kit-trace` and CI catch invented ids.
 - Everything traces to a use case: UC/US → change → TASK → test → code → spec.
 - Work **only on a task branch** (`<type>/TASK-NNN-slug`). `main`, `develop`, `release/*`, `hotfix/*` are protected.
 - Create documents with `.agent/scripts/kit-new <task|change|testplan|adr|usecase|story|doc>` — never invent the skeleton.
 - Small steps: change → `kit-run check` → `kit-task checkpoint "<what is now working>"`. Same error 3× → rollback, LESSONS.md, re-plan.
 - **Full-stack Developer on Vertical Slices (Size M: 150–350 LOC)**: One agent implements DB + Logic + API + Frontend UI Component + Tests for a feature. Never split tasks horizontally into FE-only or BE-only.
-- Done = `kit-task verify` passes + `.agent/checklists/definition-of-done.md`. Then `kit-task finish`.
+- Place files by `docs/architecture/project-structure.md`; module boundaries: `.agent/rules/project/modules.md` (enforced by `kit-run arch`).
+- Done = `kit-task verify` passes + `.agent/checklists/definition-of-done.md`. Then `kit-task finish`. CI re-runs `kit-task verify` on the PR.
 
 ## 3. Hard rules (also enforced by hooks / git hooks / CI)
 - Never read, print, create or commit secrets: `.env*` (except `.env.example`), keys, certs, credentials, tokens.

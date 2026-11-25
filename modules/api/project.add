@@ -1,1 +1,2 @@
 cmd_api: npx -y @stoplight/spectral-cli@6.14.2 lint docs/api/openapi.yaml --fail-severity warn
+cmd_apigen:                  # FE types/client from the contract (kit-api §3b), e.g. npx -y openapi-typescript@7.4.4 docs/api/openapi.yaml -o frontend/src/shared/api/schema.d.ts

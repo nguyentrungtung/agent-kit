@@ -30,5 +30,15 @@ Integration tests per operation and status code (checklist `.agent/checklists/te
 | Go | swaggo/swag or oapi-codegen (contract → code) | prefer generating server stubs from the contract |
 Swagger UI locally: compose service `swagger-ui` (devops catalog) → http://localhost:8081.
 
+## 3b. Frontend consumes the SAME contract (full-stack slices never drift)
+- The frontend never hand-writes request/response types. Generate them from `docs/api/openapi.yaml` into the shared API folder
+  declared in `docs/architecture/project-structure.md` (e.g. `frontend/src/shared/api/`):
+  set `cmd_apigen` in `.agent/project.yaml`, e.g. `npx -y openapi-typescript@7.4.4 docs/api/openapi.yaml -o frontend/src/shared/api/schema.d.ts`
+  (typed fetch: `openapi-fetch`; full clients: orval / openapi-generator). Commit the generated file.
+- Order inside one vertical slice: contract → `kit-run apigen` → backend handler + tests → frontend hook/component against the
+  generated types → e2e. A type error in the frontend after `apigen` = the contract changed: fix the caller, not the generated file.
+- CI regenerates and fails when the committed output is stale.
+
 ## 4. Done
-Contract updated in the same PR as the code, Spectral clean, oasdiff shows no unannounced breaking change, consumers informed of deprecations.
+Contract updated in the same PR as the code, Spectral clean, oasdiff shows no unannounced breaking change, generated frontend
+types regenerated (`kit-run apigen`), consumers informed of deprecations.

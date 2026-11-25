@@ -22,6 +22,7 @@ case_() { # case_ <name> <preset> <setup-commands>
   check "scripts parse"                     "for f in '$d'/.agent/scripts/* '$d'/.agent/hooks/*.sh '$d'/.githooks/*; do bash -n \"\$f\" || exit 1; done"
   check "no unresolved placeholders"        "! grep -rl '{{[A-Z_]*}}' '$d/.agent/project.yaml' '$d/AGENTS.md' '$d/.github/workflows' 2>/dev/null | grep -q ."
   check "ci has runtime setup"              "! grep -q '@@SETUP@@' '$d/.github/workflows/ci.yml'"
+  check "kit-trace clean on fresh install"  "(cd '$d' && .agent/scripts/kit-trace >/dev/null 2>&1)"
 }
 
 case_ php-laravel app      'printf "{\"require\":{\"laravel/framework\":\"^11\"}}\n" > composer.json; touch artisan'
@@ -38,6 +39,10 @@ case_ dotnet app           'touch App.csproj'
 case_ dbt data             'printf "name: x\nprofile: x\n" > dbt_project.yml'
 case_ monorepo app         'mkdir -p backend frontend; printf "<project><parent><artifactId>spring-boot-starter-parent</artifactId></parent></project>\n" > backend/pom.xml; printf "{\"dependencies\":{\"react\":\"^18\"}}\n" > frontend/package.json'
 case_ platform platform    'mkdir -p infra; printf "terraform {}\n" > infra/main.tf'
+
+d="$WORK/monorepo"; printf '\n== monorepo extras\n'
+check "per-framework skeletons kept apart" "[ -f '$d/.agent/stack/node/skeletons/react/modular.txt' ]"
+check "kit-new module uses the frontend skeleton" "(cd '$d' && .agent/scripts/kit-new module orders --component frontend | grep 'frontend/src/features/orders' >/dev/null)"
 
 printf '\n%d project(s) installed, %d failure(s) — workdir %s\n' "$n" "$fail" "$WORK"
 [ $fail -eq 0 ]

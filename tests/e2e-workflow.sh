@@ -114,6 +114,18 @@ s=s.replace("- [ ] AC1 — Given … When … Then …","- [ ] AC1 — Given \"A
 s=s.replace("## 4. Test plan","Hàm thuần src/greeting.ts.\n\n## 4. Test plan",1)
 open(p,'w').write(s)
 EOF
+step "verify must FAIL while the clarification checklist is not walked"
+if $T verify >/dev/null 2>&1; then echo "UNEXPECTED: verify passed with an unticked checklist"; exit 1; else echo "ok: blocked (checklist)"; fi
+python3 - "$F" <<'EOF'
+import re,sys;p=sys.argv[1];s=open(p).read()
+s=re.sub(r"^- \[ \] (Actor|Data|Edge|Errors|Numbers|State|Integrations|Scope)", r"- [x] \1", s, flags=re.M)
+s=s.replace("| 1 | Tên rỗng? | \"Xin chào, bạn\" | PO |","| 1 | Tên rỗng? | \"Xin chào, bạn\" | PO |\n\nASSUMPTION: tên tối đa 50 ký tự",1)
+open(p,'w').write(s)
+EOF
+step "verify must FAIL while an ASSUMPTION is unconfirmed"
+vrc=0; vout="$($T verify 2>&1)" || vrc=$?
+if [ "$vrc" -ne 0 ] && printf '%s\n' "$vout" | grep -q 'unconfirmed assumptions'; then echo "ok: blocked (assumption)"; else echo "UNEXPECTED: open ASSUMPTION not reported"; exit 1; fi
+sed -i.bak 's/^ASSUMPTION: tên tối đa 50 ký tự/CONFIRMED: tên tối đa 50 ký tự (PO, e2e)/' "$F" && rm -f "$F.bak"
 $N testplan TASK-001 >/dev/null
 printf "import { greet } from './greeting.js';\n\nexport const cases: [string, string][] = [\n  ['An', greet('An')],\n  ['', greet('')],\n];\n" > src/greeting.test.ts
 printf "export const greet = (name: string): string => {\n  const n = name.trim();\n  return n === '' ? 'Xin chào, bạn' : \`Xin chào, \${n}\`;\n};\n" > src/greeting.ts
@@ -138,7 +150,15 @@ for l in s.split("\n"):
 open(p,"w").write("\n".join(lines))
 PY
 grep -E '^\| TC-0' docs/qa/TASK-001.md | cut -c1-40
-$T checkpoint "greet implemented" | tail -1
+step "verify must FAIL without a recorded code review, and while a MAJOR is open"
+vrc=0; vout="$($T verify 2>&1)" || vrc=$?
+if [ "$vrc" -ne 0 ] && printf '%s\n' "$vout" | grep -q 'no code review recorded'; then echo "ok: blocked (no review)"; else echo "UNEXPECTED: missing review not reported"; exit 1; fi
+$T checkpoint "greet implemented" | tail -1   # the review covers committed code only
+$T review "BLOCKER 0 · MAJOR 1 open · MINOR 0 — by e2e" | tail -1
+vrc=0; vout="$($T verify 2>&1)" || vrc=$?
+if [ "$vrc" -ne 0 ] && printf '%s\n' "$vout" | grep -q 'open BLOCKER/MAJOR'; then echo "ok: blocked (open MAJOR)"; else echo "UNEXPECTED: open MAJOR not reported"; exit 1; fi
+$T review "BLOCKER 0 · MAJOR 1 fixed · MINOR 0 — by e2e" | tail -1
+$T checkpoint "review recorded" | tail -1
 
 step "finish: gates + check + archive change"
 $T finish 2>&1 | grep -E '✓|✗|archiv|ERROR|no remote|OK' | grep -v 'change/add-greeting' || true
