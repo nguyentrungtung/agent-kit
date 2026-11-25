@@ -118,7 +118,8 @@ hits=""
 if [ -n "$scan_paths" ]; then
   # file names that are secrets by nature, or exports that usually carry tokens (Postman, HAR)
   hits="$(find $scan_paths -type f 2>/dev/null | grep -Ei '(^|/)\.env(\.[^/]*)?$|\.(pem|key|p12|pfx|jks|keystore|har)$|(^|/)id_(rsa|ed25519)|credential|service-account.*\.json$|postman.*\.json$|\.postman_(collection|environment)' \
-         | grep -Ev '\.env\.(example|sample|template)$' | sed 's/$/ — file type/' || true)"
+         | grep -Ev '\.env\.(example|sample|template)$' \
+         | while IFS= read -r f; do if git check-ignore -q -- "$f" 2>/dev/null; then echo "$f — file type, already kept out of Git (ok)"; else echo "$f — file type"; fi; done || true)"
   hits="$hits
 $(grep -rnHIiE --exclude-dir=.git -- '-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}|[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^/[:space:]@]{3,}@|(^|[^A-Za-z.])(api[_-]?key|secret|passw(or)?d|token|client[_-]?secret|access[_-]?key)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9/+_.=-]{8,}' $scan_paths 2>/dev/null \
     | grep -viE '(example|changeme|placeholder|<[a-z_]+>|\$\{|xxxx|\*\*\*)' \
@@ -144,7 +145,7 @@ $(jq -r '.[] | "\(.File):\(.StartLine) — gitleaks \(.RuleID)"' "$tmp" 2>/dev/n
   fi
 fi
 hits="$(printf '%s\n' "$hits" | awk 'NF && !seen[$0]++')"
-if [ -n "$hits" ]; then printf '%s\n' "$hits" | sed 's/^/- [ ] /'; echo; echo "Each one: remove the value (keep the name, point to .env.example), replace a real person by an anonymous placeholder, or keep the file out of Git — BEFORE the .gitignore lines in §5 go (a push keeps the history)."
+if [ -n "$hits" ]; then printf '%s\n' "$hits" | sed -e '/(ok)$/s/^/- /' -e '/(ok)$/!s/^/- [ ] /'; echo; echo "Each one: remove the value (keep the name, point to .env.example), replace a real person by an anonymous placeholder, or keep the file out of Git — BEFORE the .gitignore lines in §5 go (a push keeps the history)."
 else echo "Nothing found by the built-in patterns$(command -v gitleaks >/dev/null 2>&1 && echo ' or gitleaks'). Still skim spreadsheets / exports in §3 for personal data."; fi
 
 # ---------------------------------------------------------------- 5. .gitignore lines hiding kit / old files

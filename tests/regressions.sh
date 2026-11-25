@@ -448,6 +448,7 @@ check "§4 Postman export + secret-like values found" "sec 4 | grep -q 'api.post
 check "§4 a .htpasswd mount path is not a password"  "! sec 4 | grep -q 'gateway.md'"
 check "§4 personal data in API samples is found"    "sec 4 | grep -q 'api-sample.md:2 — personal data (applicant_name)' && ! sec 4 | grep -q 'api-sample.md:3'"
 check "§4 unquoted phone found, 'automobile' is not a phone" "sec 4 | grep -q 'api-sample.md:5 — personal data (phone)' && ! sec 4 | grep -q 'api-sample.md:4'"
+check "§4 a risky file already out of Git is marked ok, not a to-do" "sec 4 | grep -q '^- docs/tham-chieu/api.postman_collection.json — file type, already kept out of Git (ok)'"
 check "§4 never prints the values"                   "! printf '%s\n' \"\$scan\" | grep -q 'S3cretPw' && ! printf '%s\n' \"\$scan\" | grep -q 'Zq8vK2mN4pR7sT1w' && ! printf '%s\n' \"\$scan\" | grep -q 'Tran Thi Real'"
 check "§5 the .gitignore lines that hide them"       "sec 5 | grep -q '.gitignore:1 .AGENTS.md.' && sec 5 | grep -q '.gitignore:3 .docs/.'"
 check "§6 .kit-new left to merge"                    "sec 6 | grep -q 'AGENTS.md.kit-new'"
