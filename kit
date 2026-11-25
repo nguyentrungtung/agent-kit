@@ -417,7 +417,7 @@ apply_project_add() { # put module cmd_* lines into project.yaml (fill empty key
         K="$k" L="$l" awk 'BEGIN { k = ENVIRON["K"] ":"; n = length(k); l = ENVIRON["L"] }
           { line = $0; cr = ""; if (sub(/\r$/, "", line)) cr = "\r"
             if (substr(line, 1, n) == k && substr(line, n + 1) ~ /^[ \t]*$/) print l cr; else print }' "$cfg" > "$cfg.tmp" \
-          && cat "$cfg.tmp" > "$cfg" && rm -f "$cfg.tmp"   # awk = literal match (no regex/escape surprises), keeps a CRLF ending
+          && mv "$cfg.tmp" "$cfg"   # awk = literal match (no regex/escape surprises), keeps a CRLF ending
       elif ! grep -q "^$k:" "$cfg"; then echo "$l" >> "$add"; fi
     done < "$MODULES/$m/project.add"
   done

@@ -1,0 +1,5 @@
+# CodeRabbit for the agent-kit repo itself. Switch automatic reviews off/on here (enabled: false|true);
+# an off repo can still be reviewed on demand with a "@coderabbitai review" comment on the PR.
+reviews:
+  auto_review:
+    enabled: true

@@ -231,6 +231,7 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 | `kit-task worktrees` / `cleanup TASK-NNN` | Liệt kê worktree / gỡ worktree (từ chối nếu còn việc chưa commit) |
 | `kit-task sync-gh [TASK-NNN\|--all]` / `pull-gh <issue#>` | Đồng bộ task ↔ GitHub Issues (label status/type/priority, tự đóng khi done, tuỳ chọn thêm vào GitHub Project) / tạo task từ issue |
 | `.agent/scripts/kit-trace [--strict] · kit-trace assumptions` | Bước "analyze": mọi id UC/US/BR/FR/NFR/ADR được nhắc tới phải tồn tại; cảnh báo story thiếu UC/AC/AC âm, FR không có story, thư mục module lệch `modules.md`, `ASSUMPTION:` chưa được người xác nhận. Chạy trong `kit-run check`, CI và `kit-task verify` |
+| `.agent/scripts/kit-review-bot [on\|off\|status]` | Bật/tắt review **tự động** của CodeRabbit cho repo (ghi `reviews.auto_review.enabled` vào `.coderabbit.yaml`, giữ nguyên các khoá khác). Tắt rồi vẫn gọi được khi cần: comment `@coderabbitai review` trên PR/MR; tạm dừng một PR/MR: `@coderabbitai pause`. Dùng được trên GitHub lẫn GitLab |
 | `.agent/scripts/kit-board [--json\|--html\|--open]` | Bảng kanban đọc trạng thái thật từ từng nhánh task; JSON cho UI/orchestrator; HTML tự chứa ở `.agent/local/board.html` |
 | `.agent/scripts/kit-doctor [--run]` | Kiểm tra hook, rules, tool cần cho từng `cmd_*` theo từng component, tool của module |
 | `.agent/scripts/kit-diagrams check\|export` | Render mọi sơ đồ Mermaid/PlantUML trong docs (module `ba`) |
@@ -298,6 +299,20 @@ gh pr create --base develop --head feature/TASK-NNN-slug --title "feat: mô tả
 gh run list --limit 5
 gh run view <run_id> --log-failed
 ```
+
+### Dùng GitLab thay cho GitHub
+
+Đặt `git_provider: gitlab` trong `.agent/project.yaml` (để trống = đoán từ URL remote; GitLab tự host thì phải đặt).
+
+| Phần | GitLab |
+|---|---|
+| Git hook (`pre-commit`, `commit-msg`, `pre-push`), hook Claude, `kit-trace`, `kit-task verify`, `kit-run check` | ✅ không phụ thuộc nhà cung cấp |
+| `kit-task finish` | ✅ mở Merge Request bằng `glab mr create` (cần `glab auth login`); thiếu `glab` thì chỉ nhắc mở MR bằng tay. Chưa được thử với `glab` thật |
+| `kit-task sync-gh` / `pull-gh` | ❌ chỉ GitHub Issues — trên GitLab lệnh báo lỗi rõ ràng; file task vẫn là nguồn gốc |
+| `.github/workflows/ci.yml` (guard, quality, security), `cd.yml`, `dependabot.yml`, template issue/PR | ❌ chỉ GitHub Actions. Trên GitLab không chạy; **chưa có `.gitlab-ci.yml` đi kèm** — pipeline của bạn cần gọi các script của kit (`kit-run ci`, `kit-trace`, `kit-task verify`) để giữ các gate |
+| Chặn merge ở server | Bật *Pipelines must succeed* và protected branch trên GitLab, tương đương branch protection |
+
+**CodeRabbit** hỗ trợ GitLab (cloud và self-managed). Không muốn dùng hoặc đã có pipeline/review riêng: `.agent/scripts/kit-review-bot off`, commit `.coderabbit.yaml`.
 
 ## 7. Tuỳ biến
 

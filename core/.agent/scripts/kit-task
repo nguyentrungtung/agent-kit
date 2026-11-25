@@ -334,8 +334,9 @@ cmd_verify() {
   # 2 Clarify: the ambiguity checklist must be walked (every box ticked, n/a items too) and every asked question answered
   s2="$(section_body "$f" '^## 2\. Clarifications')"
   if [ "$tpl" -ge 2 ]; then
-    ticks="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*- \[[xX]\]' || true)"
-    open_box="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*- \[ \]' || true)"
+    # task-list items: -, * or + bullets and "1." / "1)" numbering
+    ticks="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+\[[xX]\]' || true)"
+    open_box="$(printf '%s\n' "$s2" | grep -cE '^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]+\[[[:space:]]\]' || true)"
     # the checklist belongs to the task: every box in §2 must be ticked (n/a ones too), however many there are.
     # The 8 standard dimensions are a reminder — one that is missing is only a warning, the task may not need it.
     if [ "${ticks:-0}" -gt 0 ] && [ "${open_box:-0}" -eq 0 ]; then gate ok "2 clarification checklist done ($ticks ticked)"
@@ -467,17 +468,23 @@ cmd_finish() {
   git add -A "$KIT_TASKS"; git commit -q -m "chore($id): ready for review" || true
   if ! has_remote; then warn "no remote: merge manually → git checkout $base && git merge --no-ff $br"; return; fi
   git push -q -u "$(remote)" "$br"
-  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    local body; body="$(mktemp)"
-    local issue; issue="$(issue_of "$id" "$(cat "$f")")"
-    { echo "Task: \`$id\` — $title"; echo; [ -n "$issue" ] && { echo "Closes #$issue"; echo; }; echo "Task file: \`${f#"$KIT_ROOT"/}\`"; echo
-      sed -n '/^## Acceptance criteria/,/^## /p' "$f" | sed '$d'; echo
-      cat "$KIT_ROOT/.github/PULL_REQUEST_TEMPLATE.md" 2>/dev/null; } > "$body"
+  local body prov; prov="$(git_provider)"; body="$(mktemp)"
+  { echo "Task: \`$id\` — $title"; echo; local issue; issue="$(issue_of "$id" "$(cat "$f")")"; [ -n "$issue" ] && { echo "Closes #$issue"; echo; }
+    echo "Task file: \`${f#"$KIT_ROOT"/}\`"; echo
+    sed -n '/^## Acceptance criteria/,/^## /p' "$f" | sed '$d'; echo
+    { [ "$prov" = gitlab ] && cat "$KIT_ROOT/.gitlab/merge_request_templates/Default.md" 2>/dev/null; } \
+      || cat "$KIT_ROOT/.github/PULL_REQUEST_TEMPLATE.md" 2>/dev/null || true; } > "$body"
+  if [ "$prov" = gitlab ]; then
+    if command -v glab >/dev/null 2>&1 && glab auth status >/dev/null 2>&1; then
+      glab mr create --target-branch "$base" --source-branch "$br" --title "${type:-feature}($id): $title" --description "$(cat "$body")" --yes \
+        || warn "glab mr create failed — open the merge request manually"
+    else warn "glab not available/authenticated — open a merge request: $br → $base"; fi
+  elif command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
     gh pr create --base "$base" --head "$br" --title "${type:-feature}($id): $title" --body-file "$body" || warn "gh pr create failed — open the PR manually"
-    rm -f "$body"
   else
     warn "gh not available/authenticated — open a PR: $br → $base"
   fi
+  rm -f "$body"
 }
 
 find_merge_commit() { # find_merge_commit <id>
@@ -521,6 +528,7 @@ cmd_abandon() {
 }
 
 gh_ready() {
+  [ "$(git_provider)" = github ] || die "sync-gh and pull-gh work with GitHub issues only (git_provider: $(git_provider)) — keep task files as the source of truth, or open issues by hand"
   command -v gh >/dev/null 2>&1 || die "GitHub CLI (gh) not installed"
   gh auth status >/dev/null 2>&1 || die "gh not authenticated — run: gh auth login"
 }

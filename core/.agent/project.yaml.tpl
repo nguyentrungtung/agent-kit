@@ -16,7 +16,8 @@ protected_extra: master release/* hotfix/*
 protected_regex: ^(main|master|develop|release/.*|hotfix/.*)$
 push_checkpoints: true       # push task branch to origin on every checkpoint (remote backup)
 
-# --- Tasks & GitHub ---
+# --- Tasks & Git hosting ---
+git_provider:                # github | gitlab — where PRs/MRs are opened (empty = guess from the remote URL; set it for self-hosted GitLab)
 gh_project:                  # optional GitHub Project for kit-task sync-gh, as <owner>/<number> (e.g. @me/3 or my-org/7)
 
 # --- Commands (verified by the kit-onboard playbook; empty = skipped) ---

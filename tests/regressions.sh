@@ -170,6 +170,10 @@ out="$(cd "$d" && f="$(ls .agent/tasks/TASK-002-*.md)" && perl -pi -e 's/^- \[x\
 check "a replaced dimension only warns"            "printf '%s\n' \"\$out\" | grep -q 'not in the checklist: Numbers' && printf '%s\n' \"\$out\" | grep -q '2 clarification checklist done'"
 out="$(cd "$d" && f="$(ls .agent/tasks/TASK-002-*.md)" && perl -0pi -e 's/(- \[x\] Something unrelated\n)/$1- [ ] Task-specific: export format\n/' "$f" && { .agent/scripts/kit-task verify TASK-002 2>&1 || true; })"
 check "an unticked task-specific item blocks"     "printf '%s\n' \"\$out\" | grep -q 'tick every item of the checklist'"
+out="$(cd "$d" && f="$(ls .agent/tasks/TASK-002-*.md)" && perl -0pi -e 's/(- \[ \] Task-specific: export format\n)/$1* [ ] star bullet left open\n/' "$f" && perl -0pi -e 's/- \[ \] Task-specific: export format\n/- [x] Task-specific: export format\n/' "$f" && { .agent/scripts/kit-task verify TASK-002 2>&1 || true; })"
+check "an unticked '*' item blocks too"             "printf '%s\n' \"\$out\" | grep -q 'tick every item of the checklist'"
+out="$(cd "$d" && f="$(ls .agent/tasks/TASK-002-*.md)" && perl -0pi -e 's/\* \[ \] star bullet left open\n/1. [x] numbered item done\n+ [x] plus item done\n/' "$f" && { .agent/scripts/kit-task verify TASK-002 2>&1 || true; })"
+check "ticked '1.' and '+' items pass"              "printf '%s\n' \"\$out\" | grep -q '2 clarification checklist done'"
 
 printf '\n== kit add fills an empty key in a CRLF project.yaml and keeps the CRLF ending\n'
 c="$WORK/crlf"; fresh "$c"
@@ -208,6 +212,38 @@ check "template placeholder rows define nothing"    "printf '%s\n' \"\$out\" | g
 check "first-column id outside docs/ba is checked"  "printf '%s\n' \"\$out\" | grep -q 'NFR-09 is referenced'"
 check "'failed' / 'If …' count as negative paths"   "! printf '%s\n' \"\$out\" | grep -qE 'US-0[124]-x.md +story has no negative'"
 check "a lone lower-case 'if' does not"             "printf '%s\n' \"\$out\" | grep -qE 'US-03-x.md +story has no negative'"
+
+# ---------------------------------------------------------------- CodeRabbit switch + git provider
+printf '\n== kit-review-bot: on/off edits only reviews.auto_review.enabled; GitLab remotes are recognised\n'
+b="$WORK/bot"; fresh "$b"; mkdir -p "$b/.agent/scripts"
+cp "$ROOT/core/.agent/scripts/lib.sh" "$ROOT/core/.agent/scripts/kit-review-bot" "$b/.agent/scripts/"
+BOT="$b/.agent/scripts/kit-review-bot"
+(cd "$b" && git init -q)
+out="$(cd "$b" && "$BOT" status 2>&1)"
+check "no file → not set here"                       "printf '%s\n' \"\$out\" | grep -q 'not set here'"
+(cd "$b" && "$BOT" off >/dev/null 2>&1)
+check "off creates the file with enabled: false"     "grep -q 'enabled: false' \"\$b/.coderabbit.yaml\""
+out="$(cd "$b" && "$BOT" status 2>&1)"
+check "status says off"                              "printf '%s\n' \"\$out\" | grep -q 'automatic review: off'"
+(cd "$b" && "$BOT" on >/dev/null 2>&1)
+out="$(cd "$b" && "$BOT" status 2>&1)"
+check "on flips it back"                             "printf '%s\n' \"\$out\" | grep -q 'automatic review: on' && grep -q 'enabled: true' \"\$b/.coderabbit.yaml\""
+printf '# my config\nlanguage: vi-VN\nreviews:\n  profile: chill\n  auto_review:\n    drafts: false\n    enabled: true   # keep\n  path_filters:\n    - "!dist/**"\nchat:\n  enabled: true\n' > "$b/.coderabbit.yaml"
+(cd "$b" && "$BOT" off >/dev/null 2>&1)
+check "other keys and comments are kept"             "grep -q 'language: vi-VN' \"\$b/.coderabbit.yaml\" && grep -q 'profile: chill' \"\$b/.coderabbit.yaml\" && grep -q '# my config' \"\$b/.coderabbit.yaml\" && grep -q 'drafts: false' \"\$b/.coderabbit.yaml\""
+check "only auto_review.enabled changed"             "grep -q '^    enabled: false' \"\$b/.coderabbit.yaml\" && grep -q '^  enabled: true' \"\$b/.coderabbit.yaml\""
+printf 'reviews:\n  profile: chill\n' > "$b/.coderabbit.yaml"; before="$(cat "$b/.coderabbit.yaml")"
+rc=0; (cd "$b" && "$BOT" off >/dev/null 2>&1) || rc=$?
+check "reviews: without auto_review is not rewritten" "[ $rc -ne 0 ] && [ \"\$(cat \"\$b/.coderabbit.yaml\")\" = \"\$before\" ]"
+printf 'language: en\n' > "$b/.coderabbit.yaml"; (cd "$b" && "$BOT" off >/dev/null 2>&1)
+check "no reviews: block → appended"                 "grep -q 'language: en' \"\$b/.coderabbit.yaml\" && grep -q '^    enabled: false' \"\$b/.coderabbit.yaml\""
+prov() { (cd "$b" && git remote remove origin 2>/dev/null; git remote add origin "$1"; . .agent/scripts/lib.sh; git_provider); }
+check "gitlab.com remote → gitlab"                   "[ \"\$(prov https://gitlab.com/acme/app.git)\" = gitlab ]"
+check "github.com remote → github"                   "[ \"\$(prov git@github.com:acme/app.git)\" = github ]"
+printf 'git_provider: gitlab   # self-hosted\n' > "$b/.agent/project.yaml"
+check "git_provider in project.yaml wins"            "[ \"\$(prov https://git.corp.example/acme/app.git)\" = gitlab ]"
+out="$(cd "$d" && git remote add origin https://gitlab.com/acme/app.git 2>/dev/null; { .agent/scripts/kit-task sync-gh --all 2>&1 || true; })"
+check "sync-gh refuses on a GitLab remote"           "printf '%s\n' \"\$out\" | grep -q 'work with GitHub issues only'"
 
 # ---------------------------------------------------------------- 2. CI task gate scope
 printf '\n== CI task gate: verify tasks this PR finishes, skip tasks finished on the base branch\n'
