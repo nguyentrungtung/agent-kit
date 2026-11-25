@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# kit-ci <prepare|guard|task-gates|api> — the CI gates in ONE place. GitHub Actions (.github/workflows/ci.yml) and GitLab CI
+# (.gitlab-ci.yml / .gitlab-ci.kit.yml) only call this script, so every Git host enforces exactly the same rules.
+#   prepare      make sure the CI container has git, bash, jq, perl, curl (apt/apk when root) and try to fetch gitleaks
+#   guard        secrets + forbidden files (whole repo) · secrets in the PR/MR history · branch name · Conventional Commits · kit-trace
+#   task-gates   `kit-task verify` for the task of this branch and every task this PR/MR marks as finished (agents cannot skip the gates)
+#   api          Spectral lint · generated API client up to date (cmd_apigen) · breaking changes vs the target branch (oasdiff, needs docker)
+# Where it runs is detected: GitHub Actions and GitLab CI are read from their own variables; by hand, set
+#   KIT_CI_HEAD=<branch>  KIT_CI_BASE=<target branch>  KIT_CI_EVENT=pr|push
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+
+if [ "${GITLAB_CI:-}" = true ]; then
+  HEAD_REF="${KIT_CI_HEAD:-${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-${CI_COMMIT_BRANCH:-}}}"
+  BASE_REF="${KIT_CI_BASE:-${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}}"
+  EVENT="${KIT_CI_EVENT:-$([ -n "${CI_MERGE_REQUEST_IID:-}" ] && echo pr || echo push)}"
+elif [ "${GITHUB_ACTIONS:-}" = true ]; then
+  HEAD_REF="${KIT_CI_HEAD:-${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-}}}"
+  BASE_REF="${KIT_CI_BASE:-${GITHUB_BASE_REF:-}}"
+  EVENT="${KIT_CI_EVENT:-$([ "${GITHUB_EVENT_NAME:-}" = pull_request ] && echo pr || echo push)}"
+else
+  HEAD_REF="${KIT_CI_HEAD:-$(current_branch)}"; BASE_REF="${KIT_CI_BASE:-}"; EVENT="${KIT_CI_EVENT:-push}"
+fi
+
+ci_error() { if [ "${GITHUB_ACTIONS:-}" = true ]; then echo "::error::$*"; else echo "ERROR: $*" >&2; fi; }
+fetch_base() { # make origin/<target> available (shallow or single-branch clones do not have it)
+  if [ -n "$BASE_REF" ]; then git fetch -q origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" 2>/dev/null || warn "could not fetch origin/$BASE_REF"; fi
+  return 0
+}
+
+cmd_prepare() {
+  local need="" t
+  for t in git bash jq perl curl; do command -v "$t" >/dev/null 2>&1 || need="$need $t"; done
+  if [ -n "$need" ]; then
+    if [ "$(id -u)" = 0 ] && command -v apt-get >/dev/null 2>&1; then
+      apt-get update -qq && apt-get install -y -qq --no-install-recommends $need ca-certificates >/dev/null
+    elif [ "$(id -u)" = 0 ] && command -v apk >/dev/null 2>&1; then apk add --no-cache $need ca-certificates >/dev/null
+    else die "missing in the CI image:$need — use an image that has them (or run as root so kit-ci can install them)"; fi
+  fi
+  if ! command -v gitleaks >/dev/null 2>&1; then   # optional: without it the built-in scanner still runs (offline runners: bake gitleaks into the image)
+    local v=8.21.2 arch dest="/usr/local/bin"; arch="$(uname -m)"; case "$arch" in x86_64|amd64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; esac
+    [ -w "$dest" ] || dest="$HOME/.local/bin"; mkdir -p "$dest"
+    if curl -fsSL --max-time 60 "https://github.com/gitleaks/gitleaks/releases/download/v${v}/gitleaks_${v}_linux_${arch}.tar.gz" | tar -xz -C "$dest" gitleaks 2>/dev/null; then
+      export PATH="$dest:$PATH"; info "gitleaks $v installed in $dest"
+    else warn "gitleaks not available (offline runner?) — only the built-in secret scan runs; put gitleaks in the CI image for the history scan"; fi
+  fi
+}
+
+cmd_guard() {
+  "$KIT_DIR/scripts/kit-secrets-scan" --all
+  if [ "$EVENT" = pr ]; then
+    [ -n "$BASE_REF" ] || die "kit-ci: a pull / merge request needs its target branch (KIT_CI_BASE)"
+    fetch_base
+    if command -v gitleaks >/dev/null 2>&1; then gitleaks detect --no-banner --redact --log-opts="origin/$BASE_REF..HEAD"
+    else warn "gitleaks not installed — history scan skipped"; fi
+    printf '%s' "$HEAD_REF" | grep -Eq '^(feature|fix|hotfix|refactor|chore|docs|test|release|revert)/' \
+      || { ci_error "branch '$HEAD_REF' must be <type>/TASK-NNN-slug"; return 1; }
+    local types bad=0 s; types="$(cfg commit_types 'feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert|sec')"
+    while IFS= read -r s; do
+      case "$s" in Merge\ *|Revert\ *) continue ;; esac
+      printf '%s' "$s" | grep -Eq "^(${types})(\([A-Za-z0-9._/-]+\))?!?: .{3,}" || { ci_error "bad commit subject: $s"; bad=1; }
+    done < <(git log --format=%s "origin/$BASE_REF..HEAD")
+    [ $bad -eq 0 ] || return 1
+  fi
+  "$KIT_DIR/scripts/kit-trace"
+}
+
+cmd_task_gates() {
+  [ "$EVENT" = pr ] || { info "task gates run on pull / merge requests only"; return 0; }
+  [ -n "$BASE_REF" ] || die "kit-ci: a pull / merge request needs its target branch (KIT_CI_BASE)"
+  local id ids changed_tasks f base_st t bad=0
+  id="$(printf '%s' "$HEAD_REF" | grep -oE 'TASK-[0-9]+' | head -n1 || true)"
+  case "$HEAD_REF" in
+    feature/*|fix/*|hotfix/*|refactor/*)
+      [ -n "$id" ] || { ci_error "code branch '$HEAD_REF' has no TASK-NNN — every code change needs a task (kit-task new / start)"; return 1; } ;;
+  esac
+  fetch_base
+  # also every task file this PR marks as finished (review/done) — a chore/docs branch cannot close a task unverified
+  # (release/revert PRs only carry tasks already verified in their own PRs)
+  ids="$id"
+  case "$HEAD_REF" in
+    release/*|revert/*) changed_tasks="" ;;
+    *) changed_tasks="$(git diff --name-only "origin/$BASE_REF...HEAD" -- '.agent/tasks/TASK-*.md' '.agent/tasks/archive/*/TASK-*.md')" ;;
+  esac
+  for f in $changed_tasks; do
+    [ -f "$f" ] || continue
+    case "$(sed -n 's/^status:[[:space:]]*//p' "$f" | head -n1)" in review|done) ;; *) continue ;; esac
+    # already review/done on the base branch (e.g. kit-task start archiving merged tasks) = verified in its own PR → skip
+    base_st="$( { git show "origin/$BASE_REF:$f" 2>/dev/null || git show "origin/$BASE_REF:.agent/tasks/$(basename "$f")" 2>/dev/null; } | sed -n 's/^status:[[:space:]]*//p' | head -n1)"
+    case "$base_st" in review|done) continue ;; esac
+    ids="$ids $(basename "$f" | grep -oE '^TASK-[0-9]+')"
+  done
+  ids="$(printf '%s\n' $ids | sort -u | tr '\n' ' ')"
+  [ -n "${ids// /}" ] || { info "no task on this branch and no task marked finished — skipped"; return 0; }
+  for t in $ids; do echo "== $t"; KIT_BASE_REF="origin/$BASE_REF" "$KIT_DIR/scripts/kit-task" verify "$t" || bad=1; done
+  return $bad
+}
+
+cmd_api() {
+  [ -f docs/api/openapi.yaml ] || { info "no docs/api/openapi.yaml — API checks skipped"; return 0; }
+  "$KIT_DIR/scripts/kit-run" api
+  if grep -qE '^cmd_apigen:[[:space:]]*[^#[:space:]]' "$KIT_CFG"; then
+    local before; before="$(git status --porcelain)"
+    "$KIT_DIR/scripts/kit-run" apigen
+    [ "$before" = "$(git status --porcelain)" ] || { git status --short; ci_error "generated API client is stale — run .agent/scripts/kit-run apigen and commit"; return 1; }
+  else
+    info "cmd_apigen is not set — frontend types are not checked against docs/api/openapi.yaml (set it when a frontend consumes the API, kit-api §3b)"
+  fi
+  if [ "$EVENT" = pr ] && [ -n "$BASE_REF" ]; then
+    fetch_base
+    local base; base="$(mktemp)"
+    if git show "origin/$BASE_REF:docs/api/openapi.yaml" > "$base" 2>/dev/null; then
+      if command -v docker >/dev/null 2>&1; then
+        docker run --rm -v "$(dirname "$base"):/base" -v "$PWD/docs/api:/head" tufin/oasdiff:v1.11.1 breaking "/base/$(basename "$base")" /head/openapi.yaml --fail-on ERR
+      else warn "docker not available — breaking-change check (oasdiff) skipped"; fi
+    else info "no base contract yet"; fi
+    rm -f "$base"
+  fi
+}
+
+case "${1:-}" in
+  prepare) cmd_prepare ;;
+  guard) cmd_guard ;;
+  task-gates) cmd_task_gates ;;
+  api) cmd_api ;;
+  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

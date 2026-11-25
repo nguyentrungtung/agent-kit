@@ -16,3 +16,5 @@ cmd_coverage: ./mvnw -B verify -Dcoverage.min=$(awk "BEGIN{print ${KIT_COVERAGE_
 cmd_build: ./mvnw -B -DskipTests package
 cmd_audit: ./mvnw -B -q org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7
 post_note: merge .agent/stack/java-maven/snippets/pom-plugins.xml into pom.xml and copy ArchitectureTest.java into src/test/java/<base package>/ (the kit-onboard playbook does this).
+
+ci_image: maven:3.9-eclipse-temurin-21

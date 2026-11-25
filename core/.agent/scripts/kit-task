@@ -475,7 +475,8 @@ cmd_finish() {
     sed -n '/^## Acceptance criteria/,/^## /p' "$f" | sed '$d'; echo
     { [ "$prov" = gitlab ] && cat "$KIT_ROOT/.gitlab/merge_request_templates/Default.md" 2>/dev/null; } \
       || cat "$KIT_ROOT/.github/PULL_REQUEST_TEMPLATE.md" 2>/dev/null || true; } > "$body"
-  if [ "$prov" = gitlab ]; then
+  if [ "$prov" = none ]; then warn "git_provider: none — open the merge/pull request yourself: $br → $base"
+  elif [ "$prov" = gitlab ]; then
     if command -v glab >/dev/null 2>&1 && glab auth status >/dev/null 2>&1; then
       glab mr create --target-branch "$base" --source-branch "$br" --title "${type:-feature}($id): $title" --description "$(cat "$body")" --yes \
         || warn "glab mr create failed — open the merge request manually"

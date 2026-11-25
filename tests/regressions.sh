@@ -285,6 +285,81 @@ check "--hooks keep on a plain repo prints the lines" "[ -z \"\$(hp \"\$H\")\" ]
 rc=0; "$KIT" init "$WORK/hk-bad" --hooks nonsense >/dev/null 2>&1 || rc=$?
 check "--hooks rejects other values"                "[ $rc -ne 0 ]"
 
+# ---------------------------------------------------------------- adopting an existing repo cleanly (lessons from a real GitLab data repo)
+printf '\n== kit init in an existing repo: Git host, flow, hooks, configs and files the repo already has\n'
+ad() { # ad <dir> "<setup shell>" [kit init args…] — an existing git repo (main), then kit init (no modules unless asked); log in <dir>.log
+  local dir="$1" setup="$2"; shift 2; fresh "$dir"
+  (cd "$dir" && git init -q -b main && eval "$setup")
+  "$KIT" init "$dir" --yes --no-deps --no-setup --no-tools --modules none "$@" >"$dir.log" 2>&1 || true
+}
+commit_all() { (cd "$1" && git add -A && git -c core.hooksPath=/dev/null commit -qm "chore: base" --no-verify); }
+yv() { sed -n "s/^$2:[[:space:]]*\([^ #]*\).*/\1/p" "$1/.agent/project.yaml" | head -n1; }
+
+# --- Git host: a self-hosted GitLab whose URL does not say "gitlab", recognised by its pipeline file
+A="$WORK/ad-gitlab"
+ad "$A" 'printf "stages: [test]\nt:\n  script: [echo]\n" > .gitlab-ci.yml && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify && git remote add origin https://git.example.cloud/data/lakehouse.git && printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node
+check "pipeline file → git_provider: gitlab"        "[ \"\$(yv \"\$A\" git_provider)\" = gitlab ]"
+check "no .github/ in a GitLab repo"                "[ ! -e \"\$A/.github\" ]"
+check "MR + issue templates installed"              "[ -f \"\$A/.gitlab/merge_request_templates/Default.md\" ] && [ -f \"\$A/.gitlab/issue_templates/task.md\" ]"
+check "your .gitlab-ci.yml is untouched"            "git -C \"\$A\" diff --quiet HEAD -- .gitlab-ci.yml && [ -z \"\$(git -C \"\$A\" status --porcelain .gitlab-ci.yml)\" ]"
+check "runtime provider agrees"                     "[ \"\$(cd \"\$A\" && . .agent/scripts/lib.sh && git_provider)\" = gitlab ]"
+A="$WORK/ad-github"; ad "$A" 'git remote add origin git@github.com:acme/app.git && printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node
+check "github remote → github files only"           "[ \"\$(yv \"\$A\" git_provider)\" = github ] && [ -f \"\$A/.github/workflows/ci.yml\" ] && [ ! -e \"\$A/.gitlab\" ]"
+A="$WORK/ad-none"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node --provider none
+check "--provider none installs no host files"      "[ \"\$(yv \"\$A\" git_provider)\" = none ] && [ ! -e \"\$A/.github\" ] && [ ! -e \"\$A/.gitlab\" ]"
+rc=0; "$KIT" init "$WORK/ad-bad" --provider svn >/dev/null 2>&1 || rc=$?
+check "--provider rejects other values"             "[ $rc -ne 0 ]"
+
+# --- flow: trunk-based when an existing repo has no develop; gitflow when it has one or is brand new
+A="$WORK/ad-trunk"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack node
+check "existing repo without develop → trunk"       "[ \"\$(yv \"\$A\" develop_branch)\" = main ] && ! git -C \"\$A\" show-ref -q --verify refs/heads/develop"
+commit_all "$A"; tip="$(git -C "$A" rev-parse main)"
+(cd "$A" && .agent/scripts/kit-task new "Trunk task" >/dev/null && .agent/scripts/kit-task start TASK-001 >/dev/null 2>&1)
+check "kit-task start branches from main"           "[ \"\$(git -C \"\$A\" rev-parse --abbrev-ref HEAD)\" = feature/TASK-001-trunk-task ] && [ \"\$(git -C \"\$A\" merge-base HEAD main)\" = \"$tip\" ]"
+A="$WORK/ad-flow-develop"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify && git branch develop' --stack node
+check "a develop branch → gitflow as before"        "[ \"\$(yv \"\$A\" develop_branch)\" = develop ]"
+A="$WORK/ad-flow-new"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node
+check "brand-new repo → gitflow"                    "[ \"\$(yv \"\$A\" develop_branch)\" = develop ]"
+A="$WORK/ad-flow-force"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack node --flow gitflow
+check "--flow gitflow creates develop"              "git -C \"\$A\" show-ref -q --verify refs/heads/develop && [ \"\$(yv \"\$A\" develop_branch)\" = develop ]"
+
+# --- hooks: a hand-written hook in .git/hooks is a hook setup too
+A="$WORK/ad-rawhook"
+ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json && printf "#!/bin/sh\nexit 0\n" > .git/hooks/commit-msg && chmod +x .git/hooks/commit-msg' --stack node
+check "hand-written .git/hooks kept (hooksPath unset)" "[ -z \"\$(hp \"\$A\")\" ] && grep -q 'keeping your' \"\$A.log\" && [ -x \"\$A/.git/hooks/commit-msg\" ]"
+
+# --- configs and files the repo already has are not duplicated
+A="$WORK/ad-dup"
+ad "$A" 'mkdir -p ingestion/docker platform/compose && printf "[project]\nname=\"i\"\n" > ingestion/pyproject.toml && printf "line-length = 99\n" > ruff.toml && printf "FROM python:3.12\n" > ingestion/docker/Dockerfile && printf "services: {}\n" > platform/compose/docker-compose.yml' --stack python:ingestion --modules devops
+check "root ruff.toml → no second ruff.toml in ingestion/" "[ ! -e \"\$A/ingestion/ruff.toml\" ] && grep -q 'not adding a second' \"\$A.log\""
+check "own Dockerfile kept, no generic one added"    "[ ! -e \"\$A/ingestion/Dockerfile\" ] && grep -q 'generic Dockerfile is not added' \"\$A.log\""
+check "own compose file → no compose.yaml generated" "[ ! -e \"\$A/compose.yaml\" ] && grep -q 'not generating a second compose.yaml' \"\$A.log\""
+check "cmd_up / down / logs left empty"              "[ -z \"\$(yv \"\$A\" cmd_up)\" ] && [ -z \"\$(yv \"\$A\" cmd_down)\" ]"
+A="$WORK/ad-nodup"; ad "$A" 'mkdir -p ingestion && printf "[project]\nname=\"i\"\n" > ingestion/pyproject.toml' --stack python:ingestion --modules devops
+check "without them the kit's own files are added"   "[ -f \"\$A/ingestion/ruff.toml\" ] && [ -f \"\$A/ingestion/Dockerfile\" ] && [ -f \"\$A/compose.yaml\" ] && [ -n \"\$(yv \"\$A\" cmd_up)\" ]"
+for pr in data app; do   # presets pick modules, so these two run kit init without --modules none
+  A="$WORK/ad-perf-$pr"; fresh "$A"; (cd "$A" && git init -q -b main && printf '{"name":"x","version":"1"}\n' > package.json)
+  "$KIT" init "$A" --yes --no-deps --no-setup --no-tools --stack node --preset "$pr" >"$A.log" 2>&1 || true
+done
+check "app preset: k6 perf smoke + cmd_perf"         "[ -f \"\$WORK/ad-perf-app/perf/smoke.js\" ] && grep -q '^cmd_perf:[[:space:]]*if ' \"\$WORK/ad-perf-app/.agent/project.yaml\""
+check "data preset: no perf files, cmd_perf empty"   "[ ! -e \"\$WORK/ad-perf-data/perf\" ] && ! grep -q '^cmd_perf:[[:space:]]*if ' \"\$WORK/ad-perf-data/.agent/project.yaml\""
+
+# --- the repo's own .gitignore may hide kit files: say so
+A="$WORK/ad-ignored"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json && printf "AGENTS.md\n.claude/\n" > .gitignore' --stack node
+check "ignored kit files are reported at install"    "grep -q 'ignores kit files' \"\$A.log\""
+out="$(cd "$A" && .agent/scripts/kit-doctor 2>&1 || true)"
+check "kit-doctor reports them too"                  "printf '%s\n' \"\$out\" | grep -q 'ignores kit files'"
+
+# --- kit-doctor: `uv run <tool>` is fine when uv exists; dbt --target ci needs a ci target
+UB="$WORK/uvbin"; rm -rf "$UB"; mkdir -p "$UB"; printf '#!/bin/sh\nexit 0\n' > "$UB/uv"; chmod +x "$UB/uv"
+A="$WORK/ad-doctor"; ad "$A" 'mkdir -p ingestion transform && printf "[project]\nname=\"i\"\n" > ingestion/pyproject.toml && touch ingestion/uv.lock && printf "name: t\n" > transform/dbt_project.yml && printf "t:\n  outputs:\n    prod:\n      type: trino\n" > transform/profiles.yml' --stack python:ingestion,dbt:transform
+out="$(cd "$A" && PATH="$UB:$PATH" .agent/scripts/kit-doctor 2>&1 || true)"
+check "uv run <tool>: only uv is checked"            "! printf '%s\n' \"\$out\" | grep -q \"'ruff'\""
+check "dbt without a ci target is flagged"           "printf '%s\n' \"\$out\" | grep -q \"no 'ci' target in profiles.yml\""
+printf "t:\n  outputs:\n    ci:\n      type: duckdb\n" > "$A/transform/profiles.yml"
+out="$(cd "$A" && PATH="$UB:$PATH" .agent/scripts/kit-doctor 2>&1 || true)"
+check "with a ci target it is not"                   "! printf '%s\n' \"\$out\" | grep -q \"no 'ci' target in profiles.yml\""
+
 # ---------------------------------------------------------------- issue sync: GitLab (REST) and GitHub (gh) behind one interface
 printf '\n== kit-task sync / pull: GitLab through its REST API (fake server), GitHub through gh (fake gh)\n'
 issue_project() { # issue_project <dir> <provider> <remote-url> → a kit project on develop with git_provider set
@@ -294,8 +369,11 @@ issue_project() { # issue_project <dir> <provider> <remote-url> → a kit projec
   perl -pi -e "s/^git_provider:.*/git_provider: $2/" "$dir/.agent/project.yaml"
   (cd "$dir" && git add -A && git commit -qm "chore: init" --no-verify && git branch develop && git checkout -q develop && git remote add origin "$3")
 }
-python3 "$ROOT/tests/lib/fake-gitlab.py" "$WORK/gl.log" "$WORK/gl.port" & GLPID=$!
-rm -f "$WORK/gl.log" "$WORK/gl.port"; for _ in $(seq 1 50); do [ -s "$WORK/gl.port" ] && break; sleep 0.1; done
+rm -f "$WORK/gl.log" "$WORK/gl.port"
+# output redirected: a server that kept the script's stdout open would hang `bash regressions.sh | grep …` forever if the script died early
+python3 "$ROOT/tests/lib/fake-gitlab.py" "$WORK/gl.log" "$WORK/gl.port" >/dev/null 2>&1 & GLPID=$!
+trap 'kill "$GLPID" 2>/dev/null || true' EXIT
+for _ in $(seq 1 50); do [ -s "$WORK/gl.port" ] && break; sleep 0.1; done
 GLP="$(cat "$WORK/gl.port" 2>/dev/null || echo 0)"
 g="$WORK/glsync"; issue_project "$g" gitlab "http://127.0.0.1:$GLP/acme/app.git"
 (cd "$g" && .agent/scripts/kit-task new "Alpha feature" --priority P1 >/dev/null)
@@ -345,14 +423,12 @@ check "github update: add/remove labels as before"  "grep -q 'issue edit 12 --ti
 check "github: a closed issue is reopened (old name sync-gh works)" "grep -qx 'issue reopen 12' \"\$GH_LOG\""
 unset GH_LOG
 
-# ---------------------------------------------------------------- 2. CI task gate scope
-printf '\n== CI task gate: verify tasks this PR finishes, skip tasks finished on the base branch\n'
-step_script() { # the run: block of the "Task workflow gates" step, with kit-task verify stubbed
-  ruby -ryaml -e 'y = YAML.load_file(ARGV[0]); s = y["jobs"]["quality"]["steps"].find { |x| x["name"].to_s.start_with?("Task workflow gates") }; puts s["run"]' \
-    "$ROOT/core/.github/workflows/ci.yml" | sed 's#KIT_BASE_REF="origin/$BASE_REF" .agent/scripts/kit-task verify "$t"#echo "VERIFY $t"#'
-}
-r="$WORK/ci"; rm -rf "$r" "$r.git"; mkdir -p "$r/.agent/tasks"
-step_script > "$WORK/step.sh"
+# ---------------------------------------------------------------- 2. CI gates (kit-ci) — one script behind GitHub Actions and GitLab CI
+printf '\n== kit-ci task-gates: verify tasks this PR finishes, skip tasks finished on the base branch\n'
+r="$WORK/ci"; rm -rf "$r" "$r.git"; mkdir -p "$r/.agent/tasks" "$r/.agent/scripts"
+cp "$ROOT/core/.agent/scripts/kit-ci" "$ROOT/core/.agent/scripts/lib.sh" "$r/.agent/scripts/"
+printf '#!/usr/bin/env bash\necho "VERIFY $2"\n' > "$r/.agent/scripts/kit-task"; chmod +x "$r/.agent/scripts/kit-task"
+kci() { (cd "$r" && KIT_CI_EVENT=pr KIT_CI_BASE=develop KIT_CI_HEAD="$1" .agent/scripts/kit-ci "$2" 2>&1); }
 (
   cd "$r" && git init -q -b develop
   printf -- '---\nstatus: review\n---\n' > .agent/tasks/TASK-001-old.md
@@ -364,13 +440,45 @@ step_script > "$WORK/step.sh"
   sed -i.bak 's/review/done/' .agent/tasks/archive/2026-11/TASK-001-old.md && sed -i.bak 's/todo/review/' .agent/tasks/TASK-002-new.md
   rm -f .agent/tasks/*.bak .agent/tasks/archive/2026-11/*.bak && git commit -qam "chore: move"
 )
-out="$(cd "$r" && HEAD_REF=chore/plan BASE_REF=develop bash "$WORK/step.sh" 2>&1 || true)"
+out="$(kci chore/plan task-gates || true)"
 check "task finished by this PR is verified"        "printf '%s\n' \"\$out\" | grep -q 'VERIFY TASK-002'"
 check "task archived after its own PR is skipped"   "! printf '%s\n' \"\$out\" | grep -q 'VERIFY TASK-001'"
-rc=0; out="$(cd "$r" && HEAD_REF=feature/no-task BASE_REF=develop bash "$WORK/step.sh" 2>&1)" || rc=$?
+rc=0; out="$(kci feature/no-task task-gates)" || rc=$?
 check "code branch without TASK-NNN fails"          "[ $rc -ne 0 ] && printf '%s\n' \"\$out\" | grep -q 'has no TASK-NNN'"
-out="$(cd "$r" && HEAD_REF=release/1.0 BASE_REF=develop bash "$WORK/step.sh" 2>&1 || true)"
+out="$(kci release/1.0 task-gates || true)"
 check "release branch verifies nothing"            "! printf '%s\n' \"\$out\" | grep -q 'VERIFY'"
+out="$(cd "$r" && KIT_CI_EVENT=push .agent/scripts/kit-ci task-gates 2>&1 || true)"
+check "a plain push has no task gates"              "printf '%s\n' \"\$out\" | grep -q 'merge requests only\|pull / merge requests only'"
+
+printf '\n== kit-ci guard: branch name and Conventional Commits (GitHub and GitLab variables are understood)\n'
+printf '#!/usr/bin/env bash\nexit 0\n' > "$r/.agent/scripts/kit-secrets-scan"; cp "$r/.agent/scripts/kit-secrets-scan" "$r/.agent/scripts/kit-trace"; chmod +x "$r/.agent/scripts/kit-secrets-scan" "$r/.agent/scripts/kit-trace"
+(cd "$r" && git checkout -q develop && git checkout -q -b feature/TASK-009-x && echo a > a.txt && git add -A && git commit -qm "bad subject here" --no-verify)
+out="$(kci feature/TASK-009-x guard || true)"
+check "a bad commit subject fails the guard"        "printf '%s\n' \"\$out\" | grep -q 'bad commit subject: bad subject here'"
+out="$(kci wip/foo guard || true)"
+check "a branch name outside <type>/ fails"         "printf '%s\n' \"\$out\" | grep -q \"must be <type>/TASK-NNN-slug\""
+(cd "$r" && git commit -q --amend -m "feat(TASK-009): add a thing" --no-verify)
+rc=0; out="$(kci feature/TASK-009-x guard)" || rc=$?
+check "good branch + subject pass"                  "[ $rc -eq 0 ]"
+rc=0; out="$(cd "$r" && GITLAB_CI=true CI_MERGE_REQUEST_IID=7 CI_MERGE_REQUEST_SOURCE_BRANCH_NAME=wip/gl CI_MERGE_REQUEST_TARGET_BRANCH_NAME=develop .agent/scripts/kit-ci guard 2>&1)" || rc=$?
+check "GitLab MR variables are read"                "[ $rc -ne 0 ] && printf '%s\n' \"\$out\" | grep -q \"branch 'wip/gl'\""
+rc=0; out="$(cd "$r" && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request GITHUB_HEAD_REF=wip/gh GITHUB_BASE_REF=develop .agent/scripts/kit-ci guard 2>&1)" || rc=$?
+check "GitHub PR variables are read"                "[ $rc -ne 0 ] && printf '%s\n' \"\$out\" | grep -q \"branch 'wip/gh'\""
+
+printf '\n== GitLab pipeline: installed with the stack image and setup; your own .gitlab-ci.yml is never edited\n'
+A="$WORK/gl-new"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node --provider gitlab
+check "no pipeline yet → .gitlab-ci.yml is installed" "[ -f \"\$A/.gitlab-ci.yml\" ] && [ ! -e \"\$A/.gitlab-ci.kit.yml\" ]"
+check "image and setup are filled in, no placeholder left" "grep -q 'image: node:22' \"\$A/.gitlab-ci.yml\" && grep -q -- '- corepack enable' \"\$A/.gitlab-ci.yml\" && ! grep -q '@@' \"\$A/.gitlab-ci.yml\""
+check "all four jobs are defined (valid YAML)"      "ruby -ryaml -e 'd = YAML.load_file(ARGV[0]); exit(%w[kit-guard kit-quality kit-sast kit-deps].all? { |j| d.key?(j) } ? 0 : 1)' \"\$A/.gitlab-ci.yml\""
+check "every gate goes through kit-ci"              "grep -q 'kit-ci guard' \"\$A/.gitlab-ci.yml\" && grep -q 'kit-ci task-gates' \"\$A/.gitlab-ci.yml\" && grep -q 'kit-ci api' \"\$A/.gitlab-ci.yml\""
+commit_all "$A"; (cd "$A" && "$KIT" upgrade . --allow-dirty >"$A.up.log" 2>&1 || true)
+check "upgrade keeps the pipeline stable"           "[ -z \"\$(git -C \"\$A\" status --porcelain)\" ] && [ ! -e \"\$A/.gitlab-ci.yml.kit-new\" ]"
+A="$WORK/gl-own"; ad "$A" 'printf "stages: [test]\nmine:\n  script: [echo mine]\n" > .gitlab-ci.yml && printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node
+check "own pipeline untouched, kit's written beside it" "grep -q 'echo mine' \"\$A/.gitlab-ci.yml\" && ! grep -q kit-guard \"\$A/.gitlab-ci.yml\" && grep -q 'kit-guard' \"\$A/.gitlab-ci.kit.yml\" && grep -q 'local: .gitlab-ci.kit.yml' \"\$A.log\""
+for stk in python go; do   # every stack resolves to a real image
+  B="$WORK/gl-$stk"; ad "$B" 'printf "[project]\nname=\"x\"\n" > pyproject.toml; printf "module x\n" > go.mod' --stack $stk --provider gitlab
+  check "$stk stack image in the pipeline"          "grep -qE '^  image: (python:3.12|golang:1.23)\$' \"\$B/.gitlab-ci.yml\""
+done
 
 printf '\n%d failure(s) — workdir %s\n' "$fail" "$WORK"
 [ $fail -eq 0 ]

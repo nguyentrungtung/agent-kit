@@ -1,0 +1,68 @@
+# agent-kit CI for GitLab (GitLab Runner) — the same gates as the GitHub workflow; the logic lives in .agent/scripts/kit-ci.
+#
+# Make it binding: Settings > Merge requests > "Pipelines must succeed"; protect main (and develop) in Settings > Repository.
+# This file uses GitLab's built-in stages (.pre and test), so it can sit next to your own pipeline: if you already have a
+# .gitlab-ci.yml, the kit left it alone and wrote this file as .gitlab-ci.kit.yml — add at the top of yours
+#     include: [{ local: .gitlab-ci.kit.yml }]
+# (your `stages:` must contain `test`; GitLab's default does).
+# `image:` needs a Docker-executor runner; on a shell executor the tools come from the runner machine.
+# Self-hosted / offline runners: mirror the images below and let `kit-ci prepare` find gitleaks in the image (it tries github.com).
+
+.kit-rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never                # no duplicate branch pipeline while a merge request is open
+    - if: $CI_COMMIT_BRANCH
+
+.kit-job:
+  extends: .kit-rules
+  image: @@GL_IMAGE@@
+  variables:
+    GIT_DEPTH: "0"               # commit messages and task gates need the history
+  before_script:
+    - .agent/scripts/kit-ci prepare
+    # @@GL_SETUP@@
+
+kit-guard:
+  extends: .kit-job
+  stage: .pre
+  script:
+    - .agent/scripts/kit-ci guard
+
+kit-quality:
+  extends: .kit-job
+  stage: test
+  needs: [kit-guard]
+  script:
+    - .agent/scripts/kit-run install
+    - .agent/scripts/kit-run format_check lint typecheck
+    - .agent/scripts/kit-run arch
+    - .agent/scripts/kit-run specs
+    - .agent/scripts/kit-ci task-gates
+    - .agent/scripts/kit-ci api
+    - .agent/scripts/kit-run ops
+    - .agent/scripts/kit-run testcov
+    - .agent/scripts/kit-run dup
+    - .agent/scripts/kit-run build
+    - .agent/scripts/kit-run docs
+
+kit-sast:
+  extends: .kit-rules
+  stage: test
+  needs: [kit-guard]
+  image:
+    name: semgrep/semgrep:1.99.0
+    entrypoint: [""]
+  script:
+    - semgrep scan --config p/default --config p/secrets --severity ERROR --error --metrics=off
+
+kit-deps:
+  extends: .kit-rules
+  stage: test
+  needs: [kit-guard]
+  image:
+    name: aquasec/trivy:0.58.1
+    entrypoint: [""]
+  script:
+    - trivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .

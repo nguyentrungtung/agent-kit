@@ -1,0 +1,3 @@
+title: Performance smoke test (k6) — a quick latency / error-rate check for web or API services (kit-run perf); not useful for batch / data pipelines
+default: true
+tools_optional: k6 docker

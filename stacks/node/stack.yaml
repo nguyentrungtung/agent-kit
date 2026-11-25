@@ -16,3 +16,5 @@ cmd_coverage: npx --no-install c8 --check-coverage --lines ${KIT_COVERAGE_MIN} n
 cmd_build: npm run --if-present build
 cmd_audit: npm audit --audit-level=high --omit=dev
 post_note: make sure tsconfig.json has the strict flags from .agent/stack/node/snippets/tsconfig.strict.json.
+
+ci_image: node:22

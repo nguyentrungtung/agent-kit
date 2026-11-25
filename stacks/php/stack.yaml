@@ -17,3 +17,5 @@ cmd_coverage:
 cmd_build:
 cmd_audit: composer audit
 post_note: check composer.json "autoload.psr-4" maps your root namespace to src/ (PSR-4), then run kit-run format to normalise the codebase in ONE separate commit.
+
+ci_image: composer:2

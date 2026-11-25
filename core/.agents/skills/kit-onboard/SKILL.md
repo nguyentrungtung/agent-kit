@@ -17,10 +17,20 @@ Goal: after this, any fresh session can work correctly by reading `.agent/` only
    - `.agent/context/CONVENTIONS.md` — fill "Observed in code": where the code differs from `.agent/rules/stack/*.md` (naming, layering, error/logging, tests).
    - `.agent/rules/project/` — module boundaries and domain rules found in code (one file per topic, each rule + enforcing tool).
    - `GLOSSARY.md` — domain terms found in code.
+3b. **Existing agent instructions** (`AGENTS.md.kit-new`, a `agent/` or `docs/` rule folder, `.cursor/`, an old `CLAUDE.md`): keep the project's rules, do not
+   throw them away and do not paste them twice. Move what is specific to this project into `AGENTS.md` §7 / `.agent/rules/project/` (or link to the
+   existing files from there), keep `CLAUDE.md` as `@AGENTS.md`, delete only what became a duplicate. If `kit-doctor` says the repo's `.gitignore` hides kit
+   files, ask the human: share the kit with the team (remove those lines) or use it personally.
 4. **Wire the quality tools**: run `.agent/scripts/kit-doctor`. Merge every snippet in `.agent/stack/<stack>/snippets/`
    (e.g. Maven/Gradle plugins, ArchitectureTest with the real base package, tsconfig strict flags, Cargo lints) and adapt
    tool configs to the real folder layout (paths in phpstan/deptrac/dependency-cruiser…). Never relax a rule to get green — record debt instead.
    Format-only changes (`kit-run format`) go in ONE separate commit `style: apply <formatter>`.
+   **The repo's own CI is the ground truth for commands.** Read `.gitlab-ci.yml` / `.github/workflows/*` / `.pre-commit-config.yaml` first and copy their exact
+   commands into `cmd_*` (pinned tool versions, flags such as `--ignore=tests/live`, working directories). The kit's defaults stay only where the CI has nothing.
+   A gate the repo does not use today (mypy, pip-audit, sqlfluff…) is not switched on silently: leave `cmd_*` empty and record it as baseline debt / an open question.
+   Tests that call real APIs, queues or warehouses must be excluded from `cmd_test` (they need credentials) — never let `kit-run` or the pre-push hook run them.
+   dbt: every `--target ci` command needs a `ci` target (DuckDB, see `.agent/stack/dbt/snippets/profiles.example.yml`); without it clear those `cmd_*` —
+   `kit-doctor` flags this — so no command can reach a real warehouse.
    Verify commands in `.agent/project.yaml`: run each `kit-run <step>` (install, format_check, lint, typecheck, arch, test, build, audit).
    - Fix wrong commands (the user will be asked to approve edits to project.yaml). Missing tool → leave empty + note.
    - Record what fails today as **baseline debt** (don't fix it now).

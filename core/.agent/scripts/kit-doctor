@@ -33,6 +33,24 @@ else  # a hook manager (Husky, lefthook, …) may own the hooks and call the kit
     meh "hooks are wired but not installed in git yet — run your manager's install (npm install for Husky, lefthook install)"
   fi
 fi
+# kit files the repo's own .gitignore hides: they would exist on this machine only
+ign=""
+for f in AGENTS.md CLAUDE.md .claude/settings.json .agent/project.yaml .githooks/pre-commit .agents/skills; do
+  [ -e "$f" ] && git check-ignore -q -- "$f" 2>/dev/null && ign="$ign $f"
+done
+[ -z "$ign" ] || meh "your .gitignore ignores kit files:$ign — teammates and CI will not see them (remove those lines to share the kit)"
+# CI files of the other Git host are dead weight
+prov="$(git_provider)"
+if [ "$prov" = gitlab ] && [ -d .github/workflows ]; then meh ".github/workflows exists but git_provider is gitlab — GitHub Actions do not run there (delete it, or set git_provider: github)"; fi
+if [ "$prov" = github ] && [ -f .gitlab-ci.yml ] && [ -z "$(git remote get-url origin 2>/dev/null | grep -i github || true)" ]; then meh ".gitlab-ci.yml exists but git_provider is github — check 'git_provider' in .agent/project.yaml"; fi
+# dbt commands that say --target ci need that target, or they run against whatever the default target is (maybe a real warehouse)
+for comp in $(cfg components); do
+  cpath="${comp%%=*}"; cst="${comp#*=}"; cst="${cst%%+*}"
+  [ "$cst" = dbt ] || continue
+  printf '%s' "$(cfg cmd_typecheck)$(cfg cmd_arch)$(cfg cmd_test)$(cfg cmd_build)" | grep -q -- '--target ci' || continue
+  have=0; for pf in "$cpath/profiles.yml" "${DBT_PROFILES_DIR:-$HOME/.dbt}/profiles.yml"; do [ -f "$pf" ] && grep -qE '^[[:space:]]+ci:[[:space:]]*$' "$pf" && have=1; done
+  [ $have -eq 1 ] || bad "dbt ($cpath): cmd_* use --target ci but no 'ci' target in profiles.yml — they would hit another target. Add one (see .agent/stack/dbt/snippets/profiles.example.yml, a DuckDB target) or clear those cmd_*"
+done
 if grep -q 'TODO' .agent/context/PROJECT.md 2>/dev/null; then meh "PROJECT.md still has TODOs — run the kit-onboard (existing code) or kit-ba (new project) playbook"; else ok "context filled"; fi
 n_rules=$(find .agent/rules -name '*.md' 2>/dev/null | grep -vc README || true)
 if [ "${n_rules:-0}" -gt 0 ]; then ok "$n_rules rule file(s) in .agent/rules"; else bad "no rules in .agent/rules"; fi
@@ -51,7 +69,11 @@ check_cmd() { # check_cmd <step> <command>
     case "${1:-}" in
       npx) shift; [ "${1:-}" = "--no-install" ] && shift ;;
       pnpm|yarn) [ "${2:-}" = exec ] && shift 2 || { exe="$1"; } ;;
-      uv) [ "${2:-}" = run ] && shift 2 ;;
+      uv|poetry|pdm|hatch|pipenv|rye) # "<runner> run <tool>": the tool lives in the project's own environment — only the runner is checked
+        if [ "${2:-}" = run ]; then
+          if command -v "$1" >/dev/null 2>&1; then echo "ok|$dir|$1 run"; else echo "missing|$dir|$1"; fi
+          continue
+        fi ;;
       test|bash|sh) echo "ok|$dir|$1"; continue ;;
       .agent/*|./.agent/*) echo "ok|$dir|$1"; continue ;;
     esac

@@ -2,4 +2,3 @@ cmd_up: docker compose up -d --build --wait
 cmd_down: docker compose down
 cmd_logs: docker compose logs --tail=200
 cmd_ops: .agent/scripts/kit-ops-lint
-cmd_perf: if command -v k6 >/dev/null 2>&1; then k6 run perf/smoke.js; else docker run --rm -i --network host -e BASE_URL grafana/k6:0.57.0 run - < perf/smoke.js; fi

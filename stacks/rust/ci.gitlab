@@ -1,0 +1,2 @@
+rustup component add rustfmt clippy
+cargo install cargo-deny --locked

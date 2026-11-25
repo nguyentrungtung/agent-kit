@@ -17,3 +17,5 @@ cmd_coverage: ./gradlew --no-daemon test jacocoTestCoverageVerification -Pcovera
 cmd_build: ./gradlew --no-daemon build -x test
 cmd_audit: ./gradlew --no-daemon dependencyCheckAnalyze
 post_note: merge .agent/stack/java-gradle/snippets/build.gradle.kts into your build script and copy ArchitectureTest.java into src/test/java/<base package>/.
+
+ci_image: gradle:8-jdk21

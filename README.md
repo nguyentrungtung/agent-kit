@@ -58,6 +58,7 @@ Monorepo: mỗi component là `path=stack+framework`. Lệnh được ghép ki�
 | `ba` | ✔ | `kit-ba` theo BABOK (stakeholder, as-is/to-be swimlane, use case, sequence, state, ERD, story map, RTM), skill `kit-diagram`, template trong `docs/ba/_templates/`, `kit-run docs` render và kiểm tra mọi sơ đồ Mermaid/PlantUML (mmdc/plantuml, hoặc qua Docker) |
 | `sa` | ✔ | Vai trò **tích hợp**: kịch bản chất lượng, hướng dẫn chọn kiểu kiến trúc (MVC + repository, HMVC, modular monolith, hexagonal, microservice, event-driven), so sánh phương án + ADR, C4, tích hợp, data model mức logic, khung chi phí. **Bàn giao** cho DevOps, AppSec, Data |
 | `devops` | ✔ | `kit-devops` + agent `devops-engineer`: môi trường, IaC, CI/CD, chiến lược deploy, observability/SLO, backup/DR, sizing, runbook (`docs/platform/`). Gồm luôn phần Docker: Dockerfile từng stack, `compose.yaml` từ catalog, `kit-run up/down/logs`. **`kit-run ops`** = hadolint, actionlint, shellcheck, compose config, terraform, kubeconform (dùng tool trên máy hoặc image Docker ghim version). `docker` là tên cũ, vẫn dùng được |
+| `perf` | preset `app` | Test tải k6 `perf/smoke.js` + `kit-run perf` cho dịch vụ web/API (không dành cho pipeline batch/dữ liệu nên không có trong preset `data`) |
 | `security` | ✔ | `kit-appsec` + agent `security-architect`: threat model (DFD + STRIDE), chọn mức ASVS, yêu cầu bảo mật thành scenario OpenSpec, thiết kế authN/Z, sổ dữ liệu cá nhân theo **Luật 91/2025/QH15 + NĐ 356/2025/NĐ-CP**, SBOM (`kit-run sbom`), DAST baseline (ZAP, chỉ cho local/staging) |
 | `codegraph` | ✔ | `codegraph init` (index + MCP), rule `code-intelligence.md`, `.codegraph/` vào gitignore |
 | `openspec` | ✔ | [OpenSpec](https://github.com/Fission-AI/OpenSpec) 2.1.1 (ghim version, chạy qua `kit-openspec`, tắt telemetry) + schema **`kit-flow`**: proposal có Source/Clarifications, design có Impact & reuse/Data model/API/Test plan, tasks mỗi nhóm = 1 kit task, test trước. Cần Node ≥ 20.19 |
@@ -126,7 +127,7 @@ UC/US (docs/ba) ─▶ OpenSpec change: proposal ─▶ specs ─▶ design ─�
 | Coverage ≥ `coverage_min` (c8, pytest-cov, JaCoCo, `go tool cover`, cargo-llvm-cov, coverlet, Laravel `--min`) | `kit-run coverage` / `testcov` | CI |
 | Code trùng lặp ≤ 3% (jscpd, mọi ngôn ngữ) | `kit-run dup` | CI |
 | Độ phức tạp: ESLint `complexity`/`max-params`/`max-depth`, Ruff `C90`/`PLR`, PHPStan cognitive-complexity, PMD (Java), gocognit/gocyclo/funlen, CA1502 (.NET), clippy | `kit-run lint` | pre-push, CI |
-| E2E + accessibility (Playwright + axe, React) · test tải k6 với ngưỡng SLO | `kit-run e2e` · `kit-run perf` | theo task / trước release |
+| E2E + accessibility (Playwright + axe, React) · test tải k6 với ngưỡng SLO (module `perf`) | `kit-run e2e` · `kit-run perf` | theo task / trước release |
 Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết mới, module sâu, SOLID/KISS/YAGNI, khi nào dùng design pattern nào, anti-pattern). Checklist test theo loại thay đổi: `.agent/checklists/testing.md`.
 
 ### Phát hành và vận hành
@@ -138,6 +139,7 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 | Sự cố production + post-mortem không đổ lỗi | `kit-incident`, `kit-new postmortem "<tiêu đề>"` |
 | Checklist release (gồm DAST/pentest trên staging, rollback) | `.agent/checklists/release.md` |
 | Nâng cấp kit cho dự án đã cài | `kit upgrade <dir>`: file bạn chưa sửa thì cập nhật, file bạn đã sửa thì giữ nguyên + `*.kit-new`, file bạn đã xoá thì không tạo lại; thêm key mới vào `project.yaml` (dựa trên `.agent/kit.manifest`) |
+| Lên 0.12.0 (repo có sẵn, GitLab) | `kit init` đoán Git host và ghi `git_provider:`; repo GitLab không còn nhận `.github/` (kit giữ nguyên file `.github/` đã cài, chỉ ngừng cập nhật) mà nhận `.gitlab-ci.yml` / `.gitlab-ci.kit.yml` + template MR. Gate CI chuyển vào `.agent/scripts/kit-ci`: `.github/workflows/ci.yml` mới gọi script này (nếu bạn đã sửa `ci.yml`, bản mới ở `ci.yml.kit-new`). Repo có sẵn mà chưa có `develop` giờ mặc định trunk-based. Module `perf` tách khỏi `devops` (project cũ giữ nguyên file `perf/`). `kit-task sync-gh` / `pull-gh` đổi tên `sync` / `pull` (tên cũ vẫn chạy) và hỗ trợ GitLab |
 | Lên 0.11.0 (anti-drift gates) | Task đang làm dở (không có `template: 2` trong front matter) giữ luật cũ — các gate mới (checklist §2, nguồn §1, assumption, review, tài liệu sống) chỉ áp dụng cho task tạo sau khi nâng cấp. Chạy `.agent/scripts/kit-trace` một lần để dọn id UC/US/BR/FR/ADR không tồn tại (kể cả id mẫu còn sót từ template BA). `ASSUMPTION:` trong `docs/ba/BRIEF.md` / `docs/architecture/SOLUTION.md` phải được người đổi thành `CONFIRMED:`. CI của dự án giờ chặn PR từ branch `feature/`·`fix/`·`hotfix/`·`refactor/` không có `TASK-NNN` — PR đang mở theo kiểu cũ cần đổi tên branch hoặc gắn task. Skeleton framework chuyển sang `.agent/stack/<stack>/skeletons/<framework>/`; skeleton bạn đã sửa được `kit upgrade` mang sang (bản kit ở `.kit-new`) |
 | Kit tự test chính nó | `.github/workflows/kit-ci.yml`: lint shell + actionlint + gitleaks, `tests/smoke.sh` (init 14 dự án mẫu), `tests/e2e-workflow.sh` (luồng OpenSpec → task → finish) |
 
@@ -313,19 +315,38 @@ gh run view <run_id> --log-failed
 
 Hook manager của bạn là **nguồn duy nhất** của git hook; kit chỉ là một lệnh nó gọi. Cách này giống nhau trên GitHub, GitLab (cloud hay tự host), Bitbucket, Gitea. `kit-doctor` nhận ra hook đã chain. Lưu ý: guard `pre-push` cần danh sách ref trên stdin; pre-commit framework không truyền nên chỉ chain được `pre-commit` và `commit-msg` (nhớ bật bảo vệ nhánh trên server).
 
-### Dùng GitLab thay cho GitHub
+### Dùng GitLab (gitlab.com hoặc tự host) thay cho GitHub
 
-Đặt `git_provider: gitlab` trong `.agent/project.yaml` (để trống = đoán từ URL remote; GitLab tự host thì phải đặt).
+`kit init` tự nhận Git host (`--provider github|gitlab|none|auto`): theo URL remote, rồi theo file repo đang có (`.gitlab-ci.yml`, `.gitlab/` → GitLab; `.github/` → GitHub). Nhận ra cả GitLab tự host có URL không chứa chữ "gitlab". Kết quả ghi rõ vào `git_provider:` trong `.agent/project.yaml` (sửa tay được).
 
 | Phần | GitLab |
 |---|---|
-| Git hook (`pre-commit`, `commit-msg`, `pre-push`), hook Claude, `kit-trace`, `kit-task verify`, `kit-run check` | ✅ không phụ thuộc nhà cung cấp |
+| Git hook, hook Claude, `kit-trace`, `kit-task verify`, `kit-run check` | ✅ không phụ thuộc nhà cung cấp |
+| CI | ✅ `.gitlab-ci.yml` với 4 job: `kit-guard`, `kit-quality`, `kit-sast`, `kit-deps`. **Mọi gate nằm trong một script** `.agent/scripts/kit-ci` mà GitHub Actions và GitLab CI cùng gọi, nên hai nơi luật giống hệt nhau. Image và lệnh chuẩn bị lấy theo stack (`ci_image`, `ci.gitlab`). Chưa được thử trên GitLab Runner thật |
+| Repo đã có `.gitlab-ci.yml` | ✅ kit **không sửa** file của bạn: ghi `.gitlab-ci.kit.yml` rồi nhắc thêm `include: [{ local: .gitlab-ci.kit.yml }]` ở đầu file của bạn (cần stage `test`) |
+| MR / issue template | ✅ `.gitlab/merge_request_templates/Default.md`, `.gitlab/issue_templates/` |
 | `kit-task finish` | ✅ mở Merge Request bằng `glab mr create` (cần `glab auth login`); thiếu `glab` thì chỉ nhắc mở MR bằng tay. Chưa được thử với `glab` thật |
-| `kit-task sync` / `pull` (Issues) | ✅ qua REST API v4, chỉ cần `curl` + `jq` + biến môi trường `GITLAB_TOKEN` (token scope `api`, kit không lưu token). Host/project lấy từ remote; GitLab tự host có sub-path hoặc cổng riêng thì đặt `gitlab_url` + `gitlab_project` trong `project.yaml`. Đã thử với server giả, chưa thử với GitLab thật |
-| `.github/workflows/ci.yml` (guard, quality, security), `cd.yml`, `dependabot.yml`, template issue/PR | ❌ chỉ GitHub Actions. Trên GitLab không chạy; **chưa có `.gitlab-ci.yml` đi kèm** — pipeline của bạn cần gọi các script của kit (`kit-run ci`, `kit-trace`, `kit-task verify`) để giữ các gate |
-| Chặn merge ở server | Bật *Pipelines must succeed* và protected branch trên GitLab, tương đương branch protection |
+| `kit-task sync` / `pull` (Issues) | ✅ qua REST API v4, chỉ cần `curl` + `jq` + biến môi trường `GITLAB_TOKEN` (token scope `api`, kit không lưu token). Host/project lấy từ remote; sub-path hoặc cổng riêng thì đặt `gitlab_url` + `gitlab_project`. Đã thử với server giả, chưa thử với GitLab thật |
+| `cd.yml`, `dependabot.yml` | ❌ chỉ GitHub. GitLab: dùng Renovate hoặc dependency scanning; deploy vẫn do người chạy |
+| Chặn merge ở server | Bật *Pipelines must succeed* và protected branch trên GitLab |
+
+Runner không ra được Internet (GitLab tự host trong mạng kín): `kit-ci prepare` thử tải gitleaks từ github.com (không được thì chỉ còn bộ quét secret dựng sẵn) và `kit-sast`/`kit-deps` kéo image `semgrep`/`trivy` (semgrep còn cần tải rule). Hãy mirror image và đưa gitleaks vào image runner.
 
 **CodeRabbit** hỗ trợ GitLab (cloud và self-managed). Không muốn dùng hoặc đã có pipeline/review riêng: `.agent/scripts/kit-review-bot off`, commit `.coderabbit.yaml`.
+
+### Áp dụng vào repo có sẵn: kit không áp đặt
+
+Rút ra từ lần chạy thật trên một repo data (Python + dbt) trên GitLab tự host:
+
+| Tình huống | Kit làm gì |
+|---|---|
+| Repo chưa có nhánh `develop` | Chạy **trunk-based**: `develop_branch: main`, task rẽ từ `main`, MR vào `main`, không tạo `develop` (`--flow gitflow` để dùng `develop`). Repo mới tinh vẫn mặc định gitflow |
+| Có `ruff.toml` / `.editorconfig` / `.sqlfluff` / `.prettierrc` ở thư mục cha | Không đặt bản thứ hai trong thư mục con (tool lấy file gần nhất nên sẽ âm thầm thay cấu hình của bạn) |
+| Component đã có `Dockerfile*` (kể cả `docker/Dockerfile`) hoặc repo đã có file compose | Không thêm Dockerfile / `compose.yaml` chung chung; `cmd_up/down/logs` để trống cho bạn tự đặt |
+| Hook thô trong `.git/hooks` hoặc Husky / lefthook / pre-commit framework | Không chiếm `core.hooksPath`, in cách nối vào `.agent/scripts/kit-hook` |
+| `.gitignore` của repo đang ẩn `AGENTS.md`, `.claude/`… | Cảnh báo khi cài và trong `kit-doctor`: các file đó chỉ nằm trên máy bạn, đồng đội và CI không thấy |
+| Lệnh `cmd_*` sinh ra khác CI thật của repo | `kit-onboard` lấy **lệnh trong file CI của repo làm chuẩn** (ví dụ `--ignore=tests/live`, phiên bản ghim); `kit-doctor` báo khi `dbt --target ci` mà `profiles.yml` không có target `ci` |
+| `perf/` k6 | Chỉ ở preset `app` (module `perf`), không ép vào repo dữ liệu |
 
 ## 7. Tuỳ biến
 

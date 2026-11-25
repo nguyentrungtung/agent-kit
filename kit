@@ -9,6 +9,9 @@
 #       --name <n> --lang vi|en   --yes (accept defaults, install dev deps, run module setup)
 #       --install-tools (install MISSING global tools without asking; never implied by --yes)
 #       --no-deps --no-setup --no-tools --force (overwrite) --no-git
+#       --provider github|gitlab|none|auto   where PRs/MRs, CI and issues live (auto: remote host, then .gitlab-ci.yml / .github/);
+#                                 gitlab installs .gitlab-ci + MR/issue templates instead of .github/, none installs neither
+#       --flow gitflow|trunk|auto   gitflow = tasks branch from develop; trunk = from main (auto: trunk when an existing repo has no develop)
 #       --hooks auto|kit|keep     git hooks: kit = core.hooksPath → .githooks; keep = leave Husky/lefthook/… alone and chain the kit's
 #                                 checks through .agent/scripts/kit-hook; auto (default) = keep when a manager is found, else kit
 #   kit add <module…> [--dir <project>] [--services …] [--yes]   add modules to an installed project
@@ -53,7 +56,7 @@ PRESETS="app data platform minimal"
 preset_modules() { # preset_modules <preset> → module list (only modules that exist)
   local want m o=""
   case "$1" in
-    app)      want="ba sa api devops security openspec eng-skills codegraph" ;;
+    app)      want="ba sa api devops perf security openspec eng-skills codegraph" ;;
     data)     want="ba sa data devops security openspec eng-skills codegraph" ;;
     platform) want="devops security openspec eng-skills codegraph" ;;
     minimal)  want="openspec eng-skills codegraph" ;;
@@ -61,7 +64,7 @@ preset_modules() { # preset_modules <preset> → module list (only modules that 
   esac
   for m in $want; do [ -d "$MODULES/$m" ] && o="$o $m"; done; echo $o
 }
-preset_title() { case "$1" in app) echo "Web/API application — BA, SA, API contracts, DevOps, Security, OpenSpec, engineering skills, CodeGraph";; data) echo "Data engineering — BA, SA, Data (dbt/Airflow/PySpark), DevOps, Security, OpenSpec data-flow";; platform) echo "Infrastructure / platform repo — DevOps, Security, OpenSpec, CodeGraph";; minimal) echo "Minimal — gates + OpenSpec + CodeGraph only";; esac; }
+preset_title() { case "$1" in app) echo "Web/API application — BA, SA, API contracts, DevOps, k6 perf smoke, Security, OpenSpec, engineering skills, CodeGraph";; data) echo "Data engineering — BA, SA, Data (dbt/Airflow/PySpark), DevOps, Security, OpenSpec data-flow";; platform) echo "Infrastructure / platform repo — DevOps, Security, OpenSpec, CodeGraph";; minimal) echo "Minimal — gates + OpenSpec + CodeGraph only";; esac; }
 all_services() { local f; for f in "$MODULES"/devops/catalog/*.yml; do basename "$f" .yml; done; }
 svc_meta() { sed -n "s/^# $2:[[:space:]]*//p" "$MODULES/devops/catalog/$1.yml" | head -n1; }
 
@@ -284,11 +287,34 @@ comp_dockerfile() { # framework Dockerfile > stack Dockerfile
 }
 
 # ---------------------------------------------------------------- install pieces
+detect_provider() { # github | gitlab — the Git host this repo lives on (keep in sync with git_provider in core/.agent/scripts/lib.sh)
+  local u; u="$(git -C "$TARGET" remote get-url origin 2>/dev/null || git -C "$TARGET" remote -v 2>/dev/null | awk 'NR==1{print $2}' || true)"
+  case "$u" in *github*) echo github; return 0 ;; *gitlab*) echo gitlab; return 0 ;; esac
+  if [ -f "$TARGET/.gitlab-ci.yml" ] || [ -d "$TARGET/.gitlab" ]; then echo gitlab; else echo github; fi
+}
+resolve_provider() { # PROVIDER: --provider > project.yaml git_provider > detected
+  local cur=""
+  [ -f "$TARGET/.agent/project.yaml" ] && cur="$(yget "$TARGET/.agent/project.yaml" git_provider)"
+  [ "${PROVIDER:-auto}" != auto ] || PROVIDER="${cur:-$(detect_provider)}"
+  case "$PROVIDER" in github|gitlab|none) ;; *) die "git_provider must be github, gitlab or none (got '$PROVIDER')" ;; esac
+}
 install_core() {
   local f rel
   while IFS= read -r -d '' f; do
     rel="${f#"$CORE"/}"
     case "$rel" in *.kit|.agent/project.yaml.tpl|.claude/settings.json) continue ;; esac
+    case "$rel" in   # only the files of the Git host in use: .github/ for GitHub, .gitlab/ + the pipeline for GitLab
+      .github/*) [ "$PROVIDER" = github ] || continue ;;
+      .gitlab/*) [ "$PROVIDER" = gitlab ] || continue ;;
+      .gitlab-ci.kit.yml) [ "$PROVIDER" = gitlab ] || continue
+        # never touch a pipeline the project already owns: ours then goes to .gitlab-ci.kit.yml and is `include:`d by hand
+        if [ -f "$TARGET/.gitlab-ci.yml" ] && [ -z "$(manifest_hash .gitlab-ci.yml)" ]; then
+          copy_file "$f" "$TARGET/.gitlab-ci.kit.yml"
+          NOTES="$NOTES
+   - CI: your .gitlab-ci.yml was left alone. Add this at its top to run the kit's gates too:   include: [{ local: .gitlab-ci.kit.yml }]   (and stages: guard, quality, security)"
+        else copy_file "$f" "$TARGET/.gitlab-ci.yml"; fi
+        continue ;;
+    esac
     copy_file "$f" "$TARGET/$rel"
   done < <(find "$CORE" -type f -print0)
   merge_settings
@@ -297,8 +323,24 @@ install_core() {
   [ -f "$TARGET/.env.example" ] || cp "$CORE/env.example.kit" "$TARGET/.env.example"
 }
 
+# A nested component (path != .) must not add a second copy of a tool config the repo already has in a parent folder: tools such as ruff
+# use the NEAREST config only, so the kit's file would silently replace the project's. true = skip (and say so).
+config_above() { # config_above <component path> <relative file>
+  local p="$1" rel="$2" d
+  [ "$p" != "." ] || return 1
+  case "$rel" in ruff.toml|.ruff.toml|.editorconfig|.sqlfluff|.prettierrc|.prettierrc.json) ;; *) return 1 ;; esac
+  d="$TARGET/$p"
+  while [ "$d" != "$TARGET" ] && [ "$d" != "/" ]; do
+    d="$(dirname "$d")"
+    if [ -f "$d/$rel" ] || { case "$rel" in ruff.toml|.ruff.toml) [ -f "$d/ruff.toml" ] || [ -f "$d/.ruff.toml" ] || grep -qs '^\[tool\.ruff' "$d/pyproject.toml" ;; *) false ;; esac; }; then
+      note "[$p] $rel: the repo already has one in ${d#"$TARGET"}${d:+/} — not adding a second that would replace it for $p/"
+      return 0
+    fi
+  done
+  return 1
+}
 install_component() { # install_component <idx>
-  local i="$1" p="${C_PATH[$1]}" s="${C_STACK[$1]}" f="${C_FW[$1]}" fd="" src rel files dest tmp globs g paths="" note
+  local i="$1" p="${C_PATH[$1]}" s="${C_STACK[$1]}" f="${C_FW[$1]}" fd="" src rel files dest tmp globs g paths="" note own
   dest="$TARGET"; [ "$p" != "." ] && dest="$TARGET/$p"
   mkdir -p "$dest"
   [ -n "$f" ] && fd="$(fw_dir "$s" "$f")"
@@ -308,12 +350,14 @@ install_component() { # install_component <idx>
     while IFS= read -r -d '' src; do
       rel="${src#"$files"/}"
       [ -n "$fd" ] && in_list "$rel" "$(yget "$fd/framework.yaml" exclude_files)" && continue
+      config_above "$p" "$rel" && continue
       if [ -n "$fd" ] && [ -f "$fd/files/$rel" ]; then copy_file "$fd/files/$rel" "$dest/$rel"; else copy_file "$src" "$dest/$rel"; fi
     done < <(find "$files" -type f -print0)
   fi
   if [ -n "$fd" ] && [ -d "$fd/files" ]; then
     while IFS= read -r -d '' src; do
       rel="${src#"$fd/files"/}"; [ -n "$files" ] && [ -f "$files/$rel" ] && continue
+      config_above "$p" "$rel" && continue
       copy_file "$src" "$dest/$rel"
     done < <(find "$fd/files" -type f -print0)
   fi
@@ -388,14 +432,17 @@ $(sha "$sk")  ${sbd#"$TARGET"/}"; CONFLICTS="$CONFLICTS ${sbd#"$TARGET"/}"   # b
   # 4. Dockerfile
   if has_module devops; then
     src="$(comp_dockerfile "$i")"
-    [ -n "$src" ] && copy_file "$src" "$dest/Dockerfile"
+    if [ -n "$src" ] && [ ! -e "$dest/Dockerfile" ] && own="$(find "$dest" -maxdepth 3 -iname 'Dockerfile*' -not -path '*/node_modules/*' -not -path '*/.venv/*' 2>/dev/null | head -n1)" && [ -n "$own" ]; then
+      note "[$p] already has ${own#"$TARGET"/} — the kit's generic Dockerfile is not added"; src=""
+    fi
+    [ -z "$src" ] || copy_file "$src" "$dest/Dockerfile"
   fi
   note="$(yget "$(stack_yaml "$s")" post_note)"; [ -n "$note" ] && NOTES="$NOTES
    - [$p · $s] $note"
   return 0
 }
 
-MODS=""; SERVICES=""; NOTES=""
+MODS=""; SERVICES=""; NOTES=""; PROVIDER=auto; FLOW=auto; HOOKS=auto
 has_module() { case " $MODS " in *" $1 "*) return 0 ;; esac; return 1; }
 norm_mods() { echo $* | tr ' ' '\n' | sed 's/^docker$/devops/' | awk 'NF && !seen[$0]++' | tr '\n' ' ' | sed 's/ $//'; }
 
@@ -415,6 +462,7 @@ apply_project_add() { # put module cmd_* lines into project.yaml (fill empty key
     [ -f "$MODULES/$m/project.add" ] || continue
     while IFS= read -r l; do
       k="${l%%:*}"; [ -z "$k" ] && continue
+      case "$k" in cmd_up|cmd_down|cmd_logs) [ -z "$(existing_compose)" ] || [ -f "$TARGET/compose.yaml" ] || continue ;; esac   # the repo has its own compose: leave these to it
       if grep -q "^$k:[[:space:]]*$" "$cfg"; then   # literal replacement: the line may contain # & / \ (comments, URLs)
         K="$k" L="$l" awk 'BEGIN { k = ENVIRON["K"] ":"; n = length(k); l = ENVIRON["L"] }
           { line = $0; cr = ""; if (sub(/\r$/, "", line)) cr = "\r"
@@ -431,9 +479,17 @@ apply_project_add() { # put module cmd_* lines into project.yaml (fill empty key
   rm -f "$add"
 }
 
+existing_compose() { # prints the first compose file the repo already has (any folder up to 3 deep), else nothing
+  find "$TARGET" -maxdepth 3 \( -name 'compose*.y*ml' -o -name 'docker-compose*.y*ml' \) -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.agent/*' -not -path '*/.venv/*' 2>/dev/null | head -n1
+  return 0
+}
 generate_compose() {
-  local out="$TARGET/compose.yaml" tmp i p s port host svc used="" deps="" sv vols="" v envtmp e
+  local out="$TARGET/compose.yaml" tmp i p s port host svc used="" deps="" sv vols="" v envtmp e ex
   [ -f "$out" ] && [ $FORCE -eq 0 ] && { note "compose.yaml exists — kept (add services with the kit-docker playbook; catalog in .agent/docker/catalog)"; return 0; }
+  ex="$(existing_compose)"
+  if [ -n "$ex" ] && [ $FORCE -eq 0 ]; then
+    note "the repo already has ${ex#"$TARGET"/} — not generating a second compose.yaml; cmd_up / cmd_down / cmd_logs stay empty until you set your own"; return 0
+  fi
   for sv in $SERVICES; do
     [ -f "$MODULES/devops/catalog/$sv.yml" ] || die "unknown docker service '$sv' (kit list)"
     if grep -q 'healthcheck:' "$MODULES/devops/catalog/$sv.yml" && ! grep -q 'profiles:' "$MODULES/devops/catalog/$sv.yml"; then deps="$deps $sv"; fi
@@ -539,7 +595,8 @@ wire_harnesses() { # one source of truth (.agents/skills + AGENTS.md) exposed to
   # Gemini CLI: load AGENTS.md as context (GEMINI.md still honoured)
   local gs="$TARGET/.gemini/settings.json"; mkdir -p "$TARGET/.gemini"
   if [ -f "$gs" ] && command -v jq >/dev/null 2>&1; then
-    jq '.context.fileName = ((((.context.fileName // []) | if type == "string" then [.] else . end) + ["AGENTS.md","GEMINI.md"]) | unique)' "$gs" > "$gs.tmp" && mv "$gs.tmp" "$gs"
+    jq '.context.fileName = ((((.context.fileName // []) | if type == "string" then [.] else . end) + ["AGENTS.md","GEMINI.md"]) | unique)' "$gs" > "$gs.tmp"
+    if [ "$(jq -S . "$gs")" = "$(jq -S . "$gs.tmp")" ]; then rm -f "$gs.tmp"; else mv "$gs.tmp" "$gs"; fi   # only when it really changes: an upgrade must not reformat your file
   elif [ ! -f "$gs" ]; then
     printf '{\n  "context": { "fileName": ["AGENTS.md", "GEMINI.md"] }\n}\n' > "$gs"
   fi
@@ -603,7 +660,7 @@ write_project_yaml() {
   awk -v cf="$tmp" '/\{\{COMMANDS\}\}/{while((getline l < cf)>0) print l; next} {print}' "$CORE/.agent/project.yaml.tpl" \
     | sed -e "s|{{NAME}}|$PROJECT_NAME|" -e "s|{{DESCRIPTION}}|TODO|" -e "s|{{KIT_VERSION}}|$VERSION|" \
           -e "s|{{STACK}}|${C_STACK[0]}|" -e "s|{{COMPONENTS}}|$(components_str)|" -e "s|{{MODULES}}|$MODS|" \
-          -e "s|^docs_language: vi|docs_language: $LANG_DOCS|" > "$cfg"
+          -e "s|^docs_language: vi|docs_language: $LANG_DOCS|" -e "s|^git_provider:[[:space:]]*#|git_provider: $PROVIDER   #|" > "$cfg"
   rm -f "$tmp"; CREATED=$((CREATED+1))
   [ "${cfg%.kit-new}" = "$cfg" ] || return 0
   # keep a lock with the selection (for kit add / upgrades)
@@ -623,6 +680,19 @@ insert_ci_setup() {
     awk -v sf="$tmp" '/# @@SETUP@@/{while((getline l < sf)>0) print l; next} {print}' "$ci" > "$ci.tmp" && mv "$ci.tmp" "$ci"
   done
   rm -f "$tmp"
+  # GitLab: the primary stack's image + every stack's setup commands (stacks/<s>/ci.gitlab, one command per line)
+  local img gl l; gl="$(mktemp)"; seen=""
+  img="$(yget "$(stack_yaml "${C_STACK[0]}")" ci_image)"; img="${img:-debian:bookworm}"
+  for s in "${C_STACK[@]}"; do
+    case " $seen " in *" $s "*) continue ;; esac; seen="$seen $s"
+    [ -f "$STACKS/$s/ci.gitlab" ] || continue
+    while IFS= read -r l; do [ -z "$l" ] || printf '    - %s\n' "$l" >> "$gl"; done < "$STACKS/$s/ci.gitlab"
+  done
+  for ci in "$TARGET/.gitlab-ci.yml" "$TARGET/.gitlab-ci.yml.kit-new" "$TARGET/.gitlab-ci.kit.yml" "$TARGET/.gitlab-ci.kit.yml.kit-new"; do
+    [ -f "$ci" ] && grep -q '@@GL_' "$ci" || continue   # a pipeline of your own has no placeholders and is never touched
+    awk -v img="$img" -v sf="$gl" '{ sub(/@@GL_IMAGE@@/, img) } /# @@GL_SETUP@@/ { while ((getline l < sf) > 0) print l; next } { print }' "$ci" > "$ci.tmp" && mv "$ci.tmp" "$ci"
+  done
+  rm -f "$gl"
 }
 
 run_dev_deps() {
@@ -674,7 +744,10 @@ hook_manager() { # husky | lefthook | pre-commit | other — a hook setup the pr
   if [ -d "$TARGET/.husky" ] || grep -qs '"husky"' "$TARGET/package.json"; then echo husky; return 0; fi
   for f in "$TARGET"/lefthook.* "$TARGET"/.lefthook.*; do [ ! -e "$f" ] || { echo lefthook; return 0; }; done
   if [ -f "$TARGET/.pre-commit-config.yaml" ]; then echo pre-commit; return 0; fi
-  if [ -n "$hp" ] && [ "$hp" != .githooks ]; then echo other; fi
+  if [ -n "$hp" ] && [ "$hp" != .githooks ]; then echo other; return 0; fi
+  local hd; hd="$(git -C "$TARGET" rev-parse --git-path hooks 2>/dev/null || true)"   # hand-written hooks (not *.sample) in .git/hooks
+  case "$hd" in "") return 0 ;; /*) ;; *) hd="$TARGET/$hd" ;; esac
+  for f in "$hd"/*; do [ ! -f "$f" ] || case "$f" in *.sample) ;; *) echo other; return 0 ;; esac; done
   return 0
 }
 hook_call() { # the line a manager's hook file uses to call one kit hook
@@ -725,15 +798,22 @@ $(hook_howto "$mgr")"
 }
 
 git_setup() {
-  local cfg="$TARGET/.agent/project.yaml" mb
+  local cfg="$TARGET/.agent/project.yaml" mb has_head=0
   cd "$TARGET"
   if ! git rev-parse --git-dir >/dev/null 2>&1; then git init -q -b main; say "git init (main)"; fi
   setup_hooks
-  if git rev-parse -q --verify HEAD >/dev/null; then
-    if ! git show-ref -q --verify refs/heads/main && git show-ref -q --verify refs/heads/master; then
-      sed -i.bak 's/^main_branch: main/main_branch: master/' "$cfg" && rm -f "$cfg.bak"; note "main branch is 'master' — project.yaml updated"
-    fi
-    mb="$(sed -n 's/^main_branch:[[:space:]]*\([^ ]*\).*/\1/p' "$cfg")"
+  git rev-parse -q --verify HEAD >/dev/null && has_head=1
+  if [ $has_head -eq 1 ] && ! git show-ref -q --verify refs/heads/main && git show-ref -q --verify refs/heads/master; then
+    sed -i.bak 's/^main_branch: main/main_branch: master/' "$cfg" && rm -f "$cfg.bak"; note "main branch is 'master' — project.yaml updated"
+  fi
+  mb="$(sed -n 's/^main_branch:[[:space:]]*\([^ ]*\).*/\1/p' "$cfg")"; mb="${mb:-main}"
+  if [ "$FLOW" = auto ]; then   # an existing repo that has no develop branch (here or on origin) works trunk-based: do not invent one
+    if [ $has_head -eq 1 ] && ! git show-ref -q --verify refs/heads/develop && ! git show-ref -q --verify refs/remotes/origin/develop; then FLOW=trunk; else FLOW=gitflow; fi
+  fi
+  if [ "$FLOW" = trunk ]; then
+    sed -i.bak "s|^develop_branch:.*|develop_branch: $mb      # trunk-based: tasks branch from and merge into $mb|" "$cfg" && rm -f "$cfg.bak"
+    say "flow: trunk-based — tasks branch from $mb and merge into it, no develop branch (--flow gitflow adds one)"
+  elif [ $has_head -eq 1 ]; then
     git show-ref -q --verify refs/heads/develop || { git branch develop "$mb" 2>/dev/null && say "created branch develop from $mb"; } || true
   fi
   cd - >/dev/null
@@ -781,7 +861,7 @@ pick_interactive() {
 
 # ---------------------------------------------------------------- commands
 cmd_init() {
-  TARGET=""; PROJECT_NAME=""; LANG_DOCS=vi; YES=0; DEPS=ask; SETUP=ask; TOOLS=ask; GITSETUP=1; HOOKS=auto
+  TARGET=""; PROJECT_NAME=""; LANG_DOCS=vi; YES=0; DEPS=ask; SETUP=ask; TOOLS=ask; GITSETUP=1; HOOKS=auto; PROVIDER=auto; FLOW=auto
   local stack_flag="" fw_flag=""; MODS_FLAG=""; SERVICES_FLAG=""; PRESET=app
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -800,6 +880,8 @@ cmd_init() {
       --install-tools) TOOLS=yes; shift ;;
       --force) FORCE=1; shift ;;
       --no-git) GITSETUP=0; shift ;;
+      --provider) PROVIDER="${2:-}"; case "$PROVIDER" in github|gitlab|none|auto) ;; *) die "--provider takes github, gitlab, none or auto" ;; esac; shift 2 ;;
+      --flow) FLOW="${2:-}"; case "$FLOW" in gitflow|trunk|auto) ;; *) die "--flow takes gitflow, trunk or auto" ;; esac; shift 2 ;;
       --hooks) HOOKS="${2:-}"; case "$HOOKS" in auto|kit|keep) ;; *) die "--hooks takes auto, kit or keep" ;; esac; shift 2 ;;
       -h|--help) usage ;;
       -*) die "unknown option $1" ;;
@@ -834,6 +916,7 @@ cmd_init() {
   say "modules:    ${MODS:-none}"; has_module devops && say "services:   ${SERVICES:-none}"; say "docs:       $LANG_DOCS"
   if [ $INTERACTIVE -eq 1 ]; then ui_confirm "Install with this selection?" y || die "aborted"; fi
 
+  resolve_provider; say "git host:  $PROVIDER"
   install_core
   local i; for i in "${!C_PATH[@]}"; do install_component "$i"; done
   for m in $MODS; do install_module_files "$m"; done
@@ -841,8 +924,10 @@ cmd_init() {
   write_project_yaml
   apply_project_add
   render_module_placeholders
-  has_module devops && { generate_compose; generate_cd; }
-  generate_dependabot
+  has_module devops && generate_compose
+  if [ "$PROVIDER" = github ]; then has_module devops && generate_cd; generate_dependabot
+  elif [ "$PROVIDER" = gitlab ]; then NOTES="$NOTES
+   - GitLab: no dependabot / cd workflow generated (use Renovate or GitLab dependency scanning; deploy stays a human step)"; fi
   wire_harnesses
   render_playbooks
   insert_ci_setup
@@ -855,6 +940,14 @@ cmd_init() {
   report
 }
 
+warn_ignored_kit_files() { # kit files the project's own .gitignore hides would exist on this machine only
+  local f ign=""
+  for f in AGENTS.md CLAUDE.md .claude/settings.json .agent/project.yaml .githooks/pre-commit .agents/skills; do
+    if [ -e "$TARGET/$f" ] && git -C "$TARGET" check-ignore -q -- "$f" 2>/dev/null; then ign="$ign $f"; fi
+  done
+  [ -z "$ign" ] || note "your .gitignore ignores kit files:$ign — they stay on this machine only (teammates and CI never see them). Remove those lines to share the kit with the team, or keep them to use it personally."
+  return 0
+}
 report() {
   say "installed agent-kit $VERSION — $CREATED file(s) created"
   if [ -n "$CONFLICTS" ]; then
@@ -862,6 +955,7 @@ report() {
     for c in $CONFLICTS; do printf '   - %s\n' "$c" >&2; done
   fi
   [ -n "$NOTES" ] && { note "to do:"; printf '%s\n' "$NOTES" | sed '/^$/d' >&2; }
+  warn_ignored_kit_files
   if [ -x "$TARGET/.agent/scripts/kit-doctor" ]; then printf '\n' >&2; (cd "$TARGET" && .agent/scripts/kit-doctor >&2) || true; fi
   cat >&2 <<EOF
 
@@ -900,6 +994,7 @@ cmd_add() {
   case " $new " in *" devops "*) [ -z "$SERVICES" ] && [ $INTERACTIVE -eq 1 ] && {
       local opts=() o; for o in $(all_services); do opts+=("$(lbl "$o" "$(svc_meta "$o" title)")"); done
       SERVICES="$(ui_many "Docker services for local dev" "postgres" "${opts[@]}")"; } ;; esac
+  resolve_provider
   for m in $new; do install_module_files "$m"; done
   case " $new " in *" devops "*)
     local i; for i in "${!C_PATH[@]}"; do src="$(comp_dockerfile "$i")"; [ -n "$src" ] && copy_file "$src" "$TARGET/${C_PATH[$i]}/Dockerfile"; done
@@ -945,6 +1040,7 @@ cmd_upgrade() {
   MODS="$(norm_mods $(yget "$lock" modules))"; SERVICES="$(yget "$lock" services)"
   parse_components_str "$(yget "$lock" components)"; [ ${#C_PATH[@]} -gt 0 ] || add_component . "$(yget "$cfg" stack)" ""
   say "upgrading $TARGET: kit $from → $VERSION · modules: $MODS"
+  resolve_provider
   install_core
   local i; for i in "${!C_PATH[@]}"; do install_component "$i"; done
   for m in $MODS; do install_module_files "$m"; done
