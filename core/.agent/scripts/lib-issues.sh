@@ -29,6 +29,13 @@ gl_conn() {
   [ -n "$tok" ] || die "set GITLAB_TOKEN to an access token with the 'api' scope (the kit never stores it)"
   command -v curl >/dev/null 2>&1 || die "curl is needed for GitLab issue sync"
   command -v jq >/dev/null 2>&1 || die "jq is needed for GitLab issue sync"
+  # the token never travels in clear text: http only to this machine, or when the human says so for this shell
+  case "$base" in
+    https://*) ;;
+    http://127.0.0.1*|http://localhost*|http://\[::1\]*) ;;
+    http://*) [ "${KIT_GITLAB_ALLOW_HTTP:-}" = 1 ] || die "refusing to send GITLAB_TOKEN over plain http to ${base} — use https (gitlab_url), or export KIT_GITLAB_ALLOW_HTTP=1 if you accept that" ;;
+    *) die "gitlab_url must start with https:// (got '${base}')" ;;
+  esac
   GL_BASE="${base%/}"; GL_PROJ="$(printf '%s' "$proj" | jq -sRr '@uri')"; GL_TOKEN="$tok"
 }
 

@@ -40,7 +40,7 @@ own_uncovered() { # keep the commands that run a file of this repo (tools/checks
       case "$t" in
         */*.py|*/*.sh|*/*.js|*/*.ts|*/*.rb)
           [ -f "$t" ] || continue
-          grep -qF -- "$t" "$KIT_CFG" 2>/dev/null || echo "- \`$c\` (runs \`$t\`)"
+          grep -qF -- "$t" "$KIT_CFG" 2>/dev/null || echo "- \`$t\` — run by your CI or hooks (see the command there; it is not printed here, it may carry tokens)"
           break ;;
       esac
     done

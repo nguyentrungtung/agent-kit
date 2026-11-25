@@ -7,6 +7,8 @@
 # (your `stages:` must contain `test`; GitLab's default does).
 # `image:` needs a Docker-executor runner; on a shell executor the tools come from the runner machine.
 # Self-hosted / offline runners: mirror the images below and let `kit-ci prepare` find gitleaks in the image (it tries github.com).
+# Merge-request pipelines must be allowed: if your `workflow: rules` only allows branch pipelines, a branch with an open MR runs no kit job
+# (see .kit-rules) and without an MR pipeline kit-ci cannot check the branch name, the commits or the task gates.
 
 .kit-rules:
   rules:
@@ -22,7 +24,6 @@
     GIT_DEPTH: "0"               # commit messages and task gates need the history
   before_script:
     - .agent/scripts/kit-ci prepare
-    # @@GL_SETUP@@
 
 kit-guard:
   extends: .kit-job
@@ -34,6 +35,9 @@ kit-quality:
   extends: .kit-job
   stage: test
   needs: [kit-guard]
+  before_script:
+    - .agent/scripts/kit-ci prepare
+    # @@GL_SETUP@@
   script:
     - .agent/scripts/kit-run install
     - .agent/scripts/kit-run format_check lint typecheck

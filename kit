@@ -199,8 +199,11 @@ append_lines_missing() { # append_lines_missing <src> <dest>  — each line once
   while IFS= read -r l; do [ -z "$l" ] && continue; grep -qxF "$l" "$2" 2>/dev/null || echo "$l" >> "$2"; done < "$1"
 }
 gi_needed() { # gi_needed <src> <dest .gitignore> — the patterns of <src> the existing rules do not already cover (asked to git itself,
-  # so `**/.venv/` in the repo covers the kit's `.venv/`); a negation is kept only when its path is ignored at that point
-  local tmp l probe
+  # so `**/.venv/` in the repo covers the kit's `.venv/`); a negation is kept only when its path is ignored at that point.
+  # Only the repo's .gitignore counts (not the developer's global excludes file, which teammates and CI do not have), and a kit
+  # pattern without an inner `/` matches at any depth, so it is covered only when a nested path is ignored too (`/.env` ≠ `.env`).
+  local tmp l probe deep
+  gi() { git -C "$tmp" -c core.excludesFile=/dev/null check-ignore -q --no-index -- "$1" 2>/dev/null; }
   tmp="$(mktemp -d)"
   if ! git -C "$tmp" init -q >/dev/null 2>&1; then grep -vE '^[[:space:]]*(#|$)' "$1" || true; rm -rf "$tmp"; return 0; fi
   if [ -f "$2" ]; then cp "$2" "$tmp/.gitignore"; else : > "$tmp/.gitignore"; fi
@@ -209,8 +212,9 @@ gi_needed() { # gi_needed <src> <dest .gitignore> — the patterns of <src> the 
     probe="${l#!}"; probe="${probe#/}"; probe="${probe#\*\*/}"
     case "$probe" in */) probe="${probe%/}/x" ;; esac   # a folder pattern: probe a file inside it
     probe="$(printf '%s' "$probe" | sed -e 's/\[[^]]*\]/c/g' -e 's/[*?]/x/g')"
-    if [ "${l#!}" != "$l" ]; then git -C "$tmp" check-ignore -q --no-index -- "$probe" 2>/dev/null || continue
-    else ! git -C "$tmp" check-ignore -q --no-index -- "$probe" 2>/dev/null || continue; fi
+    deep="$probe"; case "${l#!}" in /*|*/?*) ;; *) deep="kitprobe/kitprobe/$probe" ;; esac   # any-depth pattern: also nested
+    if [ "${l#!}" != "$l" ]; then { gi "$probe" || gi "$deep"; } || continue
+    else { gi "$probe" && gi "$deep"; } && continue; fi
     printf '%s\n' "$l"; printf '\n%s\n' "$l" >> "$tmp/.gitignore"
   done < "$1"
   rm -rf "$tmp"
@@ -220,7 +224,13 @@ append_gitignore() { # append_gitignore <src> <dest> [rebuild] — add the patte
   # rebuild (core block, existing-repo upgrade): first drop the block and recompute it; the stack/module calls that follow add theirs back.
   local need
   if [ "${3:-}" = rebuild ] && [ -f "$2" ] && grep -q '>>> agent-kit' "$2" && [ $UPGRADE -eq 1 ] && [ $EXISTING -eq 1 ]; then
-    awk '/^# >>> agent-kit/{skip=1; next} /^# <<< agent-kit/{skip=0; next} !skip' "$2" > "$2.kit-tmp" && mv "$2.kit-tmp" "$2"
+    if grep -q '^# <<< agent-kit' "$2"; then   # both markers, else leave the file alone
+      cat "$CORE/gitignore.kit" "$STACKS"/*/gitignore.add "$STACKS"/*/frameworks/*/gitignore.add "$MODULES"/*/gitignore.add 2>/dev/null > "$2.kit-known"
+      awk -v kf="$2.kit-known" 'BEGIN { while ((getline l < kf) > 0) known[l] = 1 }
+        /^# >>> agent-kit/ { skip = 1; next } /^# <<< agent-kit/ { skip = 0; next }
+        !skip || !($0 in known) { print }' "$2" > "$2.kit-tmp" && mv "$2.kit-tmp" "$2"   # a line the kit never ships is the user's: kept
+      rm -f "$2.kit-known"
+    fi
   fi
   need="$(gi_needed "$1" "$2")"
   if [ -n "$need" ]; then
@@ -306,7 +316,11 @@ repo_snapshot() { # what the repo uses today, taken BEFORE the kit writes anythi
 }
 tool_used() { # tool_used <tool> — the repo mentions it (dependency, config file, CI, hook)
   local re="$1"
-  case "$1" in lint-imports) re='import-linter|lint-imports|importlinter' ;; esac
+  case "$1" in
+    lint-imports) re='import-linter|lint-imports|importlinter' ;;
+    tsc) re='tsc|typescript|tsconfig[a-z.]*|vue-tsc' ;;
+    depcruise) re='depcruise|dependency-cruiser' ;;
+  esac
   [ -n "$REPO_SNAP" ] && grep -qiE -- "(^|[^a-z0-9_-])($re)([^a-z0-9_-]|\$)" "$REPO_SNAP"
 }
 seg_tool() { # seg_tool "<command>" — the program a command really runs (wrappers such as `uv run`, `npx` stripped)
@@ -341,25 +355,48 @@ ci_pytest_flags() { # --ignore=… flags the repo's own CI passes to pytest (e.g
   done | sed 's/^--ignore /--ignore=/' | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ $//'
 }
 dbt_has_ci_target() { [ ! -f "$1/profiles.yml" ] || grep -qE '^[[:space:]]+ci:[[:space:]]*$' "$1/profiles.yml"; }
-has_dbt_evaluator() { local p; for p in "$1/packages.yml" "$1/dependencies.yml"; do [ -f "$p" ] && { grep -q dbt_project_evaluator "$p"; return; }; done; return 0; }
+has_dbt_evaluator() { # a new project gets the gate (its packages.yml comes from the snippets); an existing one only when it installs the package
+  local p; for p in "$1/packages.yml" "$1/dependencies.yml"; do [ -f "$p" ] && { grep -q dbt_project_evaluator "$p"; return; }; done
+  [ $EXISTING -eq 0 ]
+}
 
-# value of a step for one component; in an existing repo a gate whose tool the repo does not use is left empty
+repo_mentions() { [ -n "$REPO_SNAP" ] && grep -qiE -- "$1" "$REPO_SNAP"; }   # looser than tool_used: plugin ids are distinctive
+gate_missing() { # gate_missing "<command>" — what the command needs that the repo does not use (empty = keep the gate)
+  local v="$1" t pat need name miss=""
+  t="$(seg_tool "$v")"
+  case "$t" in
+    gradlew|gradle|mvnw|mvn|cargo|dotnet)   # build wrappers are always there; the plugin a task needs may not be
+      while IFS='@' read -r pat need name; do   # task pattern in the command @ evidence in the repo @ name in the report
+        printf '%s' "$v" | grep -Eq -- "$pat" || continue
+        repo_mentions "$need" || miss="$miss $name"
+      done <<'PLUGINS'
+spotless@spotless@spotless
+checkstyle@checkstyle@checkstyle
+pmd(Main|Test)?([^a-z]|$)@(^|[^a-z])pmd@pmd
+dependencyCheck|dependency-check@dependency-?check@dependency-check
+ArchitectureTest@archunit|netarchtest|ArchitectureTests?@archunit
+jacoco|coverage[.]min@jacoco@jacoco
+cargo deny@cargo-deny|deny[.]toml@cargo-deny
+llvm-cov@llvm-cov@cargo-llvm-cov
+CollectCoverage@coverlet@coverlet
+PLUGINS
+      ;;
+    *) case "$CORE_TOOLS" in *" $t "*) ;; *) tool_used "$t" || miss="$t" ;; esac ;;
+  esac
+  printf '%s' "${miss# }"
+}
+# value of a step for one component; in an existing repo a gate whose tool (or build plugin) the repo does not use is left empty
 comp_value() { # comp_value <idx> <key>
-  local v t
+  local v
   v="$(comp_raw "$@")"
-  if [ $EXISTING -eq 1 ] && [ -n "$v" ]; then
-    t="$(seg_tool "$v")"
-    case "$CORE_TOOLS" in *" $t "*) ;; *) tool_used "$t" || v="" ;; esac
-  fi
+  if [ $EXISTING -eq 1 ] && [ -n "$v" ] && [ -n "$(gate_missing "$v")" ]; then v=""; fi
   printf '%s' "$v"
 }
 comp_unused() { # tools of a component's gates the repo does not use (only meaningful when EXISTING=1)
   local i="$1" step v t out=""
   for step in $STEPS; do
     v="$(comp_raw "$i" "cmd_$step")"; [ -n "$v" ] || continue
-    t="$(seg_tool "$v")"
-    case "$CORE_TOOLS" in *" $t "*) continue ;; esac
-    tool_used "$t" || case " $out " in *" $t "*) ;; *) out="$out $t" ;; esac
+    for t in $(gate_missing "$v"); do case " $out " in *" $t "*) ;; *) out="$out $t" ;; esac; done
   done
   printf '%s' "${out# }"
 }
@@ -926,13 +963,22 @@ insert_ci_setup() {
   done
   rm -f "$tmp"
   # GitLab: the primary stack's image + every stack's setup commands (stacks/<s>/ci.gitlab, one command per line)
-  local img gl l; gl="$(mktemp)"; seen=""
+  # One job, one image: stacks that need another image (node next to python…) do not get their setup appended — it would fail in the
+  # primary image. They are reported; use an image that has every toolchain, or split kit-quality per component.
+  local img gl l si other=""; gl="$(mktemp)"; seen=""
   img="$(yget "$(stack_yaml "${C_STACK[0]}")" ci_image)"; img="${img:-debian:bookworm}"
   for s in "${C_STACK[@]}"; do
     case " $seen " in *" $s "*) continue ;; esac; seen="$seen $s"
+    si="$(yget "$(stack_yaml "$s")" ci_image)"; si="${si:-debian:bookworm}"
+    if [ "$si" != "$img" ]; then other="$other $s ($si)"; continue; fi
     [ -f "$STACKS/$s/ci.gitlab" ] || continue
     while IFS= read -r l; do [ -z "$l" ] || printf '    - %s\n' "$l" >> "$gl"; done < "$STACKS/$s/ci.gitlab"
   done
+  if [ -n "$other" ] && [ "$PROVIDER" = gitlab ]; then
+    printf '    # stacks needing another image (not set up here):%s — use an image with every toolchain, or one job per component\n' "$other" >> "$gl"
+    NOTES="$NOTES
+   - CI (GitLab): kit-quality runs in $img; these stacks need another image:$other — give kit-quality an image with every toolchain, or split it per component"
+  fi
   for ci in "$TARGET/.gitlab-ci.yml" "$TARGET/.gitlab-ci.yml.kit-new" "$TARGET/.gitlab-ci.kit.yml" "$TARGET/.gitlab-ci.kit.yml.kit-new"; do
     [ -f "$ci" ] && grep -q '@@GL_' "$ci" || continue   # a pipeline of your own has no placeholders and is never touched
     awk -v img="$img" -v sf="$gl" '{ sub(/@@GL_IMAGE@@/, img) } /# @@GL_SETUP@@/ { while ((getline l < sf) > 0) print l; next } { print }' "$ci" > "$ci.tmp" && mv "$ci.tmp" "$ci"
@@ -1005,7 +1051,10 @@ run_module_setup() {
 KIT_HOOK_NAMES="pre-commit commit-msg pre-push"
 hook_manager() { # husky | lefthook | pre-commit | other — a hook setup the project already has; empty = none
   local hp f; hp="$(git -C "$TARGET" config --get core.hooksPath 2>/dev/null || true)"
-  if [ -d "$TARGET/.husky" ] || grep -qs '"husky"' "$TARGET/package.json"; then echo husky; return 0; fi
+  if [ -d "$TARGET/.husky" ]; then echo husky; return 0; fi
+  if grep -qs '"husky"' "$TARGET/package.json"; then   # Husky v4 (hooks in package.json) ignores .husky/: printed how-to, no files written
+    if grep -qsE '"husky"[[:space:]]*:[[:space:]]*\{' "$TARGET/package.json"; then echo other; else echo husky; fi; return 0
+  fi
   for f in "$TARGET"/lefthook.* "$TARGET"/.lefthook.*; do [ ! -e "$f" ] || { echo lefthook; return 0; }; done
   if [ -f "$TARGET/.pre-commit-config.yaml" ]; then echo pre-commit; return 0; fi
   if [ -n "$hp" ] && [ "$hp" != .githooks ]; then echo other; return 0; fi
@@ -1346,7 +1395,8 @@ cmd_upgrade() {
   local i; for i in "${!C_PATH[@]}"; do install_component "$i"; done
   for m in $MODS; do install_module_files "$m"; done
   build_commands; reconcile_cmds "$mode_flag"; sync_project_keys; apply_project_add; render_module_placeholders
-  NOTES=""; [ $EXISTING -eq 0 ] || note_existing_gaps   # on upgrade only the gaps are worth repeating, not the install notes
+  NOTES="$(printf '%s\n' "$NOTES" | grep -F -- '- CI' || true)"   # on upgrade: the CI include hint and the gaps, not every install note
+  [ $EXISTING -eq 0 ] || note_existing_gaps
   wire_harnesses; render_playbooks; insert_ci_setup
   chmod +x "$TARGET"/.agent/scripts/* "$TARGET"/.agent/hooks/*.sh "$TARGET"/.githooks/* 2>/dev/null || true
   write_manifest

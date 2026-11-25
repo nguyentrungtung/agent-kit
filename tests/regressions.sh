@@ -7,6 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; KIT="$ROOT/kit"
 WORK="${1:-$(mktemp -d)}"; mkdir -p "$WORK"; WORK="$(cd "$WORK" && pwd)"   # absolute: cases cd around
 export GIT_AUTHOR_NAME=kit GIT_AUTHOR_EMAIL=kit@example.invalid GIT_COMMITTER_NAME=kit GIT_COMMITTER_EMAIL=kit@example.invalid
+export GIT_CONFIG_GLOBAL=/dev/null   # the developer's global git config (excludesFile, hooks…) must not hide or cause failures
 fail=0
 check() { if eval "$2"; then printf '  ok   %s\n' "$1"; else printf '  FAIL %s\n' "$1"; fail=$((fail+1)); fi; }
 fresh() { rm -rf "$1" "$1".*; mkdir -p "$1"; }   # every case starts clean, so the script can re-run in the same workdir
@@ -418,7 +419,7 @@ ad "$A" 'mkdir -p agent docs/nghiep-vu docs/tham-chieu tools/checks \
   && printf "db: postgres://etl:S3cretPw@db:5432/x\n" > docs/nghiep-vu/conn.md \
   && printf "volumes:\n  - ./config/.htpasswd:/etc/nginx/.htpasswd:ro\n" > docs/nghiep-vu/gateway.md \
   && printf "print(1)\n" > tools/checks/check_registry.py \
-  && printf "stages: [test]\nchecks:\n  stage: test\n  script:\n    - python3 tools/checks/check_registry.py\n" > .gitlab-ci.yml \
+  && printf "stages: [test]\nchecks:\n  stage: test\n  script:\n    - python3 tools/checks/check_registry.py --token glpat-SeCrEt0123456789\n" > .gitlab-ci.yml \
   && printf "AGENTS.md\nagent/\ndocs/\n" > .gitignore && printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json \
   && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack node
 before="$(git -C "$A" status --porcelain | sort)"
@@ -434,6 +435,7 @@ check "§5 the .gitignore lines that hide them"       "sec 5 | grep -q '.gitigno
 check "§6 .kit-new left to merge"                    "sec 6 | grep -q 'AGENTS.md.kit-new'"
 check "§7 kit pipeline not included yet"             "sec 7 | grep -q 'NOT included'"
 check "§8 CI check no cmd_* covers"                  "sec 8 | grep -q 'tools/checks/check_registry.py'"
+check "§8 never prints the CI command (tokens)"       "! printf '%s\n' \"\$scan\" | grep -q 'glpat-SeCrEt'"
 check "report saved in .agent/local (ignored)"       "[ -f \"\$A/.agent/local/adopt-scan.md\" ] && git -C \"\$A\" check-ignore -q .agent/local/adopt-scan.md"
 check "read-only: git status unchanged"              "[ \"\$(git -C \"\$A\" status --porcelain | sort)\" = \"\$before\" ]"
 check "kit-migrate skill installed for every harness" "[ -f \"\$A/.agents/skills/kit-migrate/SKILL.md\" ] && [ -L \"\$A/.claude/skills/kit-migrate\" ] && grep -q '\`kit-migrate\`' \"\$A/AGENTS.md.kit-new\""
@@ -461,10 +463,13 @@ check "no mode in kit.lock: upgrade as new, say how to re-adopt" "grep -q 'kit u
 check "old install: differing cmd_* only suggested"   "grep -q 'would set these commands differently' \"\$A.up1.log\" && grep -q '^cmd_install: (cd ingestion && uv sync) ' \"\$A/.agent/project.yaml\""
 check "no baseline guessed for them in kit.cmds"     "! grep -q '^cmd_install:' \"\$A/.agent/kit.cmds\""
 (cd "$A" && git add -A && git -c core.hooksPath=/dev/null commit -qm "chore: upgrade kit" --no-verify)
+awk '/^# <<< agent-kit/ { print "my-own-dir/" } { print }' "$A/.gitignore" > "$A/gi.tmp" && mv "$A/gi.tmp" "$A/.gitignore"
+(cd "$A" && git add -A && git -c core.hooksPath=/dev/null commit -qm "chore: own ignore" --no-verify)
 "$KIT" upgrade "$A" --mode existing >"$A.up2.log" 2>&1 || true
 check "--mode existing: kit's untouched mypy.ini / .sqlfluff removed" "[ ! -e \"\$A/ingestion/mypy.ini\" ] && [ ! -e \"\$A/transform/.sqlfluff\" ] && grep -q 'removed ingestion/mypy.ini' \"\$A.up2.log\""
 check "--mode existing: commands as an existing-repo init" "[ -z \"\$(yv \"\$A\" cmd_typecheck)\" ] && grep -q '^cmd_test: (cd ingestion && uv run pytest -q --ignore=tests/live)\$' \"\$A/.agent/project.yaml\" && grep -q 'uv run --project ../ingestion dbt deps' \"\$A/.agent/project.yaml\""
 check "a user-edited cmd_* is never replaced"         "grep -q '^cmd_lint: make lint\$' \"\$A/.agent/project.yaml\""
+check "a line the user put in the kit block survives"  "grep -qx 'my-own-dir/' \"\$A/.gitignore\""
 check "backup kept, mode stored in kit.lock"          "[ -f \"\$A/.agent/project.yaml.bak-kit\" ] && grep -q '^mode: existing' \"\$A/.agent/kit.lock\""
 check ".gitignore kit block trimmed to what is not covered" "! sed -n '/>>> agent-kit/,/<<< agent-kit/p' \"\$A/.gitignore\" | grep -qx '.env' && grep -qx '.agent/local/' \"\$A/.gitignore\""
 cp "$A/.agent/project.yaml" "$A.before"; "$KIT" upgrade "$A" --allow-dirty >"$A.up3.log" 2>&1 || true
@@ -494,10 +499,14 @@ if command -v sqlite3 >/dev/null 2>&1; then
   printf -- '-- severity: warn\n-- why: so is never negative\nSELECT ma FROM hs WHERE so < 0;\n' > "$A/dq/hs/correct-so.sql"
   printf -- '-- why: every row has a name\nSELECT ma FROM hs WHERE ten IS NULL\n' > "$A/dq/hs/complete-ten.sql"
   printf 'DELETE FROM hs\n' > "$A/dq/hs/clean-evil.sql"; printf 'SELECT 1; DROP TABLE hs\n' > "$A/dq/hs/clean-evil2.sql"
+  printf 'SELECT 1 AS x \\! touch pwned\n' > "$A/dq/hs/clean-evil3.sql"
+  printf -- "-- severity: warn\nSELECT ma FROM hs WHERE ten IN ('INSERT', 'DELETE') AND ma <> '--'\n" > "$A/dq/hs/correct-literals.sql"
   rc=0; out="$(cd "$A" && .agent/scripts/kit-dq run --report 2>&1)" || rc=$?
   check "duplicate key fails, warn only warns, pass is ok" "printf '%s\n' \"\$out\" | grep -q '^FAIL .*clean-dup-ma' && printf '%s\n' \"\$out\" | grep -q '^WARN .*correct-so' && printf '%s\n' \"\$out\" | grep -q '^ok .*complete-ten'"
   check "writes refused, table intact"                "printf '%s\n' \"\$out\" | grep -q '^REFUSED .*clean-evil.sql' && printf '%s\n' \"\$out\" | grep -q '^REFUSED .*clean-evil2.sql' && [ \"\$(sqlite3 \"\$A/dq.sqlite\" 'select count(*) from hs')\" = 3 ]"
   check "exit 1 on an error-severity failure"         "[ $rc -eq 1 ]"
+  check "psql meta-command (backslash) refused"        "printf '%s\n' \"\$out\" | grep -q '^REFUSED .*clean-evil3.sql' && [ ! -e \"\$A/pwned\" ]"
+  check "write keywords inside string literals are fine" "printf '%s\n' \"\$out\" | grep -q '^ok .*correct-literals.sql'"
   check "report has counts, never row values"         "grep -q 'clean-dup-ma.sql. | 1 |' \"\$A\"/docs/data/quality/*.md && ! grep -rq 'SECRET' \"\$A/docs/data/quality\" && ! printf '%s' \"\$out\" | grep -q SECRET"
   rc=0; out="$(cd "$A" && .agent/scripts/kit-dq run hs/complete-ten.sql 2>&1)" || rc=$?
   check "one check by path (the last file not matching is fine)" "[ $rc -eq 0 ] && printf '%s\n' \"\$out\" | grep -q '1 check(s): 0 failed'"
@@ -555,6 +564,9 @@ gls() { (cd "$g" && GITLAB_TOKEN="${GLT:-secret-token}" .agent/scripts/kit-task 
 gl() { jq -s -r "$1" "$WORK/gl.log"; }
 rc=0; out="$(cd "$g" && env -u GITLAB_TOKEN -u GITLAB_PRIVATE_TOKEN .agent/scripts/kit-task sync 2>&1)" || rc=$?
 check "no token → clear error, nothing sent"        "[ $rc -ne 0 ] && printf '%s\n' \"\$out\" | grep -q GITLAB_TOKEN && [ ! -s \"$WORK/gl.log\" ]"
+gh2="$WORK/glhttp"; issue_project "$gh2" gitlab "http://gitlab.example.test/acme/app.git"
+rc=0; out="$(cd "$gh2" && GITLAB_TOKEN=tok .agent/scripts/kit-task sync 2>&1)" || rc=$?
+check "token never sent over plain http to a remote host" "[ $rc -ne 0 ] && printf '%s\n' \"\$out\" | grep -q 'refusing to send GITLAB_TOKEN over plain http'"
 out="$(GLT=wrong gls sync TASK-001 || true)"
 check "a rejected token is reported"                "printf '%s\n' \"\$out\" | grep -q 'HTTP 401'"
 : > "$WORK/gl.log"; gls sync TASK-001 >/dev/null
@@ -653,6 +665,31 @@ for stk in python go; do   # every stack resolves to a real image
   B="$WORK/gl-$stk"; ad "$B" 'printf "[project]\nname=\"x\"\n" > pyproject.toml; printf "module x\n" > go.mod' --stack $stk --provider gitlab
   check "$stk stack image in the pipeline"          "grep -qE '^  image: (python:3.12|golang:1.23)\$' \"\$B/.gitlab-ci.yml\""
 done
+
+
+# ---------------------------------------------------------------- review findings (fresh-context review of the multi-host branch)
+printf '\n== review findings: global excludes, anchored ignores, multi-stack GitLab, build plugins, TypeScript, dbt evaluator, http token\n'
+GX="$WORK/gx"; rm -rf "$GX"; mkdir -p "$GX"; printf '.env\n' > "$GX/excludes"; printf '[core]\n\texcludesFile = %s\n' "$GX/excludes" > "$GX/config"
+A="$WORK/rv-global"; fresh "$A"; (cd "$A" && git init -q -b main && printf '{"name":"x","version":"1"}\n' > package.json)
+GIT_CONFIG_GLOBAL="$GX/config" "$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules none --stack node >"$A.log" 2>&1 || true
+check "a global excludesFile does not drop .env from the repo" "sed -n '/^# >>> agent-kit/,/^# <<< agent-kit/p' \"\$A/.gitignore\" | grep -qx '.env'"
+A="$WORK/rv-anchored"; ad "$A" 'printf "/.env\n/secrets/\n" > .gitignore && printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node
+check "root-anchored /.env does not stand in for .env at any depth" "git -C \"\$A\" check-ignore -q svc/.env && git -C \"\$A\" check-ignore -q svc/secrets/x"
+A="$WORK/rv-glmulti"; ad "$A" 'mkdir -p api web && printf "[project]\nname=\"a\"\n" > api/pyproject.toml && printf "{\"name\":\"w\",\"version\":\"1\"}\n" > web/package.json' --stack python:api,node:web --provider gitlab
+check "GitLab: no node setup in the python image, guard has no stack setup" "! grep -q 'corepack enable' \"\$A/.gitlab-ci.yml\" && awk '/^kit-guard:/,/^kit-quality:/' \"\$A/.gitlab-ci.yml\" | grep -vq 'pip install' && grep -q 'need another image' \"\$A.log\""
+A="$WORK/rv-gradle"; ad "$A" 'printf "plugins { id \"java\" }\n" > build.gradle && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack java-gradle
+check "existing Gradle repo: no gates for plugins it lacks" "[ -z \"\$(yv \"\$A\" cmd_format_check)\" ] && [ -z \"\$(yv \"\$A\" cmd_lint)\" ] && [ -z \"\$(yv \"\$A\" cmd_audit)\" ] && [ -z \"\$(yv \"\$A\" cmd_arch)\" ] && grep -qE '^cmd_test: (./gradlew|gradle) ' \"\$A/.agent/project.yaml\" && grep -q 'does not use: spotless' \"\$A.log\""
+A="$WORK/rv-gradle2"; ad "$A" 'printf "plugins { id \"java\"\n id \"com.diffplug.spotless\" version \"6.25.0\" }\n" > build.gradle && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack java-gradle
+check "…and keeps the ones it has (spotless)"       "grep -qE '^cmd_format_check: (./gradlew|gradle) --no-daemon spotlessCheck' \"\$A/.agent/project.yaml\""
+A="$WORK/rv-ts"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\",\"devDependencies\":{\"typescript\":\"5.6.0\"}}\n" > package.json && printf "{}\n" > tsconfig.json && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack node
+check "existing TypeScript repo keeps its typecheck gate" "grep -q '^cmd_typecheck: npx --no-install tsc --noEmit' \"\$A/.agent/project.yaml\""
+A="$WORK/rv-dbt"; ad "$A" 'printf "name: t\nprofile: t\n" > dbt_project.yml && printf "t:\n  outputs:\n    ci:\n      type: duckdb\n" > profiles.yml && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack dbt
+check "existing dbt repo without packages.yml: no evaluator gate" "[ -z \"\$(yv \"\$A\" cmd_arch)\" ] && grep -q 'dbt_project_evaluator is not in packages.yml' \"\$A.log\""
+A="$WORK/rv-hint"; ad "$A" 'printf "stages: [test]\nmine:\n  script: [echo mine]\n" > .gitlab-ci.yml && printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node --provider gitlab
+commit_all "$A"; "$KIT" upgrade "$A" >"$A.up.log" 2>&1 || true
+check "upgrade repeats the GitLab include hint"     "grep -q 'local: .gitlab-ci.kit.yml' \"\$A.up.log\""
+A="$WORK/rv-husky4"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\",\"husky\":{\"hooks\":{\"pre-commit\":\"echo\"}}}\n" > package.json' --stack node
+check "Husky v4 (package.json hooks): how-to, no .husky/ written" "[ ! -e \"\$A/.husky\" ] && grep -q 'kit-hook pre-commit' \"\$A.log\""
 
 printf '\n%d failure(s) — workdir %s\n' "$fail" "$WORK"
 [ $fail -eq 0 ]
