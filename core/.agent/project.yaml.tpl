@@ -11,9 +11,12 @@ kit_version: {{KIT_VERSION}}
 
 # --- Branching (gitflow) ---
 main_branch: main            # production
-develop_branch: develop      # integration; set to "main" for trunk-based
+develop_branch: develop      # integration + UAT (gitflow); set to "main" for trunk-based
+staging_branch:              # optional long-lived pre-production branch (e.g. staging); empty = release/* is what STAGING runs
+branch_types: feature feat bugfix fix hotfix release support refactor chore docs test ci perf build style revert
+branch_max_len: 60           # <type>/<TASK-NNN>-<kebab-case-description>, checked by CI (kit-ci guard) and pre-push
 protected_extra: master release/* hotfix/*
-protected_regex: ^(main|master|develop|release/.*|hotfix/.*)$
+protected_regex: ^(main|master|develop|staging|release/.*|hotfix/.*)$
 push_checkpoints: true       # push task branch to origin on every checkpoint (remote backup)
 
 # --- Tasks & Git hosting ---

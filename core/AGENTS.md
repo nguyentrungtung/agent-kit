@@ -41,7 +41,7 @@ idea ─▶ kit-ba (UC/US/BR) ─▶ kit-sa (solution) ─▶ kit-devops · kit-
 - **No code without a task. No task without acceptance criteria. Unclear → ask, never guess.** Low-risk unknown → `ASSUMPTION:` line; only a human marks it `CONFIRMED:`.
 - Never cite an id (UC/US/BR/FR/ADR), file, function or library API you have not seen — `kit-trace` and CI catch invented ids.
 - Everything traces to a use case: UC/US → change → TASK → test → code → spec.
-- Work **only on a task branch** (`<type>/TASK-NNN-slug`). `main`, `develop`, `release/*`, `hotfix/*` are protected.
+- Work **only on a task branch** (`<type>/TASK-NNN-slug`, gitflow: `.agent/rules/core/git-workflow.md`). `main` (go-live only), `develop` (integration + UAT), `staging`, `release/*`, `hotfix/*` are protected.
 - Create documents with `.agent/scripts/kit-new <task|change|testplan|adr|usecase|story|doc>` — never invent the skeleton.
 - Small steps: change → `kit-run check` → `kit-task checkpoint "<what is now working>"`. Same error 3× → rollback, LESSONS.md, re-plan.
 - **Full-stack Developer on Vertical Slices (Size M: 150–350 LOC)**: One agent implements DB + Logic + API + Frontend UI Component + Tests for a feature. Never split tasks horizontally into FE-only or BE-only.

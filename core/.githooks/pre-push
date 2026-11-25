@@ -12,6 +12,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     [ "${KIT_ALLOW_PROTECTED_PUSH:-}" = "i-am-human" ] || die "push to protected branch '$rb' is blocked — merge through a PR (humans: KIT_ALLOW_PROTECTED_PUSH=i-am-human)"
   fi
   [ "$local_sha" = "$zero" ] && continue   # deletion
+  bp="$(branch_name_problem "$rb")"; [ -z "$bp" ] || warn "branch '$rb': $bp — CI will reject it (rename: git branch -m <new-name>)"
   run_checks=1
 done
 if [ $run_checks -eq 1 ]; then

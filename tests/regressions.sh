@@ -319,6 +319,9 @@ commit_all "$A"; tip="$(git -C "$A" rev-parse main)"
 check "kit-task start branches from main"           "[ \"\$(git -C \"\$A\" rev-parse --abbrev-ref HEAD)\" = feature/TASK-001-trunk-task ] && [ \"\$(git -C \"\$A\" merge-base HEAD main)\" = \"$tip\" ]"
 A="$WORK/ad-flow-develop"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify && git branch develop' --stack node
 check "a develop branch → gitflow as before"        "[ \"\$(yv \"\$A\" develop_branch)\" = develop ]"
+commit_all "$A"; (cd "$A" && git checkout -q develop && git merge -q --ff-only main); dtip="$(git -C "$A" rev-parse develop)"
+(cd "$A" && .agent/scripts/kit-task new "Null ngay tiep nhan" --type bug >/dev/null && .agent/scripts/kit-task start TASK-001 >/dev/null 2>&1)
+check "gitflow: --type bug → bugfix/TASK-… from develop" "case \"\$(git -C \"\$A\" rev-parse --abbrev-ref HEAD)\" in bugfix/TASK-001-null-ngay-tiep-nhan) true ;; *) false ;; esac && [ \"\$(git -C \"\$A\" merge-base HEAD develop)\" = \"$dtip\" ]"
 A="$WORK/ad-flow-new"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node
 check "brand-new repo → gitflow"                    "[ \"\$(yv \"\$A\" develop_branch)\" = develop ]"
 A="$WORK/ad-flow-force"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack node --flow gitflow
@@ -642,10 +645,18 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$r/.agent/scripts/kit-secrets-scan"; c
 out="$(kci feature/TASK-009-x guard || true)"
 check "a bad commit subject fails the guard"        "printf '%s\n' \"\$out\" | grep -q 'bad commit subject: bad subject here'"
 out="$(kci wip/foo guard || true)"
-check "a branch name outside <type>/ fails"         "printf '%s\n' \"\$out\" | grep -q \"must be <type>/TASK-NNN-slug\""
+check "a branch name outside <type>/ fails"         "printf '%s\n' \"\$out\" | grep -q \"type 'wip' is not one of\""
+out="$(kci feature/Bad_Name guard || true)"
+check "gitflow: description must be lowercase kebab-case" "printf '%s\n' \"\$out\" | grep -q 'lowercase kebab-case'"
+out="$(cd "$r" && KIT_CI_EVENT=pr KIT_CI_BASE=main KIT_CI_HEAD=feature/TASK-009-x .agent/scripts/kit-ci guard 2>&1 || true)"
+check "gitflow: a feature cannot merge into main"   "printf '%s\n' \"\$out\" | grep -q 'only release/\* or hotfix/\* merge into main'"
 (cd "$r" && git commit -q --amend -m "feat(TASK-009): add a thing" --no-verify)
 rc=0; out="$(kci feature/TASK-009-x guard)" || rc=$?
 check "good branch + subject pass"                  "[ $rc -eq 0 ]"
+rc=0; out="$(kci feat/bronze-all-string guard)" || rc=$?
+check "gitflow: feat/ and bugfix/ are accepted"      "[ $rc -eq 0 ] && kci bugfix/TASK-010-null-date guard >/dev/null"
+rc=0; out="$(cd "$r" && KIT_CI_EVENT=pr KIT_CI_BASE=main KIT_CI_HEAD=release/v1.2.0 .agent/scripts/kit-ci guard 2>&1)" || rc=$?
+check "gitflow: release/* into main passes the name and direction checks" "! printf '%s\n' \"\$out\" | grep -q 'gitflow:' && ! printf '%s\n' \"\$out\" | grep -q \"branch 'release\""
 rc=0; out="$(cd "$r" && GITLAB_CI=true CI_MERGE_REQUEST_IID=7 CI_MERGE_REQUEST_SOURCE_BRANCH_NAME=wip/gl CI_MERGE_REQUEST_TARGET_BRANCH_NAME=develop .agent/scripts/kit-ci guard 2>&1)" || rc=$?
 check "GitLab MR variables are read"                "[ $rc -ne 0 ] && printf '%s\n' \"\$out\" | grep -q \"branch 'wip/gl'\""
 rc=0; out="$(cd "$r" && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request GITHUB_HEAD_REF=wip/gh GITHUB_BASE_REF=develop .agent/scripts/kit-ci guard 2>&1)" || rc=$?

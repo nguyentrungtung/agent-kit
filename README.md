@@ -139,6 +139,7 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 | Sự cố production + post-mortem không đổ lỗi | `kit-incident`, `kit-new postmortem "<tiêu đề>"` |
 | Checklist release (gồm DAST/pentest trên staging, rollback) | `.agent/checklists/release.md` |
 | Nâng cấp kit cho dự án đã cài | `kit upgrade <dir>`: file bạn chưa sửa thì cập nhật, file bạn đã sửa thì giữ nguyên + `*.kit-new`, file bạn đã xoá thì không tạo lại; thêm key mới vào `project.yaml` (dựa trên `.agent/kit.manifest`) |
+| Lên 0.14.0 (gitflow) | CI (`kit-ci guard`) kiểm tên nhánh theo `<type>/<TASK-NNN>-<kebab-case>` và hướng merge (vào `main` chỉ từ `release/*`, `hotfix/*`); thêm loại `bugfix/` (và `feat/`, `ci/`, `perf/`…); `project.yaml` có thêm `staging_branch`, `branch_types`, `branch_max_len` (kit upgrade tự thêm). Nhánh đang mở có tên khác chuẩn: đổi tên (`git branch -m`) hoặc thêm loại của bạn vào `branch_types` |
 | Lên 0.13.0 (áp dụng / nâng cấp repo có sẵn) | `kit init` trên repo đã có commit chạy **chế độ repo có sẵn** (`--mode new` để cài đầy đủ như trước) và ghi `mode:` vào `kit.lock`. `kit upgrade` nhớ lệnh nó sinh ra (`.agent/kit.cmds`): `cmd_*` bạn chưa sửa sẽ theo kit mới, `cmd_*` bạn đã sửa giữ nguyên. Project cài trước 0.13 chưa có `kit.cmds` nên chỉ được **gợi ý** lệnh mới; repo có code từ trước khi cài kit thì chạy một lần `kit upgrade --mode existing`: bỏ `mypy.ini` / `.sqlfluff` / `.env.example` do kit đặt mà chưa ai sửa, đặt lại `cmd_*` như init ở chế độ repo có sẵn (sao lưu `.agent/project.yaml.bak-kit`), gọn khối `.gitignore` của kit. Playbook mới `kit-migrate` + `.agent/scripts/kit-adopt-scan` |
 | Lên 0.12.0 (repo có sẵn, GitLab) | `kit init` đoán Git host và ghi `git_provider:`; repo GitLab không còn nhận `.github/` (kit giữ nguyên file `.github/` đã cài, chỉ ngừng cập nhật) mà nhận `.gitlab-ci.yml` / `.gitlab-ci.kit.yml` + template MR. Gate CI chuyển vào `.agent/scripts/kit-ci`: `.github/workflows/ci.yml` mới gọi script này (nếu bạn đã sửa `ci.yml`, bản mới ở `ci.yml.kit-new`). Repo có sẵn mà chưa có `develop` giờ mặc định trunk-based. Module `perf` tách khỏi `devops` (project cũ giữ nguyên file `perf/`). `kit-task sync-gh` / `pull-gh` đổi tên `sync` / `pull` (tên cũ vẫn chạy) và hỗ trợ GitLab |
 | Lên 0.11.0 (anti-drift gates) | Task đang làm dở (không có `template: 2` trong front matter) giữ luật cũ — các gate mới (checklist §2, nguồn §1, assumption, review, tài liệu sống) chỉ áp dụng cho task tạo sau khi nâng cấp. Chạy `.agent/scripts/kit-trace` một lần để dọn id UC/US/BR/FR/ADR không tồn tại (kể cả id mẫu còn sót từ template BA). `ASSUMPTION:` trong `docs/ba/BRIEF.md` / `docs/architecture/SOLUTION.md` phải được người đổi thành `CONFIRMED:`. CI của dự án giờ chặn PR từ branch `feature/`·`fix/`·`hotfix/`·`refactor/` không có `TASK-NNN` — PR đang mở theo kiểu cũ cần đổi tên branch hoặc gắn task. Skeleton framework chuyển sang `.agent/stack/<stack>/skeletons/<framework>/`; skeleton bạn đã sửa được `kit upgrade` mang sang (bản kit ở `.kit-new`) |
@@ -280,6 +281,23 @@ OpenSpec được init cho `claude, codex, gemini, antigravity, dsh`. Ở harnes
 - File task (`.agent/tasks/*.md`) là **nguồn gốc duy nhất**. Board, GitHub Issues và mọi UI sau này chỉ là lớp hiển thị. Schema frontmatter cố định, xem `.agent/tasks/README.md`.
 - **Hook Stop** (Claude Code): khi agent sắp kết thúc lượt trên nhánh task mà code chưa commit làm fail `stop_checks` (mặc định `format_check lint`), hook chặn **một lần** và trả lỗi để agent sửa. Tắt bằng `stop_checks: none`.
 - **Đường lên UI kiểu Vibe Kanban:** `kit-board --json` đã có đủ dữ liệu một UI cần (trạng thái, nhánh, worktree, issue, checkpoint, số file chưa commit). Một UI chỉ cần đọc JSON này và gọi `kit-task start --worktree` / `finish` để điều khiển agent. Không cần đổi format dữ liệu.
+
+## 5c. Gitflow: nhánh, môi trường, đặt tên (`.agent/rules/core/git-workflow.md`)
+
+| Nhánh | Rẽ từ → merge vào | Môi trường |
+|---|---|---|
+| `main` / `master` | ← chỉ `release/*`, `hotfix/*` (**chỉ golive**, mỗi lần merge gắn tag `vX.Y.Z`) | PRODUCTION |
+| `develop` | ← mọi nhánh task; nhận merge ngược từ `main` | DEV / **UAT** (test tích hợp các tính năng) |
+| `staging` (tuỳ chọn, `staging_branch`) | ← `develop`, `release/*`, `hotfix/*` | STAGING |
+| `release/vX.Y.Z` | từ `develop` → `main` (tag) + merge ngược về `develop` | STAGING (bản ứng viên, chỉ sửa lỗi) |
+| `hotfix/…` | từ `main` → `main` (tag patch) + merge ngược về `develop` | STAGING rồi PRODUCTION |
+| `feature/` (`feat/`), `bugfix/` (`fix/`), `refactor/ chore/ docs/ test/ ci/ perf/ build/ style/ revert/` | từ `develop` → `develop` | DEV / UAT sau khi merge |
+
+Tên nhánh: `<type>/<TASK-NNN>-<mô-tả-kebab-case>` (chữ thường, `a-z 0-9 -`, ≤ 60 ký tự; release/hotfix có thể là phiên bản `v1.4.0`).
+Lỗi tìm thấy khi test develop/UAT → `bugfix/` (từ develop); lỗi production → `hotfix/` (từ main). `kit-task new --type feature|bugfix|hotfix|…`
+tạo đúng tên và đúng nhánh gốc. CI (`kit-ci guard`) **chặn** tên sai và merge sai hướng (vd `feature/*` → `main`); pre-push hook cảnh báo.
+Release: `kit-release prepare` (cắt `release/vX.Y.Z`, CHANGELOG, bump version) → STAGING + UAT → PR vào `main` → `kit-release tag` → merge
+`main` ngược về `develop`. Trunk-based: `develop_branch: main`.
 
 ## 6. Thiết lập phía GitHub và sử dụng `gh` CLI (bắt buộc để chặn ở server)
 

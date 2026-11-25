@@ -96,7 +96,7 @@ case "${1:-plan}" in
     bump_files "$nv"
     git add -A
     KIT_RELEASE_PREP=1 git commit -q -m "chore(release): ${nv}" || die "commit failed"
-    info "on $br with CHANGELOG + version bump. Next: run checks (kit-run ci), push $br and open a PR to $(main_branch) (release checklist: .agent/checklists/release.md)" ;;
+    info "on $br with CHANGELOG + version bump. Next: run checks (kit-run ci), push $br, deploy it to STAGING for UAT sign-off (only fixes on $br from now on), then open a PR to $(main_branch) (release checklist: .agent/checklists/release.md)" ;;
   tag)
     [ "$(current_branch)" = "$(main_branch)" ] || die "run on $(main_branch) after the release PR is merged"
     v="$(git log -1 --format=%s | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"

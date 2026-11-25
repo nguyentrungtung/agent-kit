@@ -50,11 +50,12 @@ cmd_guard() {
   "$KIT_DIR/scripts/kit-secrets-scan" --all
   if [ "$EVENT" = pr ]; then
     [ -n "$BASE_REF" ] || die "kit-ci: a pull / merge request needs its target branch (KIT_CI_BASE)"
+    local p   # gitflow first: cheap, and the clearest message (rules: .agent/rules/core/git-workflow.md)
+    p="$(branch_name_problem "$HEAD_REF")"; [ -z "$p" ] || { ci_error "branch '$HEAD_REF': $p"; return 1; }
+    p="$(merge_target_problem "$HEAD_REF" "$BASE_REF")"; [ -z "$p" ] || { ci_error "gitflow: $p"; return 1; }
     fetch_base
     if command -v gitleaks >/dev/null 2>&1; then gitleaks detect --no-banner --redact --log-opts="origin/$BASE_REF..HEAD"
     else warn "gitleaks not installed — history scan skipped"; fi
-    printf '%s' "$HEAD_REF" | grep -Eq '^(feature|fix|hotfix|refactor|chore|docs|test|release|revert)/' \
-      || { ci_error "branch '$HEAD_REF' must be <type>/TASK-NNN-slug"; return 1; }
     local types bad=0 s; types="$(cfg commit_types 'feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert|sec')"
     while IFS= read -r s; do
       case "$s" in Merge\ *|Revert\ *) continue ;; esac
@@ -71,7 +72,7 @@ cmd_task_gates() {
   local id ids changed_tasks f base_st t bad=0
   id="$(printf '%s' "$HEAD_REF" | grep -oE 'TASK-[0-9]+' | head -n1 || true)"
   case "$HEAD_REF" in
-    feature/*|fix/*|hotfix/*|refactor/*)
+    feature/*|feat/*|bugfix/*|fix/*|hotfix/*|refactor/*)
       [ -n "$id" ] || { ci_error "code branch '$HEAD_REF' has no TASK-NNN — every code change needs a task (kit-task new / start)"; return 1; } ;;
   esac
   fetch_base

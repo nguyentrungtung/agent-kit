@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # kit-task — task lifecycle with gitflow branches, checkpoints and safe rollback
 #
-#   kit-task new "<title>" [--type feature|fix|hotfix|refactor|chore|docs|test] [--priority P1|P2|P3] [--change <openspec-change>]
+#   kit-task new "<title>" [--type feature|bugfix|hotfix|refactor|chore|docs|test|ci|perf] [--priority P1|P2|P3] [--change <openspec-change>]
+#                                     gitflow: hotfix branches from main, every other type from develop (fix = bugfix, bug = bugfix)
 #   kit-task verify [TASK-ID]         check the workflow gates (source, clarify checklist, solution, tests, result, AC,
 #                                     assumptions, traceability, living docs, change). CI runs it on every task PR.
 #   kit-task start <TASK-ID> [--worktree]  create <type>/<TASK-ID>-<slug> from develop (hotfix: from main), tag base
@@ -82,7 +83,7 @@ sync_done() {
 cmd_new() {
   local title="" type=feature prio=P2 change="" tags="[]"
   while [ $# -gt 0 ]; do case "$1" in
-    --type) type="$2"; shift 2 ;; --priority) prio="$2"; shift 2 ;; --change) change="$2"; shift 2 ;; --tags) tags="$2"; shift 2 ;; *) title="${title:+$title }$1"; shift ;;
+    --type) type="$2"; [ "$type" = bug ] && type=bugfix; shift 2 ;; --priority) prio="$2"; shift 2 ;; --change) change="$2"; shift 2 ;; --tags) tags="$2"; shift 2 ;; *) title="${title:+$title }$1"; shift ;;
   esac; done
   [ -n "$title" ] || die 'usage: kit-task new "<title>" [--type feature] [--priority P2] [--change <openspec-change>] [--tags <tags>]'
   if [ -n "$change" ] && [ ! -d "$(change_dir "$change")" ]; then warn "OpenSpec change '$change' not found under openspec/changes/ (create it: kit-new change $change)"; fi
@@ -328,7 +329,7 @@ cmd_verify() {
   s1="$(section_body "$f" '^## 1\. Understand')"
   [ -n "$s1" ] && gate ok "1 Understand filled" || gate no "1 Understand is empty — restate the problem and link its source (change / UC / US)"
   [ "$tpl" -ge 2 ] && case "$type" in
-    feature|fix|hotfix|refactor)
+    feature|feat|bugfix|fix|hotfix|refactor)
       if [ -n "$change" ] || printf '%s\n' "$s1" | grep -qE '(UC|US|BR|FR)-[0-9]+|[Ss]ource:|openspec/specs/[a-z0-9]'; then gate ok "1 source linked (change / UC / US / BR / spec / Source:)"
       else gate no "1 Understand links no source — set 'change:' in the front matter, cite a UC/US/BR/FR id or an openspec/specs/<capability> link, or add 'Source: <issue / request, who, date>'"; fi ;;
   esac
@@ -374,7 +375,7 @@ $(printf '%s\n' "$tr" | grep -E '^[[:space:]]+[^ ]*E[^ ]*[[:space:]]' | head -n 
   if printf '%s\n' "$ac" | grep -qE '^- \[[xX]\]' && ! printf '%s\n' "$ac" | grep -qE '^- \[ \]'; then gate ok "all acceptance criteria ticked"
   else gate no "acceptance criteria: every item must be ticked [x] (and proven by a test)"; fi
   case "$type" in
-    feature|fix|hotfix|refactor)
+    feature|feat|bugfix|fix|hotfix|refactor)
       qa="$KIT_ROOT/docs/qa/$id.md"
       if [ -f "$qa" ]; then
         gate ok "test plan docs/qa/$id.md exists"
@@ -390,7 +391,7 @@ $(printf '%s\n' "$bad_ref" | sed 's/^/      /' | head -n 10)"
   esac
   # 6 Verify: a code review must have run and been recorded (kit-review writes the line); open BLOCKER/MAJOR block the finish
   case "$type" in
-    feature|fix|hotfix|refactor)
+    feature|feat|bugfix|fix|hotfix|refactor)
       if [ "$tpl" -ge 2 ]; then
         # only lines written by `kit-task review` count (log_progress: "- YYYY-MM-DD HH:MM — Review: …"); newest first
         local rv; rv="$(section_body "$f" '^## Progress log' | grep -E '^- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} — Review: ' | head -n1 || true)"

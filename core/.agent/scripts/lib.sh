@@ -26,7 +26,44 @@ cfg() {
 
 main_branch()    { cfg main_branch main; }
 develop_branch() { cfg develop_branch develop; }
-protected_branches() { printf '%s %s %s\n' "$(main_branch)" "$(develop_branch)" "$(cfg protected_extra 'master release/* hotfix/*')"; }
+staging_branch() { cfg staging_branch ""; }   # optional long-lived pre-production branch; empty = release/* is what staging runs
+protected_branches() { printf '%s %s %s %s\n' "$(main_branch)" "$(develop_branch)" "$(staging_branch)" "$(cfg protected_extra 'master release/* hotfix/*')"; }
+
+# ---- gitflow (community git-flow + Conventional Branch): one definition for hooks, CI and kit-task
+#   main/master  production only — receives release/* and hotfix/* (tagged vX.Y.Z)      → PRODUCTION
+#   develop      integration — every feature/bugfix/… merges here, deployed for UAT      → DEV / UAT
+#   staging      optional; else release/* is the release candidate                      → STAGING
+#   feature/ feat/ bugfix/ fix/ refactor/ chore/ docs/ test/ ci/ perf/ build/ style/ revert/  from develop → develop
+#   release/vX.Y.Z  from develop → main (+ back-merge to develop) · hotfix/…  from main → main (+ back-merge to develop) · support/…  old majors
+branch_types() { cfg branch_types 'feature feat bugfix fix hotfix release support refactor chore docs test ci perf build style revert'; }
+branch_name_problem() { # branch_name_problem <branch> — prints why the name breaks the convention (nothing = fine)
+  local b="$1" t rest max
+  case " $(main_branch) $(develop_branch) $(staging_branch) main master develop " in *" $b "*) return 0 ;; esac
+  t="${b%%/*}"; rest="${b#*/}"
+  if [ "$t" = "$b" ] || [ -z "$rest" ]; then echo "no '<type>/' prefix — use <type>/<TASK-NNN>-<short-description>, type one of: $(branch_types)"; return 0; fi
+  case " $(branch_types) " in *" $t "*) ;; *) echo "type '$t' is not one of: $(branch_types)"; return 0 ;; esac
+  max="$(cfg branch_max_len 60)"
+  if [ "${#b}" -gt "$max" ]; then echo "longer than $max characters"; return 0; fi
+  # the description: lowercase kebab-case, optionally led by an issue key (TASK-001-…, PROJ-12-…); release/hotfix/support may be a version
+  printf '%s' "$rest" | grep -Eq '^([A-Z][A-Z0-9]*-[0-9]+(-[a-z0-9]+)*|v?[0-9]+[.][0-9]+([.][0-9]+)?(-[a-z0-9.]+)?|[a-z0-9]+(-[a-z0-9]+)*)$' \
+    || echo "after '$t/' use lowercase kebab-case (a-z 0-9 -), optionally led by an issue key (TASK-001-…) or, for release/hotfix, a version (v1.4.0)"
+  return 0
+}
+merge_target_problem() { # merge_target_problem <source branch> <target branch> — prints why gitflow forbids that merge (nothing = fine)
+  local h="$1" b="$2" mb db sb
+  mb="$(main_branch)"; db="$(develop_branch)"; sb="$(staging_branch)"
+  [ "$mb" != "$db" ] || return 0   # trunk-based: everything goes to main
+  if [ "$b" = "$mb" ] || [ "$b" = master ]; then
+    case "$h" in release/*|hotfix/*) return 0 ;; esac
+    [ -n "$sb" ] && [ "$h" = "$sb" ] && return 0
+    echo "only release/* or hotfix/*$( [ -n "$sb" ] && echo " (or $sb)") merge into $b (go-live) — open '$h' into $db"; return 0
+  fi
+  if [ -n "$sb" ] && [ "$b" = "$sb" ]; then
+    case "$h" in "$db"|release/*|hotfix/*) return 0 ;; esac
+    echo "only $db, release/* or hotfix/* go to $sb — open '$h' into $db"
+  fi
+  return 0
+}
 
 is_protected() { # is_protected <branch>
   local b="$1" p
