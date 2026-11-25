@@ -413,6 +413,16 @@ A="$WORK/ex-settings"; ad "$A" 'mkdir -p .claude && printf "{\"permissions\":{\"
 jq '.permissions.allow += ["Bash(make mine)"]' "$A/.claude/settings.json" > "$A/s.tmp" && mv "$A/s.tmp" "$A/.claude/settings.json"
 "$KIT" upgrade "$A" --allow-dirty >/dev/null 2>&1 || true
 check "settings.json.bak-kit still holds the original" "jq -e '.permissions.allow == [\"Bash(make ORIGINAL)\"]' \"\$A/.claude/settings.json.bak-kit\" >/dev/null && grep -q 'make mine' \"\$A/.claude/settings.json\""
+"$KIT" upgrade "$A" --allow-dirty >"$A.up2.log" 2>&1 || true
+check "settings already merged: next upgrade writes and says nothing" "! grep -q 'merged hooks/permissions' \"\$A.up2.log\""
+# a file of the user that got a .kit-new at init: once merged (.kit-new deleted), the same kit does not offer it again
+A="$WORK/ex-kitnew"; ad "$A" 'printf "# my own rules\n" > AGENTS.md && printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack node
+check "init: own AGENTS.md kept, kit version in .kit-new" "[ -f \"\$A/AGENTS.md.kit-new\" ] && grep -q 'my own rules' \"\$A/AGENTS.md\""
+rm -f "$A/AGENTS.md.kit-new"; commit_all "$A"; "$KIT" upgrade "$A" >"$A.up.log" 2>&1 || true
+check "merged .kit-new is not offered again by the same kit" "[ ! -e \"\$A/AGENTS.md.kit-new\" ] && grep -q ' AGENTS.md\$' \"\$A/.agent/kit.manifest\""
+sed -i.bak 's/^[0-9a-f]*  AGENTS.md$/0000000000000000000000000000000000000000000000000000000000000000  AGENTS.md/' "$A/.agent/kit.manifest" && rm -f "$A/.agent/kit.manifest.bak"
+commit_all "$A"; "$KIT" upgrade "$A" >"$A.up2.log" 2>&1 || true
+check "…but is offered again when the kit's version changes" "[ -f \"\$A/AGENTS.md.kit-new\" ] && grep -q 'my own rules' \"\$A/AGENTS.md\""
 
 # --- kit-migrate: kit-adopt-scan inventories old agent rules, links into them, secrets in docs, hidden files, own CI checks
 printf '\n== kit-adopt-scan: inventory for kit-migrate (read-only, values never printed)\n'

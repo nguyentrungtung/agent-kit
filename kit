@@ -165,12 +165,19 @@ copy_file() { # copy_file <src> <dest> — never clobbers user edits; on upgrade
     if cmp -s "$s" "$d"; then record "$rel"
     elif [ $UPGRADE -eq 1 ] && mh="$(manifest_hash "$rel")" && [ -n "$mh" ]; then
       if [ "$mh" = "$(sha "$d")" ]; then cp "$s" "$d"; UPDATED=$((UPDATED+1)); record "$rel"   # untouched by the user → refresh
-      else
+      elif [ "$(sha "$s")" = "$mh" ]; then
         KEPT="$KEPT
-$rel"                                                                                          # edited by the user → keep, baseline stays
-        [ "$(sha "$s")" = "$mh" ] || { cp "$s" "$d.kit-new"; CONFLICTS="$CONFLICTS $rel"; }      # .kit-new only if the kit changed it too
+$rel"                                                                                          # edited by the user, kit unchanged → keep
+      else                                           # edited by the user AND changed by the kit → .kit-new to merge; the new kit version
+        cp "$s" "$d.kit-new"; CONFLICTS="$CONFLICTS $rel"   # becomes the baseline, so the next upgrade offers it again only if the kit changes again
+        BASELINES="$BASELINES
+$(sha "$s")  $rel"
       fi
-    else cp "$s" "$d.kit-new"; CONFLICTS="$CONFLICTS $rel"; fi
+    else   # the user's own file (init) or no manifest yet: .kit-new to merge, and remember which kit version was offered
+      cp "$s" "$d.kit-new"; CONFLICTS="$CONFLICTS $rel"
+      BASELINES="$BASELINES
+$(sha "$s")  $rel"
+    fi
   elif [ $UPGRADE -eq 1 ] && mh="$(manifest_hash "$rel")" && [ -n "$mh" ]; then
     BASELINES="$BASELINES
 $mh  $rel"   # installed before and deleted by the user (or skipped on purpose): respect it — and remember it for the next upgrade
@@ -253,7 +260,6 @@ merge_settings() {
   fi
   if [ -f "$theirs" ] && [ $FORCE -eq 0 ] && command -v jq >/dev/null 2>&1; then
     cmp -s "$ours" "$theirs" && { record .claude/settings.json; return 0; }
-    [ -e "$theirs.bak-kit" ] || cp "$theirs" "$theirs.bak-kit"   # the first backup is the user's original — never overwrite it
     jq -s '
       def uniq_cat(a;b): ((a // []) + (b // [])) | unique;
       .[0] as $t | .[1] as $o |
@@ -263,8 +269,14 @@ merge_settings() {
                        deny:  uniq_cat($t.permissions.deny;  $o.permissions.deny) },
         hooks: ( ($t.hooks // {}) as $th | ($o.hooks // {}) as $oh
                  | reduce (($th + $oh) | keys[]) as $k ({}; .[$k] = (($th[$k] // []) + ($oh[$k] // []) | unique)) )
-      }' "$theirs" "$ours" > "$theirs.tmp" && mv "$theirs.tmp" "$theirs"
-    say "merged hooks/permissions into existing .claude/settings.json (backup: settings.json.bak-kit)"
+      }' "$theirs" "$ours" > "$theirs.tmp"
+    if jq -e --slurpfile a "$theirs" --slurpfile b "$theirs.tmp" -n '$a[0] == $b[0]' >/dev/null 2>&1; then
+      rm -f "$theirs.tmp"   # already contains every kit hook and permission: nothing to write, nothing to say
+    else
+      [ -e "$theirs.bak-kit" ] || cp "$theirs" "$theirs.bak-kit"   # the first backup is the user's original — never overwrite it
+      mv "$theirs.tmp" "$theirs"
+      say "merged hooks/permissions into existing .claude/settings.json (backup: settings.json.bak-kit)"
+    fi
   else
     copy_file "$ours" "$theirs"
   fi
