@@ -18,6 +18,8 @@ required **freshness** (e.g. by 07:00 ICT), history depth/backfill window, volum
 ## 2. Architecture (ADR) → `docs/data/DATA-ARCHITECTURE.md`
 - **Batch vs streaming**: batch (hourly/daily ELT) unless a consumer needs < minutes latency; streaming (Kafka/Debezium CDC + stream processing) only with a real-time use case and ops maturity.
 - **Storage**: warehouse (Postgres/BigQuery/Snowflake/ClickHouse) vs lakehouse (Iceberg/Delta on object storage + Spark/Trino). Simplest that fits volume and cost.
+  Lakehouse → answer the per-source questions of `.agent/rules/data/lakehouse.md` §1 (full list or changes, measured volume → rebuild or MERGE,
+  bronze typing, schema baseline, immutable key, history) in the ADR, and plan maintenance (snapshot expiry, orphan files) from day one.
 - **Layers**: raw/bronze (as ingested, immutable) → staging/silver (cleaned, typed, 1:1) → marts/gold (business-ready, contracted). In dbt: `stg_` → `int_` → `fct_`/`dim_`.
 - **Ingestion**: managed connector / Airbyte / Debezium / custom jobs; schema-drift policy; late/duplicate data handling.
 - **Orchestration**: Airflow (or Dagster) DAGs by domain; dbt run via selectors; SLAs and alerting.
