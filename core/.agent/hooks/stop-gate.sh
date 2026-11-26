@@ -7,23 +7,23 @@
 source "$(dirname "$0")/_hooklib.sh"
 cd "$PROJECT_DIR" 2>/dev/null || exit 0
 
+state=".agent/local/stop-gate.state"   # "<fingerprint>@<HEAD> <count>"
 [ "$(json_get stop_hook_active)" = "true" ] && exit 0
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-printf '%s' "$branch" | grep -qE 'TASK-[0-9]+' || exit 0
+printf '%s' "$branch" | grep -qE 'TASK-[0-9]+' || { rm -f "$state"; exit 0; }
 
 # only code changes count (docs, task/memory/context notes are free)
 changed="$(git status --porcelain 2>/dev/null | cut -c4- | sed 's/.* -> //' \
   | grep -vE '^(docs/|\.agent/(tasks|memory|context|local)/)|\.md$' || true)"
-[ -n "$changed" ] || exit 0
+[ -n "$changed" ] || { rm -f "$state"; exit 0; }
 
 steps="$(cfg_hook stop_checks)"; steps="${steps:-format_check lint}"
 [ "$steps" = none ] && exit 0
 
-state=".agent/local/stop-gate.state"
 out="$(.agent/scripts/kit-run $steps 2>&1)" && { rm -f "$state"; exit 0; }
 
 # the same failure turn after turn = patching in circles. Fingerprint the failing lines without numbers (line/col/timings change).
-fp="$(printf '%s\n' "$out" | grep -vE '^\[(run |skip)\]' | tr -d '0-9' | sort -u | cksum | cut -d' ' -f1)"
+fp="$(printf '%s\n' "$out" | grep -vE '^\[(run |skip)\]' | tr -d '0-9' | sort -u | cksum | cut -d' ' -f1)@$(git rev-parse -q HEAD 2>/dev/null)"
 max="$(cfg_hook stop_repeat_max)"; max="${max:-3}"
 n=1; prev="$(cat "$state" 2>/dev/null || true)"
 [ "${prev%% *}" = "$fp" ] && n=$(( ${prev##* } + 1 ))

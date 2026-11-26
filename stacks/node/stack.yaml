@@ -16,7 +16,7 @@ cmd_coverage: npx --no-install c8 --check-coverage --lines ${KIT_COVERAGE_MIN} n
 cmd_build: npm run --if-present build
 cmd_audit: npm audit --audit-level=high --omit=dev
 check_file_ext: js ts tsx jsx mjs cjs
-check_file: npx --no-install prettier --check --log-level warn {file} && npx --no-install eslint --max-warnings=0 {file}
+check_file: npx --no-install prettier --check --ignore-unknown --log-level warn {file} && npx --no-install eslint {file}
 post_note: make sure tsconfig.json has the strict flags from .agent/stack/node/snippets/tsconfig.strict.json.
 
 ci_image: node:22

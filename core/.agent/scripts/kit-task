@@ -84,11 +84,12 @@ cmd_new() {
   local title="" type=feature prio=P2 change="" tags="[]"
   while [ $# -gt 0 ]; do case "$1" in
     --type) type="$2"; [ "$type" = bug ] && type=bugfix; shift 2 ;; --priority) prio="$2"; shift 2 ;; --change) change="$2"; shift 2 ;; --tags) tags="$2"; shift 2 ;;
+    --) shift; title="${title:+$title }$*"; break ;;
     -h|--help) title=""; break ;;
     -*) die "kit-task new: unknown option '$1' (titles cannot start with '-')" ;;
     *) title="${title:+$title }$1"; shift ;;
   esac; done
-  [ -n "$title" ] || die 'usage: kit-task new "<title>" [--type feature] [--priority P2] [--change <openspec-change>] [--tags <tags>]'
+  [ -n "$title" ] || die 'usage: kit-task new "<title>" [--type feature] [--priority P2] [--change <openspec-change>] [--tags <tags>]   (title starting with "-": put -- before it)'
   if [ -n "$change" ] && [ ! -d "$(change_dir "$change")" ]; then warn "OpenSpec change '$change' not found under openspec/changes/ (create it: kit-new change $change)"; fi
   local last n id f
   last="$(task_names_all | xargs -n1 basename 2>/dev/null | grep -oE '^TASK-[0-9]+' | sed 's/TASK-//' | sort -n | tail -n1 || true)"
@@ -590,7 +591,7 @@ cmd_pull() {
   labels="$(printf '%s' "$json" | jq -r '.labels[]?' | tr '\n' ' ')"
   case " $labels " in *" bug "*|*"type:bugfix"*) type=bugfix ;; *"type:fix"*) type=fix ;; *"type:hotfix"*) type=hotfix ;; *"type:chore"*) type=chore ;; *"type:docs"*) type=docs ;; *"type:refactor"*) type=refactor ;; esac
   case " $labels " in *"priority:P1"*) prio=P1 ;; *"priority:P3"*) prio=P3 ;; esac
-  id="$(cmd_new "$title" --type "$type" --priority "$prio" | tail -n1)"
+  id="$(cmd_new --type "$type" --priority "$prio" -- "$title" | tail -n1)"
   f="$(task_file "$id")"; fm_set "$f" issue "$n"; issue_set "$id" "$n"
   # the issue text goes under "## 1. Understand" (template 2; "## Context" in older task files) with a Source: line kit-trace/verify accept;
   # passed through the environment — awk -v would process backslash escapes in the text

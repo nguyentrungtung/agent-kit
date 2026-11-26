@@ -182,5 +182,5 @@ tasks_of_change() { # tasks_of_change <change> → repo-relative task paths link
 ascii_slug() {
   perl -CSA -MUnicode::Normalize -e '
     my $s = NFD($ARGV[0]); $s =~ s/\pM//g; $s =~ tr/\x{111}\x{110}/dD/; $s = lc $s;
-    $s =~ s/[^a-z0-9]+/-/g; $s =~ s/^-+|-+$//g; print $s' "$1" | cut -c1-"${2:-50}" | sed -E 's/-+$//'
+    $s =~ s/[^a-z0-9]+/-/g; $s =~ s/^-+|-+$//g; print $s' -- "$1" | cut -c1-"${2:-50}" | sed -E 's/-+$//'
 }

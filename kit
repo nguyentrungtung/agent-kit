@@ -461,13 +461,26 @@ comp_raw() { # comp_raw <idx> <key>
   esac
   printf '%s' "$v"
 }
-check_file_lines() { # "check_file_<ext>: <cmd>" per extension of every stack (first component of a stack wins); <cmd> runs in the
-  # file's component directory with {file} = the path relative to it (Claude Code PostToolUse hook, .agent/hooks/post-edit.sh)
-  local i e v seen=""
+check_file_value() { # check_file_value <idx> — the per-file check of one component; in an existing repo EVERY chained tool must be used
+  local v seg; v="$(comp_raw "$1" check_file)"
+  if [ $EXISTING -eq 1 ] && [ -n "$v" ]; then
+    while IFS= read -r seg; do [ -z "$(gate_missing "$seg")" ] || { v=""; break; }; done < <(printf '%s\n' "$v" | awk '{ gsub(/ && /, "\n"); print }')
+  fi
+  printf '%s' "$v"
+}
+check_file_lines() { # "check_file_<ext>: <cmd>" per extension; <cmd> runs in the file's component with {file} = the path relative to it
+  # (Claude Code PostToolUse hook, .agent/hooks/post-edit.sh). Components of one stack that need different commands (uv vs pip, pnpm vs
+  # npm, a tool one of them lacks) get their own key check_file_<ext>__<path> and the shared key stays empty.
+  local i j e seen="" first same idx
   for i in "${!C_PATH[@]}"; do
     for e in $(yget "$(stack_yaml "${C_STACK[$i]}")" check_file_ext); do
       case " $seen " in *" $e "*) continue ;; esac; seen="$seen $e"
-      v="$(comp_value "$i" check_file)"; kv_line "check_file_$e" "$v"
+      idx=(); for j in "${!C_PATH[@]}"; do case " $(yget "$(stack_yaml "${C_STACK[$j]}")" check_file_ext) " in *" $e "*) idx+=("$j") ;; esac; done
+      first="$(check_file_value "${idx[0]}")"; same=1
+      for j in "${idx[@]}"; do [ "$(check_file_value "$j")" = "$first" ] || same=0; done
+      if [ $same -eq 1 ]; then kv_line "check_file_$e" "$first"; continue; fi
+      kv_line "check_file_$e" ""
+      for j in "${idx[@]}"; do kv_line "check_file_${e}__$(printf '%s' "${C_PATH[$j]}" | tr -c 'A-Za-z0-9' '_')" "$(check_file_value "$j")"; done
     done
   done
 }
