@@ -783,16 +783,16 @@ check "PostToolUse: passing file, kit files, missing tool, no key → silent" "[
 check "PostToolUse: a path with spaces is quoted" "mkdir -p \"\$H/api/sub dir\" && echo GOOD > \"\$H/api/sub dir/o k.py\" && [ -z \"\$(pe \"\$H/api/sub dir/o k.py\")\" ]"
 
 # review findings: a hanging chain is killed as a whole, wrapper "not installed" is not a finding, & in a name, per-component keys
-printf 'components: api=python web=node\ncheck_file_timeout: 1\ncheck_file_py: sleep 8 && echo late\ncheck_file_js: echo "npm error npx canceled due to missing packages"; exit 1\ncheck_file_ts: test -f {file} && ! grep -q BAD {file} || { echo "shared rule {file}"; exit 1; }\ncheck_file_ts__web: grep -q WEB {file} || { echo "web rule {file}"; exit 1; }\ncheck_file_ts__api:\ncheck_file_ts__root: echo "root rule {file}"; exit 1\ncheck_file_js__web: off\ncheck_file_mjs: echo "Error [ERR_MODULE_NOT_FOUND]: Cannot find module ./rules"; exit 1\ncheck_file_cjs: echo " ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command \\"eslint\\" not found"; exit 1\n' > "$H/.agent/project.yaml"
+printf 'components: api=python web=node\ncheck_file_timeout: 1\ncheck_file_py: sleep 8 && echo late\ncheck_file_js: for i in 1 2 3 4 5 6 7; do echo "npm warn Unknown project config key$i"; done; echo "npm error npx canceled due to missing packages"; exit 1\ncheck_file_ts: test -f {file} && ! grep -q BAD {file} || { echo "shared rule {file}"; exit 1; }\ncheck_file_mjs: echo "Error [ERR_MODULE_NOT_FOUND]: Cannot find module ./rules"; exit 1\ncheck_file_cjs: echo " ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command \\"eslint\\" not found"; exit 1\ncheck_file_go: nogofmt-xyz -l {file} >/dev/null || { nogofmt-xyz -d {file}; exit 1; }\ncheck_file_jsx: printf "\\n/p/x.jsx\\n  0:0  warning  File ignored because of a matching ignore pattern\\n\\n✖ 1 problem (0 errors, 1 warning)\\n\\nESLint found too many warnings (maximum: 0).\\n"; exit 1\ncheck_file_tsx: printf "\\n/p/y.tsx\\n  0:0  warning  File ignored because of a matching ignore pattern\\n  3:7  error  x is unused  no-unused-vars\\n"; exit 1\n' > "$H/.agent/project.yaml"
 mkdir -p "$H/web"; echo x > "$H/web/a.js"; echo x > "$H/web/b.ts"; echo x > "$H/api/c.ts"; echo x > "$H/api/a&b.ts"
 t0=$SECONDS; o="$(pe "$H/api/good.py")"; dt=$((SECONDS - t0))
 check "PostToolUse: timeout kills the whole chain (returns in seconds, silent)" "[ -z \"\$o\" ] && [ \$dt -le 4 ]"
 echo x > "$H/api/a.js"; echo x > "$H/web/m.mjs"; echo x > "$H/web/c.cjs"; echo x > "$H/root.ts"
 check "PostToolUse: a tool missing behind npx / pnpm is not reported as a lint error" "[ -z \"\$(pe \"\$H/api/a.js\")\" ] && [ -z \"\$(pe \"\$H/web/c.cjs\")\" ]"
 check "PostToolUse: a real error that mentions a missing module IS reported" "pe \"\$H/web/m.mjs\" | grep -q 'Cannot find module'"
-check "PostToolUse: component key 'off' turns it off there; empty component key falls back to the shared one" "[ -z \"\$(pe \"\$H/web/a.js\")\" ] && echo BAD > \"\$H/api/e.ts\" && pe \"\$H/api/e.ts\" | grep -q 'shared rule e.ts'"
-check "PostToolUse: files at the repo root use check_file_<ext>__root" "pe \"\$H/root.ts\" | grep -q 'root rule root.ts'"
-check "PostToolUse: a component's own key wins (web), the shared key elsewhere (api)" "pe \"\$H/web/b.ts\" | grep -q 'web rule b.ts' && [ -z \"\$(pe \"\$H/api/c.ts\")\" ]"
+echo x > "$H/api/g.go"; echo x > "$H/web/i.jsx"; echo x > "$H/web/j.tsx"
+check "PostToolUse: a tool missing in a chain (bash: command not found) is not a finding" "[ -z \"\$(pe \"\$H/api/g.go\")\" ]"
+check "PostToolUse: ESLint's ignored-file warning alone is skipped; with a real error it is reported" "[ -z \"\$(pe \"\$H/web/i.jsx\")\" ] && pe \"\$H/web/j.tsx\" | grep -q 'x is unused'"
 check "PostToolUse: '&' in a file name stays part of the name" "[ -z \"\$(pe \"\$H/api/a&b.ts\")\" ]"
 
 # the stacks' own check_file commands, with stub tools on PATH
@@ -800,10 +800,6 @@ F="$WORK/il-stubs"; fresh "$F"; mkdir -p "$F/bin" "$F/p"
 cat > "$F/bin/gofmt" <<'EOS'
 #!/bin/sh
 for a; do f=$a; done; grep -q SYNTAXERR "$f" && { echo "$f:1:1: expected '}'" >&2; exit 2; }; exit 0
-EOS
-cat > "$F/bin/rustfmt" <<'EOS'
-#!/bin/sh
-echo "$@" > "$STUB_LOG"; exit 0
 EOS
 cat > "$F/bin/ruff" <<'EOS'
 #!/bin/sh
@@ -814,8 +810,6 @@ sv() { sed -n "s/^check_file: //p" "$ROOT/stacks/$1/stack.yaml"; }
 runc() { (cd "$F/p" && PATH="$F/bin:$PATH" STUB_LOG="$F/log" bash -c "${1//\{file\}/$2}") >/dev/null 2>&1; }
 echo 'package main SYNTAXERR' > "$F/p/m.go"
 check "go: a file that does not parse fails the check" "! runc \"\$(sv go)\" m.go"
-printf '[package]\nname = "x"\nedition = "2024"\n' > "$F/p/Cargo.toml"; echo 'fn main(){}' > "$F/p/l.rs"
-check "rust: the edition comes from Cargo.toml" "runc \"\$(sv rust)\" l.rs && grep -q -- '--edition 2024' \"\$F/log\""
 echo 'x=1' > "$F/p/excluded.py"; : > "$F/log"
 check "python: files the project excludes stay excluded" "runc \"\$(sv python)\" excluded.py"
 check "node: unknown file types and warnings handled by flags" "sv node | grep -q -- '--ignore-unknown' && sv node | grep -q -- '--max-warnings=0'"
@@ -838,7 +832,7 @@ check "Stop gate: nothing left to check clears the count" "! printf '%s' \"\$o6\
 # kit init: components of one stack that need different commands get their own keys; an existing repo keeps only tools it uses
 A="$WORK/il-two"; fresh "$A"; (cd "$A" && git init -q -b main && mkdir -p api worker && printf '[project]\nname="a"\n' > api/pyproject.toml && : > api/uv.lock && printf 'x\n' > worker/requirements.txt)
 "$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules none --stack python:api,python:worker --mode new >"$A.log" 2>&1
-check "two python components (uv / pip): one key each, shared key empty" "grep -qx 'check_file_py:' \"\$A/.agent/project.yaml\" && pv \"\$A\" check_file_py__api | grep -q '^uv run ruff' && pv \"\$A\" check_file_py__worker | grep -q '^ruff format'"
+check "two python components (uv / pip): key left empty with a note, no per-component keys" "grep -qx 'check_file_py:' \"\$A/.agent/project.yaml\" && ! grep -q '^check_file_py__' \"\$A/.agent/project.yaml\" && grep -q 'check_file_py left empty' \"\$A.log\""
 A="$WORK/il-biome"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\",\"devDependencies\":{\"prettier\":\"3\",\"@biomejs/biome\":\"1\"}}\n" > package.json && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack node
 check "existing repo with prettier but no eslint: no per-file check that would call eslint" "! grep -E '^check_file_ts:' \"\$A/.agent/project.yaml\" | grep -q eslint"
 

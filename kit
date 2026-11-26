@@ -309,7 +309,7 @@ slug() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/
 
 # ---- adopting a repo that already has code (EXISTING=1): the repo is the reference, not the kit's defaults
 EXISTING=0; REPO_SNAP=""
-CORE_TOOLS=" uv pip pip3 npm pnpm yarn bun npx dbt mvn mvnw gradle gradlew go gofmt cargo rustfmt dotnet composer php bundle make node python python3 bash sh test java kit-diagrams "
+CORE_TOOLS=" uv pip pip3 npm pnpm yarn bun npx dbt mvn mvnw gradle gradlew go gofmt cargo dotnet composer php bundle make node python python3 bash sh test java kit-diagrams "
 repo_snapshot() { # what the repo uses today, taken BEFORE the kit writes anything: file names + dependency / CI / hook files
   REPO_SNAP="$(mktemp)"
   local f man="$TARGET/.agent/kit.manifest"
@@ -342,8 +342,8 @@ seg_tool() { # seg_tool "<command>" — the program a command really runs (wrapp
         while [ -n "${1:-}" ] && [ "${1#-}" != "$1" ]; do case "$1" in --project|--directory|--with|--group|--extra|--python) shift 2 ;; *) shift ;; esac; done; fi ;;
     npx) shift; while [ -n "${1:-}" ] && [ "${1#-}" != "$1" ]; do shift; done ;;
     pnpm) [ "${2:-}" = exec ] && shift 2 ;;
-    bunx) shift ;;
-    yarn) case "${2:-}" in exec|dlx) shift 2 ;; prettier|eslint|tsc|vitest|jest|biome|depcruise|stylelint) shift ;; esac ;;   # yarn <bin>; yarn's own commands stay yarn
+    bunx) shift; while [ -n "${1:-}" ] && [ "${1#-}" != "$1" ]; do shift; done ;;
+    yarn) case "${2:-}" in exec|dlx) shift 2 ;; prettier|eslint|tsc|vitest|jest|c8|biome|depcruise|stylelint) shift ;; esac ;;   # yarn <bin>; yarn's own commands stay yarn
     python|python3) [ "${2:-}" = -m ] && shift 2 ;;
   esac
   t="${1:-}"; t="${t##*/}"; t="${t%%@*}"; printf '%s' "$t"
@@ -472,7 +472,7 @@ check_file_value() { # check_file_value <idx> — the per-file check of one comp
 }
 check_file_lines() { # "check_file_<ext>: <cmd>" per extension; <cmd> runs in the file's component with {file} = the path relative to it
   # (Claude Code PostToolUse hook, .agent/hooks/post-edit.sh). Components of one stack that need different commands (uv vs pip, pnpm vs
-  # npm, a tool one of them lacks) get their own key check_file_<ext>__<path> and the shared key stays empty.
+  # npm, a tool one of them lacks): the key stays empty and a note asks the user for a command that works in each.
   local i j e seen="" first same idx
   for i in "${!C_PATH[@]}"; do
     for e in $(yget "$(stack_yaml "${C_STACK[$i]}")" check_file_ext); do
@@ -482,10 +482,8 @@ check_file_lines() { # "check_file_<ext>: <cmd>" per extension; <cmd> runs in th
       for j in "${idx[@]}"; do [ "$(check_file_value "$j")" = "$first" ] || same=0; done
       if [ $same -eq 1 ]; then kv_line "check_file_$e" "$first"; continue; fi
       kv_line "check_file_$e" ""
-      for j in "${idx[@]}"; do
-        if [ "${C_PATH[$j]}" = . ]; then kv_line "check_file_${e}__root" "$(check_file_value "$j")"
-        else kv_line "check_file_${e}__$(printf '%s' "${C_PATH[$j]}" | tr -c 'A-Za-z0-9' '_')" "$(check_file_value "$j")"; fi
-      done
+      NOTES="$NOTES
+   - check_file_$e left empty: components of one stack need different commands (uv/pip, pnpm/npm, a tool one lacks) — set one that works in each"
     done
   done
 }

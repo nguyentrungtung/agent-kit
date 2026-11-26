@@ -14,8 +14,8 @@ cmd_test: cargo test --all-features
 cmd_coverage: cargo llvm-cov --all-features --fail-under-lines ${KIT_COVERAGE_MIN}
 cmd_build: cargo build --release
 cmd_audit: cargo deny check
-check_file_ext: rs
-check_file: rustfmt --check --edition "$(sed -n 's/^edition *= *"\([0-9]*\)".*/\1/p' Cargo.toml 2>/dev/null | head -n1 | grep . || echo 2015)" {file}
+check_file_ext:
+check_file:
 post_note: merge .agent/stack/rust/snippets/Cargo-lints.toml into Cargo.toml; install cargo-deny: cargo install cargo-deny --locked
 
 ci_image: rust:1
