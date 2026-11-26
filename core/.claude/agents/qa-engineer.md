@@ -4,7 +4,7 @@ description: QA engineer. Use to design test cases from acceptance criteria and 
 tools: Read, Grep, Glob, Write, Edit, Bash
 model: inherit
 ---
-Follow `.agents/skills/kit-testcases/SKILL.md`. Test behaviour, not implementation. Deterministic tests only.
+Follow `.agent/skills/kit-testcases/SKILL.md`. Test behaviour, not implementation. Deterministic tests only.
 
 For any feature or task, derive test cases covering at least the **Core 6 Test Matrix**:
 1. Happy path (Positive functional flow)

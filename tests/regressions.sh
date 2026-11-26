@@ -278,9 +278,9 @@ check "kit-hook rejects an unknown hook name"       "[ $rc -eq 2 ]"
 H="$WORK/hk-lefthook"; PRE='printf "pre-commit:\n  commands: {}\n" > lefthook.yml' hk "$H"
 check "lefthook found → hooksPath unset, howto shown" "[ -z \"\$(hp \"\$H\")\" ] && grep -q 'lefthook.yml' \"\$H.log\" && grep -q 'kit-hook pre-push' \"\$H.log\""
 H="$WORK/hk-husky-kit"; PRE='mkdir -p .husky' hk "$H" --hooks kit
-check "--hooks kit overrides (with a warning)"      "[ \"\$(hp \"\$H\")\" = .githooks ] && grep -q 'stop running' \"\$H.log\""
+check "--hooks kit overrides (with a warning)"      "[ \"\$(hp \"\$H\")\" = .agent/githooks ] && grep -q 'stop running' \"\$H.log\""
 H="$WORK/hk-plain"; hk "$H"
-check "no manager → kit owns hooks as before"       "[ \"\$(hp \"\$H\")\" = .githooks ]"
+check "no manager → kit owns hooks as before"       "[ \"\$(hp \"\$H\")\" = .agent/githooks ]"
 H="$WORK/hk-keep"; hk "$H" --hooks keep
 check "--hooks keep on a plain repo prints the lines" "[ -z \"\$(hp \"\$H\")\" ] && grep -q 'kit-hook commit-msg' \"\$H.log\""
 rc=0; "$KIT" init "$WORK/hk-bad" --hooks nonsense >/dev/null 2>&1 || rc=$?
@@ -457,7 +457,7 @@ check "§8 CI check no cmd_* covers"                  "sec 8 | grep -q 'tools/ch
 check "§8 never prints the CI command (tokens)"       "! printf '%s\n' \"\$scan\" | grep -q 'glpat-SeCrEt'"
 check "report saved in .agent/local (ignored)"       "[ -f \"\$A/.agent/local/adopt-scan.md\" ] && git -C \"\$A\" check-ignore -q .agent/local/adopt-scan.md"
 check "read-only: git status unchanged"              "[ \"\$(git -C \"\$A\" status --porcelain | sort)\" = \"\$before\" ]"
-check "kit-migrate skill installed for every harness" "[ -f \"\$A/.agents/skills/kit-migrate/SKILL.md\" ] && [ -L \"\$A/.claude/skills/kit-migrate\" ] && grep -q '\`kit-migrate\`' \"\$A/AGENTS.md.kit-new\""
+check "kit-migrate skill installed for every harness" "[ -f \"\$A/.agent/skills/kit-migrate/SKILL.md\" ] && [ -L \"\$A/.claude/skills/kit-migrate\" ] && grep -q '\`kit-migrate\`' \"\$A/AGENTS.md.kit-new\""
 out="$(cd "$A" && .agent/scripts/kit-doctor 2>&1 || true)"
 check "doctor points at kit-migrate"                 "printf '%s\n' \"\$out\" | grep -q 'old agent rules next to the kit.s: agent/ AGENTS.md.kit-new — run the kit-migrate'"
 check "init next steps name kit-migrate"             "grep -q 'run kit-migrate, then kit-onboard' \"\$A.log\""
@@ -507,7 +507,7 @@ check "edited cmd_* kept"                             "grep -q '^cmd_lint: my-ow
 printf '\n== kit-dq: data checks correct / complete / fresh / clean, read-only, counts only\n'
 if command -v sqlite3 >/dev/null 2>&1; then
   A="$WORK/dq"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node --modules data
-  check "data module: kit-da skill, kit-dq, templates, cmd_sql key" "[ -x \"\$A/.agent/scripts/kit-dq\" ] && [ -f \"\$A/.agents/skills/kit-da/SKILL.md\" ] && [ -f \"\$A/.agent/templates/dq/fresh.sql\" ] && grep -q '^cmd_sql:' \"\$A/.agent/project.yaml\" && grep -q '^dq_dir: dq' \"\$A/.agent/project.yaml\""
+  check "data module: kit-da skill, kit-dq, templates, cmd_sql key" "[ -x \"\$A/.agent/scripts/kit-dq\" ] && [ -f \"\$A/.agent/skills/kit-da/SKILL.md\" ] && [ -f \"\$A/.agent/templates/dq/fresh.sql\" ] && grep -q '^cmd_sql:' \"\$A/.agent/project.yaml\" && grep -q '^dq_dir: dq' \"\$A/.agent/project.yaml\""
   rc=0; out="$(cd "$A" && .agent/scripts/kit-dq run 2>&1)" || rc=$?
   check "no cmd_sql → clear error"                    "[ $rc -ne 0 ] && printf '%s' \"\$out\" | grep -q 'cmd_sql is empty'"
   sqlite3 "$A/dq.sqlite" "CREATE TABLE hs(ma TEXT, ten TEXT, so INT); INSERT INTO hs VALUES ('A1','NGUYEN SECRET',5),('A1','x',3),('B2','y',-1);"
@@ -534,8 +534,8 @@ else printf '  skip kit-dq (sqlite3 not installed)\n'; fi
 # ---------------------------------------------------------------- kit-catalog + kit-doc-coverage (module data)
 printf '\n== kit-catalog / kit-doc-coverage: which data to use, and how much of it is documented\n'
 A="$WORK/catalog"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json' --stack node --modules data
-check "lakehouse decisions + failure modes shipped"   "[ -f \"\$A/.agent/rules/data/lakehouse.md\" ] && grep -q 'lakehouse.md' \"\$A/.agents/skills/kit-data/SKILL.md\""
-check "catalog templates + kit-catalog skill installed" "for f in README entities metrics rules; do [ -f \"\$A/docs/data/catalog/\$f.md\" ] || exit 1; done && [ -L \"\$A/.claude/skills/kit-catalog\" ] && grep -q 'docs/data/catalog' \"\$A/.agents/skills/kit-da/SKILL.md\""
+check "lakehouse decisions + failure modes shipped"   "[ -f \"\$A/.agent/rules/data/lakehouse.md\" ] && grep -q 'lakehouse.md' \"\$A/.agent/skills/kit-data/SKILL.md\""
+check "catalog templates + kit-catalog skill installed" "for f in README entities metrics rules; do [ -f \"\$A/docs/data/catalog/\$f.md\" ] || exit 1; done && [ -L \"\$A/.claude/skills/kit-catalog\" ] && grep -q 'docs/data/catalog' \"\$A/.agent/skills/kit-da/SKILL.md\""
 mkdir -p "$A/transform/target"; printf 'name: "lake"\nprofile: lake\n' > "$A/transform/dbt_project.yml"
 cat > "$A/transform/target/manifest.json" <<'JSON'
 {"nodes": {
@@ -748,7 +748,7 @@ printf '\n== safe deploys: data checklist installed and linked, runbook asks for
 A="$WORK/dd-data"; fresh "$A"; (cd "$A" && git init -q -b main)
 "$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules data,devops --stack python >"$A.log" 2>&1
 check "module data installs the data-deploy checklist" "[ -s \"\$A/.agent/checklists/data-deploy.md\" ]"
-check "release.md and kit-data point to it"           "grep -q 'checklists/data-deploy.md' \"\$A/.agent/checklists/release.md\" && grep -q 'checklists/data-deploy.md' \"\$A/.agents/skills/kit-data/SKILL.md\""
+check "release.md and kit-data point to it"           "grep -q 'checklists/data-deploy.md' \"\$A/.agent/checklists/release.md\" && grep -q 'checklists/data-deploy.md' \"\$A/.agent/skills/kit-data/SKILL.md\""
 (cd "$A" && .agent/scripts/kit-new runbook "Deploy gold" >/dev/null)
 rb="$A/docs/platform/runbooks/deploy-gold.md"
 check "new runbook has prerequisites and stop criteria before the steps" "[ \"\$(grep -E '^## (Prerequisites and access|Stop and roll back when|Diagnose)\$' \"\$rb\" | tr '\n' '|')\" = '## Prerequisites and access|## Stop and roll back when|## Diagnose|' ]"
@@ -859,6 +859,43 @@ check "kit-doctor and the Stop gate fallback know test_fast" "grep -q 'arch test
 check "kit-task new rejects an unknown option" "printf '%s' \"\$(cd \"\$A\" && .agent/scripts/kit-task new --typo x 2>&1 || true)\" | grep -q \"unknown option '--typo'\""
 check "a tracker title starting with '-' still makes a task (kit-task pull passes it after --)" "(cd \"\$A\" && .agent/scripts/kit-task new -- '--force flag is ignored' >/dev/null 2>&1) && ls \"\$A/.agent/tasks\" | grep -q 'force-flag-is-ignored'"
 check "reviewers use the session's model" "grep -qx 'model: inherit' \"\$A/.claude/agents/code-reviewer.md\""
+
+# ---------------------------------------------------------------- clean root migration (0.17): .githooks, .agents/skills, CLAUDE.md, GLOSSARY.md, configs into .agent/
+printf '\n== clean root layout: kit upgrade relocates old root directories to .agent/ and .claude/\n'
+A="$WORK/up-root"; fresh "$A"; (cd "$A" && git init -q -b main)
+"$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules data,api,devops --stack node >"$A.log" 2>&1
+# Simulate pre-0.17 install layout:
+mkdir -p "$A/.githooks" "$A/.agents"
+mv "$A/.agent/githooks"/* "$A/.githooks/" && rmdir "$A/.agent/githooks"
+git -C "$A" config core.hooksPath .githooks
+mv "$A/.agent/skills" "$A/.agents/skills"
+mv "$A/.claude/CLAUDE.md" "$A/CLAUDE.md"
+mv "$A/docs/GLOSSARY.md" "$A/GLOSSARY.md"
+[ -f "$A/.agent/config/jscpd.json" ] && mv "$A/.agent/config/jscpd.json" "$A/.jscpd.json"
+[ -f "$A/.agent/config/hadolint.yaml" ] && mv "$A/.agent/config/hadolint.yaml" "$A/.hadolint.yaml"
+[ -f "$A/.agent/config/spectral.yaml" ] && mv "$A/.agent/config/spectral.yaml" "$A/.spectral.yaml"
+# Revert manifest to old paths
+sed -i.bak \
+  -e 's# \.agent/githooks/# \.githooks/#g' \
+  -e 's# \.agent/skills/# \.agents/skills/#g' \
+  -e 's# \.claude/CLAUDE\.md$# CLAUDE\.md#g' \
+  -e 's# docs/GLOSSARY\.md$# GLOSSARY\.md#g' \
+  -e 's# \.agent/config/jscpd\.json$# \.jscpd\.json#g' \
+  -e 's# \.agent/config/hadolint\.yaml$# \.hadolint\.yaml#g' \
+  -e 's# \.agent/config/spectral\.yaml$# \.spectral\.yaml#g' \
+  "$A/.agent/kit.manifest" && rm -f "$A/.agent/kit.manifest.bak"
+commit_all "$A"
+
+# Now run kit upgrade:
+"$KIT" upgrade "$A" >"$A.up.log" 2>&1 || true
+check "upgrade migrated .githooks to .agent/githooks" "[ -d \"\$A/.agent/githooks\" ] && [ ! -e \"\$A/.githooks\" ]"
+check "upgrade updated core.hooksPath" "[ \"\$(git -C \"\$A\" config core.hooksPath)\" = .agent/githooks ]"
+check "upgrade migrated .agents/skills to .agent/skills" "[ -d \"\$A/.agent/skills\" ] && [ ! -e \"\$A/.agents\" ]"
+check "upgrade migrated CLAUDE.md to .claude/CLAUDE.md" "[ -f \"\$A/.claude/CLAUDE.md\" ] && [ ! -e \"\$A/CLAUDE.md\" ]"
+check "upgrade migrated GLOSSARY.md to docs/GLOSSARY.md" "[ -f \"\$A/docs/GLOSSARY.md\" ] && [ ! -e \"\$A/GLOSSARY.md\" ]"
+check "upgrade migrated config files to .agent/config" "[ -f \"\$A/.agent/config/jscpd.json\" ] && [ ! -e \"\$A/.jscpd.json\" ]"
+check "upgrade symlinks in .claude/skills point to .agent/skills" "[ -L \"\$A/.claude/skills/kit-task\" ] && [ \"\$(readlink \"\$A/.claude/skills/kit-task\")\" = '../../.agent/skills/kit-task' ]"
+check "upgrade leaves root clean" "[ ! -e \"\$A/.agents\" ] && [ ! -e \"\$A/.githooks\" ] && [ ! -e \"\$A/CLAUDE.md\" ] && [ ! -e \"\$A/GLOSSARY.md\" ]"
 
 printf '\n%d failure(s) — workdir %s\n' "$fail" "$WORK"
 [ $fail -eq 0 ]

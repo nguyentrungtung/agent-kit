@@ -19,7 +19,7 @@ fi
 
 case "$tool" in
   Edit|Write|MultiEdit|NotebookEdit)
-    if re '^(\.agent/hooks/|\.githooks/|\.git/|\.claude/settings(\.local)?\.json$)' "$rel"; then
+    if re '^(\.agent/hooks/|\.agent/githooks/|\.githooks/|\.git/|\.claude/settings(\.local)?\.json$)' "$rel"; then
       deny "guardrail file '$rel' is read-only for the agent" "describe the change; a human applies it"
     fi
     if re '^\.github/workflows/' "$rel"; then

@@ -17,7 +17,7 @@ echo "agent-kit doctor — $(cfg name "$(basename "$KIT_ROOT")") · components: 
 
 echo "Setup"
 hp="$(git config --get core.hooksPath 2>/dev/null || true)"
-if [ "$hp" = ".githooks" ]; then ok "git hooks active (.githooks)"
+if [ "$hp" = ".agent/githooks" ] || [ "$hp" = ".githooks" ]; then ok "git hooks active ($hp)"
 else  # a hook manager (Husky, lefthook, …) may own the hooks and call the kit through kit-hook
   missing=""
   for h in pre-commit commit-msg pre-push; do
@@ -29,7 +29,7 @@ else  # a hook manager (Husky, lefthook, …) may own the hooks and call the kit
     " pre-commit commit-msg pre-push")
       if [ -f .pre-commit-config.yaml ] || [ -d .husky ] || ls lefthook.* .lefthook.* >/dev/null 2>&1; then
         bad "your hook manager does not call the kit yet — add .agent/scripts/kit-hook to it (the exact lines: kit init prints them; header of .agent/scripts/kit-hook), then reinstall its hooks"
-      else bad "git hooks NOT active — run: git config core.hooksPath .githooks   (or keep your hook manager and chain the kit: see .agent/scripts/kit-hook)"; fi ;;
+      else bad "git hooks NOT active — run: git config core.hooksPath .agent/githooks   (or keep your hook manager and chain the kit: see .agent/scripts/kit-hook)"; fi ;;
     *) bad "kit hooks only partly chained — missing:$missing (see .agent/scripts/kit-hook)" ;;
   esac
   if [ -z "$hp" ] && [ ! -f .git/hooks/pre-commit ] && [ "$missing" != " pre-commit commit-msg pre-push" ]; then
@@ -37,7 +37,7 @@ else  # a hook manager (Husky, lefthook, …) may own the hooks and call the kit
   fi
 fi
 # kit files the repo's own .gitignore hides: they would exist on this machine only
-ign="$( { printf '%s\n' AGENTS.md CLAUDE.md .claude/settings.json .agent/project.yaml .githooks/pre-commit; awk '!/^#/ {print $2}' .agent/kit.manifest 2>/dev/null; } \
+ign="$( { printf '%s\n' AGENTS.md .claude/CLAUDE.md .claude/settings.json .agent/project.yaml .agent/githooks/pre-commit docs/GLOSSARY.md; awk '!/^#/ {print $2}' .agent/kit.manifest 2>/dev/null; } \
        | awk 'NF && !seen[$0]++' | while IFS= read -r f; do [ -e "$f" ] && printf '%s\n' "$f"; done | git check-ignore --stdin 2>/dev/null \
        | awk -F/ '{ k = (NF > 1 ? $1 "/" : $1); if (!seen[k]++) printf " %s", k }' || true)"
 [ -z "$ign" ] || meh "your .gitignore ignores kit files:$ign — teammates and CI will not see them (remove those lines to share the kit)"

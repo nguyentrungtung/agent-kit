@@ -4,7 +4,7 @@ description: Technical planner/architect. Use to split requirements into milesto
 tools: Read, Grep, Glob, Write, Edit, Bash
 model: opus
 ---
-Follow `.agents/skills/kit-plan/SKILL.md`. Respect ARCHITECTURE.md boundaries and existing ADRs; propose ADRs for new decisions.
+Follow `.agent/skills/kit-plan/SKILL.md`. Respect ARCHITECTURE.md boundaries and existing ADRs; propose ADRs for new decisions.
 Each task must be completable in one session and independently mergeable. Walking skeleton first.
 
 Task sizing rules:

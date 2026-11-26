@@ -26,8 +26,9 @@ skip() { skipped+=("$1"); printf '%s[skip]%s %s\n' "$c_dim" "$c_off" "$1"; }
 # Dockerfiles
 df="$(files 'Dockerfile' '*/Dockerfile' 'Dockerfile.*' '*/Dockerfile.*')"
 if [ -n "$df" ]; then
-  if command -v hadolint >/dev/null 2>&1; then run "hadolint" hadolint $df
-  elif have_docker; then run "hadolint (docker)" docker run --rm -v "$KIT_ROOT:/w" -w /w "$HADOLINT_IMG" hadolint $df
+  hl_cfg=""; [ -f "$KIT_ROOT/.agent/config/hadolint.yaml" ] && hl_cfg="--config .agent/config/hadolint.yaml"
+  if command -v hadolint >/dev/null 2>&1; then run "hadolint" hadolint $hl_cfg $df
+  elif have_docker; then run "hadolint (docker)" docker run --rm -v "$KIT_ROOT:/w" -w /w "$HADOLINT_IMG" hadolint $hl_cfg $df
   else skip "hadolint (install hadolint or Docker)"; fi
 fi
 

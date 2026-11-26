@@ -16,10 +16,10 @@ case_() { # case_ <name> <preset> <setup-commands>
   n=$((n+1))
   check "project.yaml has commands"        "grep -q '^cmd_lint:' '$d/.agent/project.yaml'"
   check "AGENTS.md playbooks rendered"      "grep -q '^- \`kit-task\`' '$d/AGENTS.md'"
-  check "skills canonical + claude links"   "[ -f '$d/.agents/skills/kit-task/SKILL.md' ] && [ -L '$d/.claude/skills/kit-task' ]"
-  check "gemini context wired"              "grep -q AGENTS.md '$d/.gemini/settings.json'"
+  check "skills canonical + claude links"   "[ -f '$d/.agent/skills/kit-task/SKILL.md' ] && [ -L '$d/.claude/skills/kit-task' ]"
+  check "clean root layout"                 "[ ! -e '$d/.agents' ] && [ ! -e '$d/.gemini' ] && [ ! -e '$d/.githooks' ] && [ ! -e '$d/CLAUDE.md' ] && [ ! -e '$d/GLOSSARY.md' ]"
   check "manifest written"                  "[ -s '$d/.agent/kit.manifest' ]"
-  check "scripts parse"                     "for f in '$d'/.agent/scripts/* '$d'/.agent/hooks/*.sh '$d'/.githooks/*; do bash -n \"\$f\" || exit 1; done"
+  check "scripts parse"                     "for f in '$d'/.agent/scripts/* '$d'/.agent/hooks/*.sh '$d'/.agent/githooks/*; do bash -n \"\$f\" || exit 1; done"
   check "no unresolved placeholders"        "! grep -rl '{{[A-Z_]*}}' '$d/.agent/project.yaml' '$d/AGENTS.md' '$d/.github/workflows' 2>/dev/null | grep -q ."
   check "ci has runtime setup"              "! grep -q '@@SETUP@@' '$d/.github/workflows/ci.yml'"
   check "kit-trace clean on fresh install"  "(cd '$d' && .agent/scripts/kit-trace >/dev/null 2>&1)"
@@ -43,6 +43,11 @@ case_ platform platform    'mkdir -p infra; printf "terraform {}\n" > infra/main
 d="$WORK/monorepo"; printf '\n== monorepo extras\n'
 check "per-framework skeletons kept apart" "[ -f '$d/.agent/stack/node/skeletons/react/modular.txt' ]"
 check "kit-new module uses the frontend skeleton" "(cd '$d' && .agent/scripts/kit-new module orders --component frontend | grep 'frontend/src/features/orders' >/dev/null)"
+
+d="$WORK/harness-opt"; mkdir -p "$d"; (cd "$d" && touch app.py)
+"$KIT" init "$d" --harness gemini,codex,antigravity --yes --no-deps --no-setup --no-tools >/dev/null 2>&1
+check "multi-harness wires gemini context" "grep -q AGENTS.md '$d/.gemini/settings.json'"
+check "multi-harness wires codex/antigravity skills" "[ -L '$d/.agents/skills' ]"
 
 printf '\n%d project(s) installed, %d failure(s) — workdir %s\n' "$n" "$fail" "$WORK"
 [ $fail -eq 0 ]

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # kit-hook <pre-commit|commit-msg|pre-push> [hook args…] — the agent-kit git checks as ONE entry point any hook manager can call.
-# `kit init` installs them as git hooks itself (core.hooksPath → .githooks). If the repo already uses Husky, lefthook or another
+# `kit init` installs them as git hooks itself (core.hooksPath → .agent/githooks). If the repo already uses Husky, lefthook or another
 # manager (`kit init --hooks keep`), that manager keeps ownership and just calls this script, e.g.
 #   .husky/pre-commit   .agent/scripts/kit-hook pre-commit
 #   .husky/commit-msg   .agent/scripts/kit-hook commit-msg "$1"
@@ -13,6 +13,6 @@ case "$name" in
   pre-commit|commit-msg|pre-push) shift ;;
   *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac
-hook="$root/.githooks/$name"
-[ -x "$hook" ] || { echo "[kit] kit-hook: $hook is missing or not executable — run: kit upgrade (or chmod +x .githooks/*)" >&2; exit 1; }
+hook="$root/.agent/githooks/$name"; [ -x "$hook" ] || hook="$root/.githooks/$name"
+[ -x "$hook" ] || { echo "[kit] kit-hook: $hook is missing or not executable — run: kit upgrade (or chmod +x .agent/githooks/*)" >&2; exit 1; }
 exec "$hook" "$@"

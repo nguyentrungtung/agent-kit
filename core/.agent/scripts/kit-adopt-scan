@@ -150,7 +150,7 @@ else echo "Nothing found by the built-in patterns$(command -v gitleaks >/dev/nul
 
 # ---------------------------------------------------------------- 5. .gitignore lines hiding kit / old files
 echo; echo "## 5. .gitignore lines that hide kit or old files"; echo
-probe="AGENTS.md CLAUDE.md .claude/settings.json .claude/skills .agent/project.yaml .agents/skills docs/README.md docs/adr/README.md openspec/project.md $LEGACY_DIRS"
+probe="AGENTS.md CLAUDE.md .claude/CLAUDE.md .claude/settings.json .claude/skills .agent/project.yaml .agent/skills .agents/skills docs/README.md docs/GLOSSARY.md docs/adr/README.md openspec/project.md $LEGACY_DIRS"
 gi="$(for p in $probe; do git check-ignore -v --no-index -- "$p" 2>/dev/null || true; done | awk -F'\t' '{ split($1, a, ":"); if (a[3] ~ /^!/) next; k=a[1] ":" a[2] " `" a[3] "`"; m[k]=m[k] " " $2 } END { for (k in m) print "- " k " → hides" m[k] }' | sort)"
 if [ -n "$gi" ]; then printf '%s\n' "$gi"; echo; echo "To share them with the team, delete those lines — after §4 is clean."; else echo "None."; fi
 

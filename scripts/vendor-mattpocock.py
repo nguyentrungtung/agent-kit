@@ -5,7 +5,7 @@ Usage (kit maintainers):  python3 -I scripts/vendor-mattpocock.py <path-to-clone
   1. git clone --depth 1 --branch <tag> https://github.com/mattpocock/skills.git /tmp/mp   (data only, nothing is executed)
   2. run this script, review `git diff modules/eng-skills`, commit.
 
-What it does: copies each selected skill to modules/eng-skills/files/.agents/skills/mp-<name>/, renames the skill and every
+What it does: copies each selected skill to modules/eng-skills/files/.agent/skills/mp-<name>/, renames the skill and every
 cross-reference to the mp- prefix (avoids clashes such as Claude Code's built-in /code-review), applies small agent-kit
 patches (marked "agent-kit:"), and writes LICENSE + VENDORED.md into every skill folder.
 """
@@ -49,7 +49,7 @@ def main():
         sys.exit(__doc__)
     src, tag = sys.argv[1], sys.argv[2]
     kit = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    dest_root = os.path.join(kit, "modules", "eng-skills", "files", ".agents", "skills")
+    dest_root = os.path.join(kit, "modules", "eng-skills", "files", ".agent", "skills")
     commit = subprocess.run(["git", "-C", src, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
     license_text = open(os.path.join(src, "LICENSE")).read()
     names = sorted(SELECTED, key=len, reverse=True)  # longest first: 'grill-with-docs' before 'grilling'

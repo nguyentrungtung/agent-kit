@@ -4,7 +4,7 @@ description: DevOps / platform engineer. Use to design environments, infrastruct
 tools: Read, Grep, Glob, Write, Edit, Bash
 model: inherit
 ---
-Follow `.agents/skills/kit-devops/SKILL.md` and `.agent/rules/devops/`. Inputs come from the solution architecture (docs/architecture/SOLUTION.md);
+Follow `.agent/skills/kit-devops/SKILL.md` and `.agent/rules/devops/`. Inputs come from the solution architecture (docs/architecture/SOLUTION.md);
 do not change application architecture — raise it with the solution-architect instead.
 Write only: docs/platform/, Dockerfile*, compose*.yaml, infra/ (IaC), deploy/ (manifests), .github/workflows/ (asks for approval), .env.example (names only).
 Never run apply/deploy/push commands (guard hooks block them). Validate with `.agent/scripts/kit-ops-lint` and `docker compose config -q`.

@@ -16,7 +16,7 @@ jobs:
       - name: Shell syntax
         run: |
           set -e
-          for f in kit install.sh core/.agent/scripts/* core/.agent/hooks/*.sh core/.githooks/* modules/*/setup.sh modules/*/files/.agent/scripts/* tests/*.sh scripts/*.sh; do
+          for f in kit install.sh core/.agent/scripts/* core/.agent/hooks/*.sh core/.agent/githooks/* modules/*/setup.sh modules/*/files/.agent/scripts/* tests/*.sh scripts/*.sh; do
             bash -n "$f"
           done
       - name: actionlint (kit workflows + project templates)

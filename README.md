@@ -25,7 +25,7 @@ kit doctor . --run        # kiểm tra tool/config và chạy thử các cổng 
 ```
 agent-kit/
 ├── kit                       CLI: init · add · doctor · list
-├── core/                     luôn được cài: AGENTS.md, .agent/ (rules/core, scripts, hooks, tasks, memory), .claude/, .githooks/, CI
+├── core/                     luôn được cài: AGENTS.md, .agent/ (rules/core, scripts, hooks, githooks, tasks, memory), .claude/, CI
 ├── stacks/<stack>/           chỉ stack được chọn mới được cài
 │   ├── stack.yaml            detect, lệnh cmd_*, dev_deps, cổng app
 │   ├── rules.md              chuẩn cộng đồng + tool nào ép rule nào  → .agent/rules/stack/<stack>.md
@@ -169,7 +169,7 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 │    AGENTS.md (luật) · .agent/context/ (mục tiêu, kiến trúc, convention)      │
 │    .agent/memory/ (STATE, DECISIONS, LESSONS) · .agent/tasks/ (1 file/task)  │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ 2. QUY TRÌNH (playbook = .agents/skills/*/SKILL.md + sub-agent)              │
+│ 2. QUY TRÌNH (playbook = .agent/skills/*/SKILL.md + sub-agent)              │
 │    onboard → BA → plan → task → testcases → review → security → handoff     │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ 3. HÀNG RÀO BẮT BUỘC (máy chặn, không phụ thuộc agent có "nghe lời" không)   │
@@ -257,15 +257,15 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 
 ## 5. Dùng với từng harness (Claude Code, Codex, Gemini CLI, Antigravity, dsh)
 
-Một nguồn duy nhất cho mọi harness: luật ở `AGENTS.md`, playbook ở **`.agents/skills/`** (chuẩn Agent Skills), rule theo stack ở `.agent/rules/`.
+Một nguồn duy nhất cho mọi harness: luật ở `AGENTS.md`, playbook ở **`.agent/skills/`** (chuẩn Agent Skills), rule theo stack ở `.agent/rules/`.
 
 | Harness | Luật | Playbook | Hook chặn của Claude |
 |---|---|---|---|
-| Claude Code | `CLAUDE.md` → `AGENTS.md`, `.claude/rules/` | `.claude/skills/` (symlink tới `.agents/skills/`), sub-agent `.claude/agents/` | ✅ |
-| Codex | `AGENTS.md` | `.agents/skills/` | ❌ → git hooks + CI |
-| Gemini CLI | `AGENTS.md` (qua `.gemini/settings.json` › `context.fileName`) | `.agents/skills/` (thư mục phải được `/trust`) | ❌ → git hooks + CI |
-| Antigravity | `AGENTS.md`, `.agents/rules/stack-*.md` (`trigger: glob`) | `.agents/skills/` | ❌ → git hooks + CI |
-| dsh / harness khác | `AGENTS.md` hoặc dán `kit-context` | `.agents/skills/` hoặc mở SKILL.md làm theo | ❌ → git hooks + CI |
+| Claude Code | `.claude/CLAUDE.md` → `AGENTS.md`, `.claude/rules/` | `.claude/skills/` (symlink tới `.agent/skills/`), sub-agent `.claude/agents/` | ✅ |
+| Codex | `AGENTS.md` | `.agent/skills/` | ❌ → git hooks + CI |
+| Gemini CLI | `AGENTS.md` (qua `.gemini/settings.json` › `context.fileName`) | `.agent/skills/` (thư mục phải được `/trust`) | ❌ → git hooks + CI |
+| Antigravity | `AGENTS.md`, `.agents/rules/stack-*.md` (`trigger: glob`) | `.agent/skills/` | ❌ → git hooks + CI |
+| dsh / harness khác | `AGENTS.md` hoặc dán `kit-context` | `.agent/skills/` hoặc mở SKILL.md làm theo | ❌ → git hooks + CI |
 
 OpenSpec được init cho `claude, codex, gemini, antigravity, dsh`. Ở harness không có hook, lớp chặn cuối là **git hooks + CI + branch protection**: commit, push và PR sai vẫn bị chặn, nhưng việc đọc file hay chạy lệnh thì không.
 
@@ -335,7 +335,7 @@ gh run view <run_id> --log-failed
 | Chế độ | Việc kit làm |
 |---|---|
 | `auto` | Có Husky / lefthook / pre-commit framework / `core.hooksPath` sẵn → như `keep`; không có → như `kit` |
-| `kit` | `git config core.hooksPath .githooks`. Hook manager cũ **ngừng chạy** (kit cảnh báo) |
+| `kit` | `git config core.hooksPath .agent/githooks`. Hook manager cũ **ngừng chạy** (kit cảnh báo) |
 | `keep` | Không đụng `core.hooksPath`. **Husky:** tự thêm một dòng gọi `.agent/scripts/kit-hook …` vào `.husky/pre-commit`, `commit-msg`, `pre-push` (giữ nguyên lệnh của bạn, chạy lại không nhân đôi). **lefthook / pre-commit framework / khác:** in sẵn đoạn cần thêm, không tự sửa file cấu hình của bạn |
 
 Hook manager của bạn là **nguồn duy nhất** của git hook; kit chỉ là một lệnh nó gọi. Cách này giống nhau trên GitHub, GitLab (cloud hay tự host), Bitbucket, Gitea. `kit-doctor` nhận ra hook đã chain. Lưu ý: guard `pre-push` cần danh sách ref trên stdin; pre-commit framework không truyền nên chỉ chain được `pre-commit` và `commit-msg` (nhớ bật bảo vệ nhánh trên server).
@@ -401,13 +401,13 @@ pint.json  phpstan.neon.dist  deptrac.yaml  .editorconfig  Dockerfile  compose.y
   rules/        core/ · stack/php.md, laravel.md · project/
   stack/php/snippets/           đoạn cần merge (kit-onboard làm)
   docker/catalog/               service để kit-docker thêm sau
-  context/ memory/ tasks/ checklists/
+  context/ memory/ tasks/ checklists/ config/ skills/
   scripts/      kit-run · kit-task · kit-doctor · kit-diagrams · kit-context · kit-daily · kit-secrets-scan
   hooks/        guard-bash · guard-files · session-start (Claude Code)
+  githooks/     pre-commit · commit-msg · pre-push
 .claude/  settings.json · rules/stack-php.md · skills/kit-* · agents/*
-.githooks/ pre-commit · commit-msg · pre-push
 .github/  workflows/ci.yml (setup đúng runtime) · PULL_REQUEST_TEMPLATE.md · ISSUE_TEMPLATE/
-docs/     ba/ (+_templates) · architecture/ · plan/ · adr/ · qa/ · security/ · daily/
+docs/     ba/ (+_templates) · architecture/ · plan/ · adr/ · qa/ · security/ · daily/ · GLOSSARY.md
 ```
 
 ## 9. Mở rộng kit
@@ -423,7 +423,7 @@ docs/     ba/ (+_templates) · architecture/ · plan/ · adr/ · qa/ · security
 > Mặc dù bộ khung đã hoàn chỉnh, khi đưa vào dự án thực tế bạn nên chú ý 3 điểm sau:
 >
 > 1. **Thiết lập Branch Protection trên GitHub (Rất quan trọng):**  
->    Các hook ở local (`.githooks/`) có thể bị lập trình viên bỏ qua nếu cố tình dùng terminal máy tính cá nhân (hoặc tham số `--no-verify`). Do đó, bạn **bắt buộc phải cấu hình Branch Protection Rules trên GitHub** (yêu cầu PR, chặn force push, bắt buộc pass các status check `guard`, `quality`, `security`) để làm chốt chặn bảo vệ cuối cùng trên server.
+>    Các hook ở local (`.agent/githooks/`) có thể bị lập trình viên bỏ qua nếu cố tình dùng terminal máy tính cá nhân (hoặc tham số `--no-verify`). Do đó, bạn **bắt buộc phải cấu hình Branch Protection Rules trên GitHub** (yêu cầu PR, chặn force push, bắt buộc pass các status check `guard`, `quality`, `security`) để làm chốt chặn bảo vệ cuối cùng trên server.
 >
 > 2. **Cài đặt các công cụ CLI hỗ trợ trên máy:**  
 >    - Các công cụ bắt buộc: `git`, `jq`, `gh` (để tạo PR, đồng bộ task issue).  
@@ -431,7 +431,7 @@ docs/     ba/ (+_templates) · architecture/ · plan/ · adr/ · qa/ · security
 >
 > 3. **Môi trường hoạt động của Hooks:**  
 >    - Hệ thống hook chặn runtime (`guard-bash.sh`, `guard-files.sh`) tích hợp sâu nhất với **Claude Code** (chặn ngay lập tức trước khi thực thi shell command hoặc đọc/sửa file).  
->    - Khi làm việc với các harness khác như **Gemini CLI, Antigravity, Codex, Cursor**, lớp bảo vệ chính của bạn sẽ là **Git Hooks cục bộ (`.githooks/`) và GitHub Actions CI**.
+>    - Khi làm việc với các harness khác như **Gemini CLI, Antigravity, Codex, Cursor**, lớp bảo vệ chính của bạn sẽ là **Git Hooks cục bộ (`.agent/githooks/`) và GitHub Actions CI**.
 
 ## 11. Giới hạn cần biết
 

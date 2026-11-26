@@ -55,6 +55,7 @@
       "Read(./.env.production)",
       "Read(./secrets/**)",
       "Edit(./.agent/hooks/**)",
+      "Edit(./.agent/githooks/**)",
       "Edit(./.githooks/**)",
       "Edit(./.claude/settings.json)"
     ]
