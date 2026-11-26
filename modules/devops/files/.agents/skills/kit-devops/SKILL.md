@@ -30,7 +30,8 @@ Decisions that constrain the whole system (hosting model, orchestrator, cloud) a
 - IaC in `infra/` (Terraform modules per environment, remote state with locking, no secrets in state outputs) — plan only.
 - K8s manifests/Helm in `deploy/` (resources, probes, PDB, security context non-root/read-only FS, NetworkPolicy).
 - CI/CD in `.github/workflows/` (pinned action versions, least-privilege `permissions:`, no untrusted input in `run:` — use env vars).
-- Runbooks: `.agent/scripts/kit-new runbook "<alert or operation>"`.
+- Runbooks: `.agent/scripts/kit-new runbook "<alert or operation>"` — fill prerequisites/access and the stop-and-roll-back table
+  (signal, check, threshold, who decides) before anyone runs it.
 - Validate: `.agent/scripts/kit-ops-lint` (hadolint, actionlint, shellcheck, terraform fmt/validate/tflint, kubeconform, compose config).
 
 ## 3b. Steps only a human can do

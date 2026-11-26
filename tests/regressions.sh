@@ -743,5 +743,18 @@ check "staging: only develop / release / hotfix go there; staging → main ok" "
 printf 'main_branch: main\ndevelop_branch: main\n' > "$G/.agent/project.yaml"
 check "trunk-based: feature → main is fine"          "[ -z \"\$(gf merge_target_problem feature/TASK-1-x main)\" ]"
 
+# ---------------------------------------------------------------- safe deploys (0.15): data-deploy checklist, runbook prerequisites + stop criteria
+printf '\n== safe deploys: data checklist installed and linked, runbook asks for prerequisites and rollback triggers\n'
+A="$WORK/dd-data"; fresh "$A"; (cd "$A" && git init -q -b main)
+"$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules data,devops --stack python >"$A.log" 2>&1
+check "module data installs the data-deploy checklist" "[ -s \"\$A/.agent/checklists/data-deploy.md\" ]"
+check "release.md and kit-data point to it"           "grep -q 'checklists/data-deploy.md' \"\$A/.agent/checklists/release.md\" && grep -q 'checklists/data-deploy.md' \"\$A/.agents/skills/kit-data/SKILL.md\""
+(cd "$A" && .agent/scripts/kit-new runbook "Deploy gold" >/dev/null)
+rb="$A/docs/platform/runbooks/deploy-gold.md"
+check "new runbook has prerequisites and stop criteria before the steps" "[ \"\$(grep -E '^## (Prerequisites and access|Stop and roll back when|Diagnose)\$' \"\$rb\" | tr '\n' '|')\" = '## Prerequisites and access|## Stop and roll back when|## Diagnose|' ]"
+A="$WORK/dd-nodata"; fresh "$A"; (cd "$A" && git init -q -b main)
+"$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules devops --stack python >"$A.log" 2>&1
+check "without module data there is no data checklist; release.md says it is module data" "[ ! -e \"\$A/.agent/checklists/data-deploy.md\" ] && grep -q 'module data' \"\$A/.agent/checklists/release.md\""
+
 printf '\n%d failure(s) — workdir %s\n' "$fail" "$WORK"
 [ $fail -eq 0 ]

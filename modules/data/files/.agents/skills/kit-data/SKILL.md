@@ -44,6 +44,8 @@ read-only SQL in `dq/`, reconciles with the source and reports in `docs/data/qua
 ## 6. Operations
 Idempotent loads (MERGE / partition overwrite keyed by interval), parameterised **backfills** (date range vars), reprocessing plan,
 monitoring (freshness, row counts, failed tests → alert → runbook), cost per run/day and guardrails (partition pruning, clustering, quotas).
+**Releasing a data change** (jobs, models, stored tables, serving, metric logic): write the deploy runbook from
+`.agent/checklists/data-deploy.md` — stop/rollback thresholds and a saved baseline are decided before the first step. A human runs it.
 
 ## 7. Governance
 PII columns tagged and masked/hashed in marts unless the consumer is authorised (update `docs/security/PII-REGISTER.md`); retention per table;
