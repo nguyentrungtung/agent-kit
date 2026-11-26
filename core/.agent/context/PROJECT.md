@@ -31,4 +31,4 @@ TODO
 - Stage: idea | MVP | production | legacy-maintenance
 - Main risks: TODO
 
-## 8. Glossary → `GLOSSARY.md` · Architecture → `ARCHITECTURE.md` · Requirements → `docs/ba/`
+## 8. Glossary → `docs/GLOSSARY.md` · Architecture → `ARCHITECTURE.md` · Requirements → `docs/ba/`

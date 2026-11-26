@@ -35,7 +35,8 @@ if [ -n "$id" ]; then
     section "ACTIVE TASK $id (${f#"$KIT_ROOT"/})"
     ch="$(fm_get "$f" change)"
     [ -n "$ch" ] && echo "OpenSpec change: openspec/changes/$ch/ (proposal, specs, design, tasks)"
-    task_tags="$(fm_get "$f" tags 2>/dev/null | tr -d '[] ' | tr ',' '|')"
+    task_tags="$(norm_tags_re "$(fm_get "$f" tags 2>/dev/null)")"
+    raw_task_tags="$(fm_get "$f" tags 2>/dev/null | tr -d '\r\t[]"'\'' ')"
     if [ $brief -eq 1 ]; then
       perl -0pe 's/<!--.*?-->//gs' "$f" | sed -n '/^## 1\. Understand/,/^## 3\. Solution/p' | grep -v '^[[:space:]]*$' | head -n 25
       echo "… (read the full task file before working)"
@@ -45,11 +46,15 @@ if [ -n "$id" ]; then
   fi
 fi
 
-query_tags="${topic:-$task_tags}"
-if [ -n "$query_tags" ] && [ -f "$KIT_DIR/memory/LESSONS.md" ]; then
-  matched_lessons="$(grep -iE "\[($query_tags)\]" "$KIT_DIR/memory/LESSONS.md" 2>/dev/null || true)"
+topic_re="$(norm_tags_re "$topic")"
+query_tags="${topic_re:-$task_tags}"
+display_tags="${topic:-${raw_task_tags:-$query_tags}}"
+lessons_clean=""
+[ -f "$KIT_DIR/memory/LESSONS.md" ] && lessons_clean="$(perl -0pe 's/<!--.*?-->//gs' "$KIT_DIR/memory/LESSONS.md" 2>/dev/null || true)"
+if [ -n "$query_tags" ] && [ -n "$lessons_clean" ]; then
+  matched_lessons="$(printf '%s\n' "$lessons_clean" | grep -iE "^- .*\[($query_tags)\]" || true)"
   if [ -n "$matched_lessons" ]; then
-    section "TOPIC LESSONS (tags: [$query_tags] in .agent/memory/LESSONS.md)"
+    section "TOPIC LESSONS (tags: [$display_tags] in .agent/memory/LESSONS.md)"
     echo "$matched_lessons" | head -n 10
   elif [ -n "$topic" ]; then
     section "TOPIC LESSONS ([$topic])"
@@ -57,7 +62,7 @@ if [ -n "$query_tags" ] && [ -f "$KIT_DIR/memory/LESSONS.md" ]; then
   fi
 fi
 
-n_lessons="$(grep -c '^- ' "$KIT_DIR/memory/LESSONS.md" 2>/dev/null || true)"
+n_lessons="$(printf '%s\n' "$lessons_clean" | grep -c '^- ' || true)"
 if [ "${n_lessons:-0}" -gt 60 ]; then
   section "MAINTENANCE"
   echo "LESSONS.md has $n_lessons entries (append-only — never edit or delete them). Promote lessons that repeat into a rule in"
@@ -74,10 +79,10 @@ done | head -n 15 || true
 
 if [ $brief -eq 0 ]; then
   if [ -n "$query_tags" ] && [ -d "$KIT_ROOT/docs/adr" ]; then
-    matched_adrs="$(find "$KIT_ROOT/docs/adr" -name "*[0-9]*.md" 2>/dev/null | grep -iE "($query_tags)" || true)"
+    matched_adrs="$(for a in "$KIT_ROOT"/docs/adr/[0-9]*.md; do [ -f "$a" ] || continue; basename "$a"; done | grep -iE "($query_tags)" || true)"
     if [ -n "$matched_adrs" ]; then
-      section "TOPIC DECISIONS (matching [$query_tags] in docs/adr/)"
-      echo "$matched_adrs" | while read -r a; do echo "- $(basename "$a")"; done
+      section "TOPIC DECISIONS (matching [$display_tags] in docs/adr/)"
+      printf '%s\n' "$matched_adrs" | sed 's/^/- /'
     fi
   fi
 

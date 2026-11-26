@@ -863,13 +863,22 @@ check "reviewers use the session's model" "grep -qx 'model: inherit' \"\$A/.clau
 # ---------------------------------------------------------------- clean root migration (0.17): .githooks, .agents/skills, CLAUDE.md, GLOSSARY.md, configs into .agent/
 printf '\n== clean root layout: kit upgrade relocates old root directories to .agent/ and .claude/\n'
 A="$WORK/up-root"; fresh "$A"; (cd "$A" && git init -q -b main)
-"$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules data,api,devops --stack node >"$A.log" 2>&1
+"$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules data,api,devops --stack node --harness claude,antigravity >"$A.log" 2>&1
 # Simulate pre-0.17 install layout:
 mkdir -p "$A/.githooks" "$A/.agents"
 mv "$A/.agent/githooks"/* "$A/.githooks/" && rmdir "$A/.agent/githooks"
 git -C "$A" config core.hooksPath .githooks
-mv "$A/.agent/skills" "$A/.agents/skills"
-mv "$A/.claude/CLAUDE.md" "$A/CLAUDE.md"
+rm -f "$A/.agents/skills" && mv "$A/.agent/skills" "$A/.agents/skills"
+# Simulate true untouched pre-0.17 CLAUDE.md + pre-0.17 cmd_dup / cmd_api + harnesses=claude
+printf '@AGENTS.md\n\n<!-- Claude Code reads CLAUDE.md; all rules live in AGENTS.md so every agent shares one source. -->\n<!-- Personal, uncommitted notes: CLAUDE.local.md (git-ignored). -->\n' > "$A/CLAUDE.md"
+rm -f "$A/.claude/CLAUDE.md"
+old_csha="$(sha "$A/CLAUDE.md")"
+sed -i.bak -e "s#^[0-9a-f]*  \.claude/CLAUDE\.md\$#${old_csha}  .claude/CLAUDE.md#" "$A/.agent/kit.manifest" && rm -f "$A/.agent/kit.manifest.bak"
+sed -i.bak -e 's/^harnesses:.*/harnesses: claude/' "$A/.agent/kit.lock" && rm -f "$A/.agent/kit.lock.bak"
+sed -i.bak \
+  -e 's#--config \.agent/config/jscpd\.json#--config .jscpd.json#' \
+  -e 's# --ruleset \.agent/config/spectral\.yaml##' \
+  "$A/.agent/project.yaml" && rm -f "$A/.agent/project.yaml.bak"
 mv "$A/docs/GLOSSARY.md" "$A/GLOSSARY.md"
 [ -f "$A/.agent/config/jscpd.json" ] && mv "$A/.agent/config/jscpd.json" "$A/.jscpd.json"
 [ -f "$A/.agent/config/hadolint.yaml" ] && mv "$A/.agent/config/hadolint.yaml" "$A/.hadolint.yaml"
@@ -886,17 +895,186 @@ sed -i.bak \
   "$A/.agent/kit.manifest" && rm -f "$A/.agent/kit.manifest.bak"
 commit_all "$A"
 
-# Now run kit upgrade:
-"$KIT" upgrade "$A" >"$A.up.log" 2>&1 || true
+# Now run kit upgrade (assert exit 0):
+up_rc=0; "$KIT" upgrade "$A" >"$A.up.log" 2>&1 || up_rc=$?
+check "upgrade exits 0 cleanly" "[ $up_rc -eq 0 ]"
 check "upgrade migrated .githooks to .agent/githooks" "[ -d \"\$A/.agent/githooks\" ] && [ ! -e \"\$A/.githooks\" ]"
 check "upgrade updated core.hooksPath" "[ \"\$(git -C \"\$A\" config core.hooksPath)\" = .agent/githooks ]"
 check "upgrade migrated .agents/skills to .agent/skills" "[ -d \"\$A/.agent/skills\" ] && [ ! -e \"\$A/.agents\" ]"
-check "upgrade migrated CLAUDE.md to .claude/CLAUDE.md" "[ -f \"\$A/.claude/CLAUDE.md\" ] && [ ! -e \"\$A/CLAUDE.md\" ]"
+check "upgrade removed untouched .agents/rules/stack-node.md" "[ ! -e \"\$A/.agents/rules\" ] && ! grep -q '\.agents/rules' \"\$A/.agent/kit.manifest\""
+check "upgrade migrated untouched CLAUDE.md without false .kit-new" "[ -f \"\$A/.claude/CLAUDE.md\" ] && [ ! -e \"\$A/CLAUDE.md\" ] && [ ! -e \"\$A/.claude/CLAUDE.md.kit-new\" ]"
 check "upgrade updated @AGENTS.md to @../AGENTS.md in .claude/CLAUDE.md" "grep -q '^@\.\./AGENTS\.md' \"\$A/.claude/CLAUDE.md\""
+check "upgrade updated pre-0.17 cmd_dup and cmd_api config paths" "grep -q -- '--config \.agent/config/jscpd\.json' \"\$A/.agent/project.yaml\" && grep -q -- '--ruleset \.agent/config/spectral\.yaml' \"\$A/.agent/project.yaml\""
 check "upgrade migrated GLOSSARY.md to docs/GLOSSARY.md" "[ -f \"\$A/docs/GLOSSARY.md\" ] && [ ! -e \"\$A/GLOSSARY.md\" ]"
 check "upgrade migrated config files to .agent/config" "[ -f \"\$A/.agent/config/jscpd.json\" ] && [ ! -e \"\$A/.jscpd.json\" ]"
 check "upgrade symlinks in .claude/skills point to .agent/skills" "[ -L \"\$A/.claude/skills/kit-task\" ] && [ \"\$(readlink \"\$A/.claude/skills/kit-task\")\" = '../../.agent/skills/kit-task' ]"
 check "upgrade leaves root clean" "[ ! -e \"\$A/.agents\" ] && [ ! -e \"\$A/.githooks\" ] && [ ! -e \"\$A/CLAUDE.md\" ] && [ ! -e \"\$A/GLOSSARY.md\" ]"
+
+# Conflicting custom files on upgrade are preserved (never silently deleted)
+UP3="$WORK/up-conflict"; fresh "$UP3"; (cd "$UP3" && git init -q -b main)
+"$KIT" init "$UP3" --yes --no-deps --no-setup --no-tools --modules none --stack node >"$UP3.log" 2>&1
+printf '@AGENTS.md\n# USER CUSTOM ROOT\n' > "$UP3/CLAUDE.md"
+printf '{"threshold": 5}\n' > "$UP3/.jscpd.json"
+commit_all "$UP3"
+"$KIT" upgrade "$UP3" >"$UP3.up.log" 2>&1
+check "upgrade preserves differing root CLAUDE.md & .jscpd.json in .bak-kit" "[ -f \"\$UP3/.claude/CLAUDE.md.bak-kit\" ] && grep -q 'USER CUSTOM ROOT' \"\$UP3/.claude/CLAUDE.md.bak-kit\" && [ -f \"\$UP3/.agent/config/jscpd.json.bak-kit\" ] && grep -q 'threshold' \"\$UP3/.agent/config/jscpd.json.bak-kit\""
+
+# ---------------------------------------------------------------- hardening & slim root (0.17.1): hook bypasses, tag parsing, feat gate, openspec setup, unused_config, docs/agents
+printf '\n== hardening & slim root: hook path/redirection bypasses, tags, feat gate, clean applied repo\n'
+G2="$WORK/guard-hard"; fresh "$G2"; (cd "$G2" && git init -q -b main && mkdir -p .agent/hooks .agent/githooks .agent/scripts .claude src)
+cp "$ROOT"/core/.agent/hooks/{_hooklib.sh,guard-bash.sh,guard-files.sh} "$G2/.agent/hooks/"
+touch "$G2/.agent/hooks/guard-bash.sh" "$G2/.claude/settings.json" "$G2/.env" "$G2/src/app.ts" "$G2/.agent/scripts/kit-task"
+mkdir -p "$G2/secrets" "$G2/.ssh"
+ln -s .agent/hooks/evil.sh "$G2/dlink"
+(cd "$G2" && git add -A && git -c core.hooksPath=/dev/null commit -qm init --no-verify)
+gf() { local rc=0; jq -cn --arg t "$1" --arg p "$2" '{tool_name:$t,tool_input:{file_path:$p}}' | CLAUDE_PROJECT_DIR="$G2" "$G2/.agent/hooks/guard-files.sh" >/dev/null 2>&1 || rc=$?; echo "$rc"; }
+gf_path() { local rc=0; jq -cn --arg t "$1" --arg p "$2" '{tool_name:$t,tool_input:{path:$p}}' | CLAUDE_PROJECT_DIR="$G2" "$G2/.agent/hooks/guard-files.sh" >/dev/null 2>&1 || rc=$?; echo "$rc"; }
+gf_out() { jq -cn --arg t "$1" --arg p "$2" '{tool_name:$t,tool_input:{file_path:$p}}' | CLAUDE_PROJECT_DIR="$G2" "$G2/.agent/hooks/guard-files.sh" 2>&1 || true; }
+gb() { local rc=0; jq -cn --arg cmd "$1" '{tool_name:"Bash",tool_input:{command:$cmd}}' | CLAUDE_PROJECT_DIR="$G2" "$G2/.agent/hooks/guard-bash.sh" >/dev/null 2>&1 || rc=$?; echo "$rc"; }
+
+check "guard-files blocks relative ./ path to guardrail"       "[ \"\$(gf Edit './.agent/hooks/guard-bash.sh')\" = 2 ]"
+check "guard-files blocks traversal .. path to guardrail"      "[ \"\$(gf Edit '.agent/../.agent/hooks/guard-bash.sh')\" = 2 ] && [ \"\$(gf Write '$G2/src/../.claude/settings.json')\" = 2 ]"
+check "guard-files blocks new file inside ./ .agent/hooks/"    "[ \"\$(gf Write './.agent/hooks/new-evil.sh')\" = 2 ]"
+check "guard-files blocks dangling symlink to guardrail"       "[ \"\$(gf Write './dlink')\" = 2 ]"
+check "guard-files blocks macOS case-variant secret/guardrail" "[ \"\$(gf Read '.Env')\" = 2 ] && [ \"\$(gf Edit '.Agent/hooks/guard-bash.sh')\" = 2 ] && [ \"\$(gf Edit '.Claude/settings.json')\" = 2 ]"
+check "guard-files blocks Grep/Glob on secrets/ and .ssh/"     "[ \"\$(gf_path Grep 'secrets/')\" = 2 ] && [ \"\$(gf_path Glob 'secrets')\" = 2 ] && [ \"\$(gf_path Grep '.ssh/')\" = 2 ] && [ \"\$(gf_path Grep '.ssh')\" = 2 ]"
+check "guard-files asks on case-variant CI workflow Write"     "gf_out Write '.GitHub/workflows/evil.yml' | grep -q 'editing CI workflow'"
+check "guard-files blocks Read of traversal .env"              "[ \"\$(gf Read 'src/../.env')\" = 2 ]"
+check "guard-files allows normal source file Edit"             "[ \"\$(gf Edit './src/app.ts')\" = 0 ]"
+
+check "guard-bash blocks kit-* multiline injection"            "[ \"\$(gb \$'.agent/scripts/kit-task status\\ncat .env')\" = 2 ]"
+cmd_esc_dq='.agent/scripts/kit-task status \" ; cat .env ; echo ""'
+cmd_esc_sq=$'.agent/scripts/kit-task status \\\' ; cat .env ; echo \\\''
+cmd_unclosed='.agent/scripts/kit-task status "unclosed ; cat .env'
+cmd_q_redir1='echo evil > ".agent/hooks/guard-bash.sh"'
+cmd_q_redir2="echo evil>>'.agent/githooks/pre-commit'"
+check "guard-bash blocks kit-* escaped-quote bypass"           "[ \"\$(gb \"\$cmd_esc_dq\")\" = 2 ] && [ \"\$(gb \"\$cmd_esc_sq\")\" = 2 ] && [ \"\$(gb \"\$cmd_unclosed\")\" = 2 ]"
+check "guard-bash blocks kit-* redirect to settings.json"      "[ \"\$(gb '.agent/scripts/kit-task status > .claude/settings.json')\" = 2 ]"
+check "guard-bash blocks kit-* append to guard-bash.sh"        "[ \"\$(gb '.agent/scripts/kit-task status >> .agent/hooks/guard-bash.sh')\" = 2 ]"
+check "guard-bash blocks quoted guardrail redirect target"     "[ \"\$(gb \"\$cmd_q_redir1\")\" = 2 ] && [ \"\$(gb \"\$cmd_q_redir2\")\" = 2 ]"
+check "guard-bash blocks '->.agent/...' unquoted redirect"     "[ \"\$(gb 'echo evil->.agent/hooks/guard-bash.sh')\" = 2 ] && [ \"\$(gb 'printf {} ->.claude/settings.json')\" = 2 ]"
+check "guard-bash blocks git global flags (-c quoted, --git-dir, -C.) on main" "[ \"\$(gb 'git -c \"user.name=John Doe\" commit -m x')\" = 2 ] && [ \"\$(gb 'git --git-dir .git commit -m x')\" = 2 ] && [ \"\$(gb 'git -C. commit -m x')\" = 2 ] && [ \"\$(gb 'git -C . push --force')\" = 2 ] && [ \"\$(gb 'git -C . reset --hard')\" = 2 ] && [ \"\$(gb 'git -C . -C . commit -m x')\" = 2 ]"
+check "guard-bash blocks wrapped/subshell/nested git commands" "[ \"\$(gb 'env git push --force')\" = 2 ] && [ \"\$(gb 'command git commit -m x')\" = 2 ] && [ \"\$(gb '(git reset --hard)')\" = 2 ] && [ \"\$(gb 'bash -c \"git push --force\"')\" = 2 ] && [ \"\$(gb 'echo \$(git reset --hard)')\" = 2 ] && [ \"\$(gb 'echo \`git commit -m x\`')\" = 2 ]"
+check "guard-bash allows prefixed ./ kit-task & checkpoint with '->' + prod" "[ \"\$(gb './.agent/scripts/kit-task checkpoint \"docs: prod -> staging\"')\" = 0 ] && [ \"\$(gb '.agent/scripts/kit-task checkpoint \"vercel --prod\"')\" = 0 ]"
+
+T="$WORK/db-auth-project"; fresh "$T"; (cd "$T" && git init -q -b main)
+"$KIT" init "$T" --yes --no-deps --no-setup --no-tools --modules none --stack node >"$T.log" 2>&1
+mkdir -p "$T/docs/adr"
+echo '# 0001' > "$T/docs/adr/0001-unrelated.md"
+echo '# 0002' > "$T/docs/adr/0002-auth-flow.md"
+(cd "$T" && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify && git checkout -qb develop)
+# Clean LESSONS.md: kit-task start must NOT echo HTML comment tags as relevant lessons
+t0id="$(cd "$T" && .agent/scripts/kit-task new "Clean start check" --type feat --tags '[auth]' | tail -n1)"
+start_out="$(cd "$T" && .agent/scripts/kit-task start "$t0id" 2>&1)"
+check "kit-task start ignores HTML comments in LESSONS.md" "! printf '%s' \"\$start_out\" | grep -q 'Relevant lessons'"
+cat > "$T/.agent/memory/LESSONS.md" <<'EOF'
+# Lessons learned
+- 2026-11-20 [auth] always HttpOnly cookies
+- 2026-11-20 [db] index foreign keys (see [])
+- 2026-11-20 [node.js] pin engines field
+EOF
+(cd "$T" && git add -A && git -c core.hooksPath=/dev/null commit -qm lessons --no-verify)
+tid="$(cd "$T" && .agent/scripts/kit-task new "Quoted tags task" --type feat --tags '"auth", "api"' | tail -n1)"
+tfile="$(ls "$T/.agent/tasks/$tid-"*.md)"
+co="$(cd "$T" && .agent/scripts/kit-context --brief "$tid")"
+check "kit-context matches YAML quoted tags" "printf '%s\n' \"\$co\" | grep -q 'always HttpOnly'"
+co2="$(cd "$T" && .agent/scripts/kit-context --topic auth,db)"
+td2="$(printf '%s\n' "$co2" | sed -n '/^### TOPIC DECISIONS/,/^### /p')"
+check "kit-context --topic auth,db matches both & avoids parent dir ADR match" "printf '%s\n' \"\$co2\" | grep -q 'always HttpOnly' && printf '%s\n' \"\$td2\" | grep -q '0002-auth-flow.md' && ! printf '%s\n' \"\$td2\" | grep -q '0001-unrelated.md'"
+co_esc="$(cd "$T" && .agent/scripts/kit-context --brief --topic node.js)"
+check "kit-context display header does not leak backslash escapes" "printf '%s\n' \"\$co_esc\" | grep -q 'TOPIC LESSONS (tags: \[node\.js\]' || printf '%s\n' \"\$co_esc\" | grep -q '\[node.js\]'"
+printf 'tags: [auth, api]\r\n' | grep . >/dev/null
+check "norm_tags_re strips CRLF cleanly" "bash -c 'source \"\$0\"; [ \"\$(norm_tags_re \$'\''[auth, api]\\r'\'')\" = \"auth|api\" ] && [ -z \"\$(norm_tags_re \$'\''[]\\r'\'')\" ]' \"$T/.agent/scripts/lib.sh\""
+sed -i.bak 's/^tags:.*/tags: [auth,]/' "$tfile" && rm -f "$tfile.bak"
+co3="$(cd "$T" && .agent/scripts/kit-context --brief "$tid")"
+check "kit-context trailing comma does not match unrelated [db]" "! printf '%s\n' \"\$co3\" | grep -q 'index foreign keys'"
+(cd "$T" && .agent/scripts/kit-task start "$tid" >/dev/null 2>&1)
+mkdir -p "$T/tests" "$T/src"
+cat > "$T/tests/feat.test.js" <<'EOF'
+function test_feat() { return true; }
+EOF
+echo 'export const x = 1;' > "$T/src/feat.js"
+(cd "$T" && .agent/scripts/kit-new testplan "$tid" >/dev/null)
+qa="$T/docs/qa/$tid.md"
+sed -i.bak 's/| unit | | | | | todo |/| unit | | | tests\/feat.test.js::test_feat | pass |/' "$qa" && rm -f "$qa.bak"
+sed -i.bak -e '/^## 1\. Understand/a\
+Source: human request' -e 's/^- \[ \] /- [x] /g' -e '/^## 3\. Solution/a\
+Implement feat' -e '/^## 7\. Result/a\
+Done without doc note' "$tfile" && rm -f "$tfile.bak"
+(cd "$T" && git add -A && git -c core.hooksPath=/dev/null commit -qm "feat($tid): code" --no-verify && .agent/scripts/kit-task review "BLOCKER 0 · MAJOR 0" >/dev/null)
+rc=0; out="$(cd "$T" && .agent/scripts/kit-task verify 2>&1)" || rc=$?
+check "verify rejects --type feat code change without living docs" "[ $rc -ne 0 ] && printf '%s' \"\$out\" | grep -q 'no spec / living doc did'"
+
+N="$WORK/ex-node-slim"; ad "$N" 'printf "{\"name\":\"x\",\"version\":\"1\"}\n" > package.json && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack node
+check "existing node without depcruise skips .dependency-cruiser.cjs" "[ ! -e \"\$N/.dependency-cruiser.cjs\" ]"
+R="$WORK/ex-rust-slim"; ad "$R" 'printf "[package]\nname=\"x\"\nversion=\"0.1.0\"\n" > Cargo.toml && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack rust
+check "existing rust without cargo-deny skips deny.toml" "[ ! -e \"\$R/deny.toml\" ]"
+G0="$WORK/ex-go-slim"; ad "$G0" 'printf "module example.com/x\n\ngo 1.23\n" > go.mod && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack go
+check "existing go without golangci-lint skips .golangci.yml" "[ ! -e \"\$G0/.golangci.yml\" ]"
+
+OS="$WORK/os-clean"; fresh "$OS"; mkdir -p "$OS/bin"; (cd "$OS" && git init -q -b main && echo '{}' > package.json)
+cat > "$OS/bin/openspec" <<'EOS'
+#!/usr/bin/env bash
+[ "${1:-}" = "--version" ] && { echo "2.1.1"; exit 0; }
+if [ "${1:-}" = "init" ]; then
+  mkdir -p .agents/skills/openspec-propose .claude/skills openspec/specs openspec/changes/archive
+  printf -- "---\nname: openspec-propose\ndescription: propose\n---\n" > .agents/skills/openspec-propose/SKILL.md
+  printf '{"target":"shared"}' > .agents/skills/.openspec-target
+  ln -sfn ../../.agents/skills/openspec-propose .claude/skills/openspec-propose
+  exit 0
+fi
+exit 0
+EOS
+chmod +x "$OS/bin/openspec"
+"$KIT" init "$OS" --preset app --yes --no-deps --no-setup --no-tools >"$OS.log" 2>&1
+(cd "$OS" && PATH="$OS/bin:$PATH" "$ROOT/modules/openspec/setup.sh" >/dev/null 2>&1)
+check "openspec setup with harnesses=claude keeps .agents absent at root" "[ ! -e \"\$OS/.agents\" ]"
+check "openspec setup relocates openspec skills into .agent/skills & removes .openspec-target" "[ -f \"\$OS/.agent/skills/openspec-propose/SKILL.md\" ] && [ ! -e \"\$OS/.agent/skills/.openspec-target\" ]"
+check "openspec setup points .claude/skills/openspec-* to ../../.agent/skills/" "[ -L \"\$OS/.claude/skills/openspec-propose\" ] && [ \"\$(readlink \"\$OS/.claude/skills/openspec-propose\")\" = '../../.agent/skills/openspec-propose' ]"
+check "docs/agents is moved into .agent/context/agents" "[ ! -e \"\$OS/docs/agents\" ] && [ -f \"\$OS/.agent/context/agents/issue-tracker.md\" ]"
+check "LESSONS.md starts clean without dummy bullets" "! grep -qE '^- [0-9]{4}-' \"\$OS/.agent/memory/LESSONS.md\""
+
+OS2="$WORK/os-codex"; fresh "$OS2"; mkdir -p "$OS2/bin"; (cd "$OS2" && git init -q -b main && echo '{}' > package.json)
+cp "$OS/bin/openspec" "$OS2/bin/openspec"
+"$KIT" init "$OS2" --preset app --harness codex --yes --no-deps --no-setup --no-tools >"$OS2.log" 2>&1
+(cd "$OS2" && PATH="$OS2/bin:$PATH" "$ROOT/modules/openspec/setup.sh" >/dev/null 2>&1)
+check "openspec setup with codex removes .openspec-target & keeps .agents/skills symlink" "[ ! -e \"\$OS2/.agent/skills/.openspec-target\" ] && [ -L \"\$OS2/.agents/skills\" ]"
+
+# migrate_root_layout also moves legacy docs/agents/ into .agent/context/agents/
+UP2="$WORK/up-agents"; fresh "$UP2"; (cd "$UP2" && git init -q -b main)
+"$KIT" init "$UP2" --preset app --yes --no-deps --no-setup --no-tools >"$UP2.log" 2>&1
+mkdir -p "$UP2/docs/agents"
+mv "$UP2/.agent/context/agents"/* "$UP2/docs/agents/" && rmdir "$UP2/.agent/context/agents"
+sed -i.bak 's# \.agent/context/agents/# docs/agents/#g' "$UP2/.agent/kit.manifest" && rm -f "$UP2/.agent/kit.manifest.bak"
+commit_all "$UP2"
+"$KIT" upgrade "$UP2" >"$UP2.up.log" 2>&1
+check "upgrade migrates legacy docs/agents/ into .agent/context/agents/" "[ ! -e \"\$UP2/docs/agents\" ] && [ -f \"\$UP2/.agent/context/agents/issue-tracker.md\" ]"
+# Exercise kit-adopt-scan line 65 directly (manifest entry removed so kit_unchanged does not short-circuit)
+grep -v ' \.claude/CLAUDE\.md$' "$UP2/.agent/kit.manifest" > "$UP2/m.tmp" && mv "$UP2/m.tmp" "$UP2/.agent/kit.manifest"
+(cd "$UP2" && git add -A && git -c core.hooksPath=/dev/null commit -qm 'chore: up' --no-verify)
+check "kit-adopt-scan accepts .claude/CLAUDE.md with comments + @../AGENTS.md" "! (cd \"\$UP2\" && .agent/scripts/kit-adopt-scan 2>/dev/null | grep -q 'should become')"
+echo "extra text" >> "$UP2/.claude/CLAUDE.md"
+scan_up2="$(cd "$UP2" && .agent/scripts/kit-adopt-scan 2>/dev/null || true)"
+check "kit-adopt-scan flags modified .claude/CLAUDE.md" "printf '%s\n' \"\$scan_up2\" | grep -q 'should become just @../AGENTS.md'"
+
+# kit-doctor openspec hint handles missing harnesses: and harnesses: all
+rm -rf "$UP2/openspec"
+sed -i.bak '/^harnesses:/d' "$UP2/.agent/kit.lock" && rm -f "$UP2/.agent/kit.lock.bak"
+doc_miss="$(cd "$UP2" && .agent/scripts/kit-doctor 2>&1 || true)"
+check "kit-doctor openspec hint falls back to --tools claude" "printf '%s\n' \"\$doc_miss\" | grep -q -- '--tools claude --profile'"
+echo "harnesses: all" >> "$UP2/.agent/kit.lock"
+doc_all="$(cd "$UP2" && .agent/scripts/kit-doctor 2>&1 || true)"
+check "kit-doctor openspec hint expands harnesses: all" "printf '%s\n' \"\$doc_all\" | grep -q -- '--tools claude,codex,gemini,antigravity,dsh --profile'"
+
+# kit upgrade removes stale .agents/skills symlink when harnesses=claude & migrates CRLF/comment pre-0.17 cmd_dup
+mkdir -p "$UP2/.agents"
+ln -s ../.agent/skills "$UP2/.agents/skills"
+sed -i.bak 's/^harnesses:.*/harnesses: claude/' "$UP2/.agent/kit.lock" && rm -f "$UP2/.agent/kit.lock.bak"
+perl -i -pe 's{^cmd_dup:.*}{cmd_dup: npx -y jscpd\@4.0.5 --config .jscpd.json . # dup\r}' "$UP2/.agent/project.yaml"
+commit_all "$UP2"
+"$KIT" upgrade "$UP2" >"$UP2.up2.log" 2>&1
+check "upgrade removes stale .agents/skills symlink when harnesses=claude" "[ ! -e \"\$UP2/.agents\" ] && [ ! -L \"\$UP2/.agents/skills\" ]"
+check "upgrade migrates pre-0.17 cmd_dup with comment & CRLF" "grep -qF -- '--config .agent/config/jscpd.json .' \"\$UP2/.agent/project.yaml\""
 
 printf '\n%d failure(s) — workdir %s\n' "$fail" "$WORK"
 [ $fail -eq 0 ]

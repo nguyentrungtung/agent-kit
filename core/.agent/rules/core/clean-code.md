@@ -14,7 +14,7 @@ Machine-checked limits are enforced by the stack linters; the rest is checked in
 | Function ≤ ~60 lines, ≤ 4 parameters, nesting ≤ 3 | ESLint `max-lines-per-function` / `max-params` / `max-depth`, Ruff `PLR0913`, review |
 | File / class with one reason to change | review (Divergent Change smell) |
 - Prefer **deep modules**: a small interface hiding a lot of behaviour (mp-codebase-design). Avoid pass-through layers (Middle Man).
-- Names reveal intent in the project's domain language (`GLOSSARY.md`). No abbreviations nobody uses, no `data`, `manager`, `util`, `helper` dumping grounds.
+- Names reveal intent in the project's domain language (`docs/GLOSSARY.md`). No abbreviations nobody uses, no `data`, `manager`, `util`, `helper` dumping grounds.
 
 ## 3. Principles
 - **SOLID** where it buys something: single responsibility, depend on abstractions at boundaries (ports), keep interfaces small.

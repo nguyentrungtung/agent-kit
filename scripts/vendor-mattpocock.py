@@ -32,7 +32,7 @@ PREFIX = "mp-"
 PATCHES = [
     ("code-review",
      "The issue tracker should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`.",
-     "agent-kit: where specs, tasks and issues live in this repo is described in `docs/agents/issue-tracker.md`."),
+     "agent-kit: where specs, tasks and issues live in this repo is described in `.agent/context/agents/issue-tracker.md`."),
     ("code-review",
      "1. Issue references in the commit messages",
      "0. agent-kit: the task file of the current branch (`.agent/tasks/TASK-NNN-*.md`, acceptance criteria) and its OpenSpec change\n"
@@ -42,6 +42,60 @@ PATCHES = [
      "When `CODING_STANDARDS.md` or `CONTRIBUTING.md` exists, it must be on the list.",
      "When `CODING_STANDARDS.md` or `CONTRIBUTING.md` exists, it must be on the list.\n"
      "agent-kit: `.agent/rules/` (project > stack > core) and `.agent/context/CONVENTIONS.md` are this repo's standards sources."),
+    ("domain-modeling",
+     "/\n├── GLOSSARY.md\n",
+     "/\n├── docs/\n│   ├── GLOSSARY.md\n"),
+    ("domain-modeling",
+     "If a `GLOSSARY-MAP.md` exists at the root,",
+     "If a `docs/GLOSSARY-MAP.md` exists (see `.agent/context/agents/domain.md`),"),
+    ("domain-modeling",
+     "/\n├── GLOSSARY-MAP.md\n",
+     "/\n├── docs/\n│   ├── GLOSSARY-MAP.md\n"),
+    ("domain-modeling",
+     "If no `GLOSSARY.md` exists,",
+     "If no `docs/GLOSSARY.md` exists,"),
+    ("domain-modeling",
+     "in `GLOSSARY.md`,",
+     "in `docs/GLOSSARY.md`,"),
+    ("domain-modeling",
+     "update `GLOSSARY.md` right there",
+     "update `docs/GLOSSARY.md` right there"),
+    ("improve-codebase-architecture",
+     "in `GLOSSARY.md`",
+     "in `docs/GLOSSARY.md`"),
+    ("improve-codebase-architecture",
+     "(`GLOSSARY.md`)",
+     "(`docs/GLOSSARY.md`)"),
+    ("improve-codebase-architecture",
+     "Use GLOSSARY.md vocabulary",
+     "Use docs/GLOSSARY.md vocabulary"),
+    ("improve-codebase-architecture",
+     "If `GLOSSARY.md` defines",
+     "If `docs/GLOSSARY.md` defines"),
+    ("improve-codebase-architecture",
+     "not in `GLOSSARY.md`?** Add the term to `GLOSSARY.md`.",
+     "not in `docs/GLOSSARY.md`?** Add the term to `docs/GLOSSARY.md`."),
+    ("improve-codebase-architecture",
+     "Update `GLOSSARY.md` right there.",
+     "Update `docs/GLOSSARY.md` right there."),
+    ("tdd",
+     "read `GLOSSARY.md`",
+     "read `docs/GLOSSARY.md`"),
+    ("diagnosing-bugs",
+     "read `GLOSSARY.md`",
+     "read `docs/GLOSSARY.md`"),
+    ("pr",
+     "from `GLOSSARY.md`.",
+     "from `docs/GLOSSARY.md`."),
+    ("domain-modeling/GLOSSARY-FORMAT.md",
+     "**Single context (most repos):** One `GLOSSARY.md` at the repo root.\n\n**Multiple contexts:** A `GLOSSARY-MAP.md` at the repo root",
+     "**Single context (most repos):** One `docs/GLOSSARY.md`.\n\n**Multiple contexts:** A `docs/GLOSSARY-MAP.md`"),
+    ("domain-modeling/GLOSSARY-FORMAT.md",
+     "- If `GLOSSARY-MAP.md` exists, read it to find contexts\n- If only a root `GLOSSARY.md` exists, single context\n- If neither exists, create a root `GLOSSARY.md` lazily when the first term is resolved",
+     "- If `docs/GLOSSARY-MAP.md` exists, read it to find contexts\n- If only `docs/GLOSSARY.md` exists, single context\n- If neither exists, create `docs/GLOSSARY.md` lazily when the first term is resolved"),
+    ("codebase-design/DESIGN-IT-TWICE.md",
+     "and GLOSSARY.md vocabulary",
+     "and docs/GLOSSARY.md vocabulary"),
 ]
 
 def main():
@@ -80,7 +134,8 @@ def main():
             f" lines marked `agent-kit:` added. Update with scripts/vendor-mattpocock.py — do not edit by hand.\n")
 
     for name, old, new in PATCHES:
-        p = os.path.join(dest_root, PREFIX + name, "SKILL.md")
+        rel_path = name.split("/", 1) if "/" in name else [name, "SKILL.md"]
+        p = os.path.join(dest_root, PREFIX + rel_path[0], rel_path[1])
         t = open(p).read()
         old_p = ref.sub(lambda m: m["pre"] + PREFIX + m["name"] + m["post"], old)
         if old_p not in t:

@@ -37,7 +37,7 @@ Map every old file by **content**, not by name. One topic lives in one place:
   over kit rules, so a real conflict goes to `.agent/rules/project/` with one line saying which kit rule it overrides.
 - `AGENTS.md`: start from `AGENTS.md.kit-new` (the kit's structure) and put the project's own top rules in **§7 (≤ 30 lines)**; everything
   longer becomes a linked file above. Agents load AGENTS.md every session — a 400-line AGENTS.md costs every task.
-- `CLAUDE.md` = `@AGENTS.md` only. `GEMINI.md`, `.cursorrules`, `.cursor/rules/`, `copilot-instructions.md`: replace their content with a pointer
+- `.claude/CLAUDE.md` = `@../AGENTS.md` only (remove any legacy root `CLAUDE.md`). `GEMINI.md`, `.cursorrules`, `.cursor/rules/`, `copilot-instructions.md`: replace their content with a pointer
   to AGENTS.md (or delete them when the harness reads AGENTS.md natively).
 - Keep a move log in the task file: `old path → new path (what was dropped and why)`.
 

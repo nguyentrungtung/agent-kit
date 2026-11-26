@@ -10,7 +10,7 @@ Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 
 Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings. Start every sub-agent with a fresh context window.
 
-agent-kit: where specs, tasks and issues live in this repo is described in `docs/agents/issue-tracker.md`.
+agent-kit: where specs, tasks and issues live in this repo is described in `.agent/context/agents/issue-tracker.md`.
 
 ## Process
 

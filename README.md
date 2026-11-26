@@ -267,7 +267,7 @@ Một nguồn duy nhất cho mọi harness: luật ở `AGENTS.md`, playbook ở
 | Antigravity | `AGENTS.md`, `.agents/rules/stack-*.md` (`trigger: glob`) | `.agent/skills/` | ❌ → git hooks + CI |
 | dsh / harness khác | `AGENTS.md` hoặc dán `kit-context` | `.agent/skills/` hoặc mở SKILL.md làm theo | ❌ → git hooks + CI |
 
-OpenSpec được init cho `claude, codex, gemini, antigravity, dsh`. Ở harness không có hook, lớp chặn cuối là **git hooks + CI + branch protection**: commit, push và PR sai vẫn bị chặn, nhưng việc đọc file hay chạy lệnh thì không.
+Mặc định OpenSpec chỉ init cho `claude` (hoặc theo `--harness` đã chọn, vd. `codex, gemini, antigravity, dsh`). Ở harness không có hook, lớp chặn cuối là **git hooks + CI + branch protection**: commit, push và PR sai vẫn bị chặn, nhưng việc đọc file hay chạy lệnh thì không.
 
 ## 5b. Chạy song song, board và GitHub Issues
 
@@ -405,7 +405,7 @@ pint.json  phpstan.neon.dist  deptrac.yaml  .editorconfig  Dockerfile  compose.y
   scripts/      kit-run · kit-task · kit-doctor · kit-diagrams · kit-context · kit-daily · kit-secrets-scan
   hooks/        guard-bash · guard-files · session-start (Claude Code)
   githooks/     pre-commit · commit-msg · pre-push
-.claude/  settings.json · rules/stack-php.md · skills/kit-* · agents/*
+.claude/  settings.json · CLAUDE.md · rules/stack-php.md · skills/kit-* · agents/*
 .github/  workflows/ci.yml (setup đúng runtime) · PULL_REQUEST_TEMPLATE.md · ISSUE_TEMPLATE/
 docs/     ba/ (+_templates) · architecture/ · plan/ · adr/ · qa/ · security/ · daily/ · GLOSSARY.md
 ```

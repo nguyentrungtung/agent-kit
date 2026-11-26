@@ -8,7 +8,7 @@
 | Business source | `docs/ba/` (use cases `UC-NN`, stories `US-NN`, rules `BR-NN`) |
 | Decisions | `docs/adr/` (create with `.agent/scripts/kit-new adr "<title>"`) |
 | Coding standards | `.agent/rules/` (project > stack > core), summary in `.agent/context/CONVENTIONS.md` |
-| Domain language | `GLOSSARY.md` (repo root) |
+| Domain language | `docs/GLOSSARY.md` |
 | GitHub / GitLab issues (optional) | linked via `.agent/tasks/.issues` (`TASK-NNN=<issue>`); create/update with `.agent/scripts/kit-task sync` (asks first) |
 
 Create new work items with `.agent/scripts/kit-task new "<title>" [--change <change>]` — never by hand, never directly on the tracker.
