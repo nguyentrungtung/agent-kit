@@ -19,7 +19,7 @@ description: Draw correct, readable diagrams as code (Mermaid first, PlantUML wh
 ## Conventions
 - Source lives in Markdown fences (```` ```mermaid ```` / ```` ```plantuml ````) next to the text that explains it. GitHub renders Mermaid natively.
 - One diagram = one question. ≤ ~15 nodes / ~10 participants; split otherwise (overview + detail).
-- Title + legend when colours/shapes carry meaning. Use real names from `GLOSSARY.md`, same IDs as requirements (US-03, BR-02).
+- Title + legend when colours/shapes carry meaning. Use real names from `docs/GLOSSARY.md`, same IDs as requirements (US-03, BR-02).
 - Sequence: show `alt`/`opt` for error and timeout paths; label messages with the operation (`POST /orders`), not "calls".
 - Process: start/end events, decisions as diamonds with labelled exits (Yes/No), exceptions explicit; one lane per role or system.
 - State: every state reachable, terminal states marked, transitions labelled `event [guard] / action`.

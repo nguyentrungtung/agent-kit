@@ -16,7 +16,7 @@ Goal: after this, any fresh session can work correctly by reading `.agent/` only
    - `.agent/context/ARCHITECTURE.md` — modules table with paths and allowed dependencies, data stores, integrations, mermaid diagram.
    - `.agent/context/CONVENTIONS.md` — fill "Observed in code": where the code differs from `.agent/rules/stack/*.md` (naming, layering, error/logging, tests).
    - `.agent/rules/project/` — module boundaries and domain rules found in code (one file per topic, each rule + enforcing tool).
-   - `GLOSSARY.md` — domain terms found in code.
+   - `docs/GLOSSARY.md` — domain terms found in code.
 3b. **Existing agent instructions or docs** (an own `AGENTS.md` / `AGENTS.md.kit-new`, `agent/`, `.cursor/`, an old `CLAUDE.md`, a `docs/` the
    `.gitignore` hides): run the **kit-migrate** playbook first (it starts from `.agent/scripts/kit-adopt-scan`), then come back here.
    Scan §8 lists checks the repo's CI / hooks run that no `cmd_*` covers — wire them in step 4.

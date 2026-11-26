@@ -4,7 +4,7 @@ description: Design the application (OLTP) data model — entities and aggregate
 ---
 # kit-datamodel — application data model
 
-Inputs: `GLOSSARY.md`, use cases/stories (`docs/ba/`), module boundaries (`docs/architecture/SOLUTION.md`), rules `.agent/rules/core/database.md`.
+Inputs: `docs/GLOSSARY.md`, use cases/stories (`docs/ba/`), module boundaries (`docs/architecture/SOLUTION.md`), rules `.agent/rules/core/database.md`.
 Output: `docs/architecture/data-model.md` (living) + ADRs + migrations via kit-task. Terms come from the glossary (mp-domain-modeling).
 
 ## 1. Entities & aggregates

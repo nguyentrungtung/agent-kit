@@ -17,3 +17,4 @@ Rule: read **living** docs to understand the system; change records only for the
 | `security/` | Threat model, PII register, accepted risks (module `security`) | living | `kit-appsec`, `kit-security` |
 | `STYLEGUIDE.md` | Markdown documentation standards (Diataxis, formatting, alerts) | standard | human / tech lead |
 | `daily/` | Daily / weekly reports | report | `kit-daily` |
+| `GLOSSARY.md` | Ubiquitous language & domain terms (single source of truth) | living | `kit-ba`, `kit-sa`, `mp-domain-modeling` |

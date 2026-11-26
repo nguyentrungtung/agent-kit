@@ -17,6 +17,7 @@ case_() { # case_ <name> <preset> <setup-commands>
   check "project.yaml has commands"        "grep -q '^cmd_lint:' '$d/.agent/project.yaml'"
   check "AGENTS.md playbooks rendered"      "grep -q '^- \`kit-task\`' '$d/AGENTS.md'"
   check "skills canonical + claude links"   "[ -f '$d/.agent/skills/kit-task/SKILL.md' ] && [ -L '$d/.claude/skills/kit-task' ]"
+  check "claude imports root AGENTS.md"     "grep -q '^@\.\./AGENTS\.md' '$d/.claude/CLAUDE.md'"
   check "clean root layout"                 "[ ! -e '$d/.agents' ] && [ ! -e '$d/.gemini' ] && [ ! -e '$d/.githooks' ] && [ ! -e '$d/CLAUDE.md' ] && [ ! -e '$d/GLOSSARY.md' ]"
   check "manifest written"                  "[ -s '$d/.agent/kit.manifest' ]"
   check "scripts parse"                     "for f in '$d'/.agent/scripts/* '$d'/.agent/hooks/*.sh '$d'/.agent/githooks/*; do bash -n \"\$f\" || exit 1; done"

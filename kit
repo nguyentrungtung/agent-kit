@@ -1396,6 +1396,7 @@ cmd_add() {
   for m in $add; do [ -d "$MODULES/$m" ] || die "unknown module '$m'"; case " $old " in *" $m "*) note "module $m already installed — refreshing files";; esac; new="$new $m"; done
   MODS="$(echo $old $new | tr ' ' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ' ' | sed 's/ $//')"
   SERVICES="${SERVICES_ADD:-$(yget "$TARGET/.agent/kit.lock" services)}"
+  HARNESSES="${HARNESSES:-$(yget "$TARGET/.agent/kit.lock" harnesses)}"; HARNESSES="${HARNESSES:-claude}"
   case " $new " in *" devops "*) [ -z "$SERVICES" ] && [ $INTERACTIVE -eq 1 ] && {
       local opts=() o; for o in $(all_services); do opts+=("$(lbl "$o" "$(svc_meta "$o" title)")"); done
       SERVICES="$(ui_many "Docker services for local dev" "postgres" "${opts[@]}")"; } ;; esac
@@ -1410,6 +1411,7 @@ cmd_add() {
   LANG_DOCS="$(yget "$cfg" docs_language)"; render_module_placeholders
   wire_harnesses
   render_playbooks
+  chmod +x "$TARGET"/.agent/scripts/* "$TARGET"/.agent/hooks/*.sh "$TARGET"/.agent/githooks/* "$TARGET"/.githooks/* 2>/dev/null || true
   [ -f "$TARGET/.agent/kit.lock" ] && { sed -i.bak "s#^modules:.*#modules: $MODS#; s#^services:.*#services: $SERVICES#" "$TARGET/.agent/kit.lock"; rm -f "$TARGET/.agent/kit.lock.bak"; }
   local keep="$MODS"; MODS="$new"; [ "$SETUP" != no ] && run_module_setup; MODS="$keep"
   say "added:$new — $CREATED file(s) created"
@@ -1483,6 +1485,9 @@ migrate_root_layout() { # migrate pre-0.17 root layout (clean root: everything u
       say "migrated: CLAUDE.md → .claude/CLAUDE.md"
     else
       rm -f "$TARGET/CLAUDE.md"
+    fi
+    if [ -f "$TARGET/.claude/CLAUDE.md" ]; then
+      sed -i.bak 's#^@AGENTS\.md#@../AGENTS.md#' "$TARGET/.claude/CLAUDE.md" && rm -f "$TARGET/.claude/CLAUDE.md.bak"
     fi
   fi
 

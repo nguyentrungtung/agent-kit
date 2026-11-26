@@ -15,8 +15,8 @@ behind. Do NOT change product code here. Run it before `kit-onboard` (which then
 ## 1. Ask the human ONE question first — then wait
 "Are the agent rules and `docs/` shared with the team (committed) or kept on your machine only?"
 - **Shared** (default for a team repo): §4 of the scan must be clean before any `.gitignore` line is removed.
-- **Personal**: keep `.gitignore` as it is, but then `CLAUDE.md`, `.agent/` and `.agents/` must be ignored too (add them) — a
-  committed `CLAUDE.md` that imports an ignored `AGENTS.md` gives teammates no rules at all. Skip step 5.
+- **Personal**: keep `.gitignore` as it is, but then `.claude/`, `.agent/` and `.agents/` must be ignored too (add them) — a
+  committed `.claude/CLAUDE.md` that imports an ignored `AGENTS.md` gives teammates no rules at all. Skip step 5.
 Record the answer in `.agent/memory/DECISIONS.md`.
 
 ## 2. Rules: move, merge, shorten (scan §1)
@@ -29,7 +29,7 @@ Map every old file by **content**, not by name. One topic lives in one place:
 | Security rules (secrets, PII, network) | `.agent/rules/project/security.md` |
 | Data rules (layers, naming, contracts, idempotency) | `.agent/rules/project/data.md` |
 | Code skeletons / templates | `.agent/stack/<stack>/skeletons/` (used by `kit-new module`) |
-| Domain terms | `GLOSSARY.md` |
+| Domain terms | `docs/GLOSSARY.md` |
 | Gotchas, incidents, "we learned that…" | `.agent/memory/LESSONS.md` (short) — long write-ups stay in `docs/` and are linked |
 | Runbooks, how-to-operate | `docs/platform/runbooks/` (or keep where they are and link) |
 | Constitution / principles duplicating `.agent/rules/core/*` | **drop the duplicate**; keep only what differs, as a project rule |

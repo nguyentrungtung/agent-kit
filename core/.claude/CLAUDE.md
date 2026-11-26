@@ -1,4 +1,4 @@
-@AGENTS.md
+@../AGENTS.md
 
-<!-- Claude Code reads CLAUDE.md; all rules live in AGENTS.md so every agent shares one source. -->
-<!-- Personal, uncommitted notes: CLAUDE.local.md (git-ignored). -->
+<!-- Claude Code reads .claude/CLAUDE.md; all rules live in AGENTS.md so every agent shares one source. -->
+<!-- Personal, uncommitted notes: .claude/CLAUDE.local.md or CLAUDE.local.md (git-ignored). -->

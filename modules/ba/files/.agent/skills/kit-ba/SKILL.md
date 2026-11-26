@@ -13,7 +13,7 @@ Write in `docs_language` (`.agent/project.yaml`). Diagrams follow the **kit-diag
 - **New project**: all steps at project level (`docs/ba/`), then one folder per epic.
 
 ## 1. Context (read, don't ask)
-`.agent/context/PROJECT.md`, `GLOSSARY.md`, existing `docs/ba/**`, `docs/architecture/**`. Prefer codegraph/grep over opening whole files.
+`.agent/context/PROJECT.md`, `docs/GLOSSARY.md`, existing `docs/ba/**`, `docs/architecture/**`. Prefer codegraph/grep over opening whole files.
 For an existing system, derive the **as-is** behaviour from code before asking.
 
 ## 2. Elicitation interview — MANDATORY before writing any requirement
@@ -101,7 +101,7 @@ Run `.agent/scripts/kit-run docs` (renders every Mermaid/PlantUML block; fails o
 - [ ] Open questions listed with owner; blockers answered.
 
 ## 9. Hand-off (BA → SA → Planner)
-Update `PROJECT.md` goals/non-goals and `GLOSSARY.md`.
+Update `PROJECT.md` goals/non-goals and `docs/GLOSSARY.md`.
 Deliver the **Architecture Hand-off Packet** in `docs/ba/BRIEF.md`:
 - Client platforms (Web SPA, Web SSR, Mobile App, API)
 - Expected load, transaction volume, and latency numbers (from NFRs)

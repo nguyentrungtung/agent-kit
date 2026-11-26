@@ -394,7 +394,7 @@ Rút ra từ lần chạy thật trên một repo data (Python + dbt) trên GitL
 ## 8. Cấu trúc được cài vào dự án (ví dụ: php + laravel, module ba sa docker codegraph)
 
 ```
-AGENTS.md  CLAUDE.md  .env.example  .gitignore(+)  .gitattributes(+)
+AGENTS.md  .env.example  .gitignore(+)  .gitattributes(+)
 pint.json  phpstan.neon.dist  deptrac.yaml  .editorconfig  Dockerfile  compose.yaml  .dockerignore   ← chỉ của stack/module đã chọn
 .agent/
   project.yaml  kit.lock        lệnh (đã ghép theo component) · lựa chọn khi init

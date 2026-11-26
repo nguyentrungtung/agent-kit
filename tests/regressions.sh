@@ -892,6 +892,7 @@ check "upgrade migrated .githooks to .agent/githooks" "[ -d \"\$A/.agent/githook
 check "upgrade updated core.hooksPath" "[ \"\$(git -C \"\$A\" config core.hooksPath)\" = .agent/githooks ]"
 check "upgrade migrated .agents/skills to .agent/skills" "[ -d \"\$A/.agent/skills\" ] && [ ! -e \"\$A/.agents\" ]"
 check "upgrade migrated CLAUDE.md to .claude/CLAUDE.md" "[ -f \"\$A/.claude/CLAUDE.md\" ] && [ ! -e \"\$A/CLAUDE.md\" ]"
+check "upgrade updated @AGENTS.md to @../AGENTS.md in .claude/CLAUDE.md" "grep -q '^@\.\./AGENTS\.md' \"\$A/.claude/CLAUDE.md\""
 check "upgrade migrated GLOSSARY.md to docs/GLOSSARY.md" "[ -f \"\$A/docs/GLOSSARY.md\" ] && [ ! -e \"\$A/GLOSSARY.md\" ]"
 check "upgrade migrated config files to .agent/config" "[ -f \"\$A/.agent/config/jscpd.json\" ] && [ ! -e \"\$A/.jscpd.json\" ]"
 check "upgrade symlinks in .claude/skills point to .agent/skills" "[ -L \"\$A/.claude/skills/kit-task\" ] && [ \"\$(readlink \"\$A/.claude/skills/kit-task\")\" = '../../.agent/skills/kit-task' ]"
