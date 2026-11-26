@@ -33,8 +33,9 @@ if [ -n "$id" ]; then
   f="$(task_file "$id")"
   if [ -f "$f" ]; then
     section "ACTIVE TASK $id (${f#"$KIT_ROOT"/})"
-    ch="$(fm_get "$f" change)"
-    [ -n "$ch" ] && echo "OpenSpec change: openspec/changes/$ch/ (proposal, specs, design, tasks)"
+    for p in "$KIT_DIR"/plugins/*/context.sh; do
+      [ -f "$p" ] && ( source "$p" task "$f" ) || true
+    done
     task_tags="$(norm_tags_re "$(fm_get "$f" tags 2>/dev/null)")"
     raw_task_tags="$(fm_get "$f" tags 2>/dev/null | tr -d '\r\t[]"'\'' ')"
     if [ $brief -eq 1 ]; then
@@ -96,7 +97,13 @@ if [ $brief -eq 0 ]; then
 fi
 
 section "READ ON DEMAND (do not load all at once)"
-echo "- Current behaviour: openspec/specs/ (source of truth) · Docs map: docs/README.md · Workflow: .agent/rules/core/workflow.md"
+extra_refs=""
+for p in "$KIT_DIR"/plugins/*/context.sh; do
+  [ -f "$p" ] || continue
+  r="$( ( source "$p" refs ) || true )"
+  [ -n "$r" ] && extra_refs="$extra_refs · $r"
+done
+echo "- Docs map: docs/README.md · Workflow: .agent/rules/core/workflow.md${extra_refs}"
 echo "- Goals/scope: .agent/context/PROJECT.md · Architecture: .agent/context/ARCHITECTURE.md · Rules: .agent/rules/"
 echo "- Finished tasks live in .agent/tasks/archive/ — history only, do not read them to learn the system"
 echo "- Conventions: .agent/context/CONVENTIONS.md · Playbooks: .agent/skills/<name>/SKILL.md"

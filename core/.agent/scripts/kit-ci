@@ -69,6 +69,9 @@ cmd_guard() {
     [ $bad -eq 0 ] || return 1
   fi
   "$KIT_DIR/scripts/kit-trace"
+  local p
+  for p in "$KIT_DIR"/plugins/*/ci-guard.sh; do [ -f "$p" ] || continue; source "$p"; done
+  return 0
 }
 
 cmd_task_gates() {
@@ -102,32 +105,18 @@ cmd_task_gates() {
   return $bad
 }
 
-cmd_api() {
-  [ -f docs/api/openapi.yaml ] || { info "no docs/api/openapi.yaml — API checks skipped"; return 0; }
-  "$KIT_DIR/scripts/kit-run" api
-  if grep -qE '^cmd_apigen:[[:space:]]*[^#[:space:]]' "$KIT_CFG"; then
-    local before; before="$(git status --porcelain)"
-    "$KIT_DIR/scripts/kit-run" apigen
-    [ "$before" = "$(git status --porcelain)" ] || { git status --short; ci_error "generated API client is stale — run .agent/scripts/kit-run apigen and commit"; return 1; }
-  else
-    info "cmd_apigen is not set — frontend types are not checked against docs/api/openapi.yaml (set it when a frontend consumes the API, kit-api §3b)"
-  fi
-  if [ "$EVENT" = pr ] && [ -n "$BASE_REF" ]; then
-    fetch_base
-    local base; base="$(mktemp)"
-    if git show "origin/$BASE_REF:docs/api/openapi.yaml" > "$base" 2>/dev/null; then
-      if command -v docker >/dev/null 2>&1; then
-        docker run --rm -v "$(dirname "$base"):/base" -v "$PWD/docs/api:/head" tufin/oasdiff:v1.11.1 breaking "/base/$(basename "$base")" /head/openapi.yaml --fail-on ERR
-      else warn "docker not available — breaking-change check (oasdiff) skipped"; fi
-    else info "no base contract yet"; fi
-    rm -f "$base"
-  fi
-}
-
-case "${1:-}" in
+sub="${1:-}"; [ -n "$sub" ] && shift || true
+case "$sub" in
   prepare) cmd_prepare ;;
   guard) cmd_guard ;;
   task-gates) cmd_task_gates ;;
-  api) cmd_api ;;
-  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  "") sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *)
+    ran=0
+    for p in "$KIT_DIR"/plugins/*/ci-"$sub".sh; do
+      [ -f "$p" ] || continue
+      ran=1; source "$p"
+    done
+    [ $ran -eq 1 ] || info "no plugin handles 'kit-ci $sub' — skipped"
+    ;;
 esac

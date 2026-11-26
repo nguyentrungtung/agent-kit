@@ -1,0 +1,2 @@
+openspec|openspec --version||@fission-ai/openspec@{{CFG:openspec_version:2.1.1}}||module openspec (or npx)|0
+node|node --version|node|||module openspec, stack node|0

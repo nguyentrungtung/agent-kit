@@ -1,10 +1,10 @@
 # Clean code — manifesto for every language
 
 The stack rules (`.agent/rules/stack/`) say HOW in each language; this file says WHAT good code is everywhere.
-Machine-checked limits are enforced by the stack linters; the rest is checked in review (`kit-review` / mp-code-review).
+Machine-checked limits are enforced by the stack linters; the rest is checked in review (`kit-review`).
 
 ## 1. Reuse before you write
-- Before adding a function/class: `codegraph explore "<concept>"` (or grep) for existing code that does it. Extend or reuse; do not duplicate.
+- Before adding a function/class: query installed code-intelligence / LSP tools (or grep) for existing code that does it. Extend or reuse; do not duplicate.
 - Duplicated blocks above the threshold fail CI (`kit-run dup`, jscpd). Extract the shared shape, call it from both places.
 
 ## 2. Small, deep, honest units
@@ -13,7 +13,7 @@ Machine-checked limits are enforced by the stack linters; the rest is checked in
 | Cyclomatic / cognitive complexity per function ≤ 10 / 15 | ESLint `complexity`, Ruff `C901`, gocognit, PHPStan cognitive-complexity, CA1502, clippy |
 | Function ≤ ~60 lines, ≤ 4 parameters, nesting ≤ 3 | ESLint `max-lines-per-function` / `max-params` / `max-depth`, Ruff `PLR0913`, review |
 | File / class with one reason to change | review (Divergent Change smell) |
-- Prefer **deep modules**: a small interface hiding a lot of behaviour (mp-codebase-design). Avoid pass-through layers (Middle Man).
+- Prefer **deep modules**: a small interface hiding rich behaviour. Avoid pass-through layers (Middle Man).
 - Names reveal intent in the project's domain language (`docs/GLOSSARY.md`). No abbreviations nobody uses, no `data`, `manager`, `util`, `helper` dumping grounds.
 
 ## 3. Principles

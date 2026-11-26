@@ -1,0 +1,1 @@
+- **Specs (`openspec`):** Living behaviour in `openspec/specs/`; active changes in `openspec/changes/<name>/` (`kit-new change`). Archived by `kit-task finish`.

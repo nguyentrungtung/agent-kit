@@ -171,13 +171,6 @@ issue_set() { # issue_set <TASK-ID> <n>
   echo "$1=$2" >> "$ISSUE_MAP.tmp"; sort -o "$ISSUE_MAP" "$ISSUE_MAP.tmp"; rm -f "$ISSUE_MAP.tmp"
 }
 
-# ---- OpenSpec links ----
-has_openspec() { [ -d "$KIT_ROOT/openspec" ] && [ -x "$KIT_DIR/scripts/kit-openspec" ]; }
-change_dir() { printf '%s/openspec/changes/%s' "$KIT_ROOT" "$1"; }
-tasks_of_change() { # tasks_of_change <change> → repo-relative task paths linked to it
-  local p; for p in $(task_names_all); do [ "$(fmv "$(task_view "$p")" change)" = "$1" ] && echo "$p"; done; return 0
-}
-
 # ascii_slug "<text>" [maxlen] → lowercase kebab-case ASCII; strips Vietnamese/Latin diacritics (đ → d)
 ascii_slug() {
   perl -CSA -MUnicode::Normalize -e '

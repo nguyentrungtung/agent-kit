@@ -13,10 +13,5 @@ description: Code review of the current task diff against .agent/checklists/code
    Re-review after fixing BLOCKER/MAJOR when the fix was large, and record the new line (newest wins).
 
 ## Why review locally when the PR also gets an external reviewer
-The author's model has the author's blind spots. Run the review in a fresh context (the `code-reviewer` sub-agent, or
-`mp-code-review`), never "re-read my own diff" in the same session, and include the checklist sections on upgrades, parsing
+The author's model has the author's blind spots. Run the review in a fresh context (the `code-reviewer` sub-agent, or an active review plugin skill), never "re-read my own diff" in the same session, and include the checklist sections on upgrades, parsing
 edge cases and gate scope. Local review is cheap and runs before push; the PR reviewer should find little.
-
-## With module eng-skills
-Run **mp-code-review** with the fixed point `kit/TASK-NNN/base` (two parallel axes: Standards = `.agent/rules/` + Fowler smell baseline,
-Spec = task acceptance criteria + OpenSpec change). Then map its findings to BLOCKER/MAJOR/MINOR here and fix BLOCKER/MAJOR.

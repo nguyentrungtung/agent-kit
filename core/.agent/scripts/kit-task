@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # kit-task — task lifecycle with gitflow branches, checkpoints and safe rollback
 #
-#   kit-task new "<title>" [--type feature|bugfix|hotfix|refactor|chore|docs|test|ci|perf] [--priority P1|P2|P3] [--change <openspec-change>]
+#   kit-task new "<title>" [--type feature|bugfix|hotfix|refactor|chore|docs|test|ci|perf] [--priority P1|P2|P3] [--change <id>]
 #                                     gitflow: hotfix branches from main, every other type from develop (fix = bugfix, bug = bugfix)
 #   kit-task verify [TASK-ID]         check the workflow gates (source, clarify checklist, solution, tests, result, AC,
 #                                     assumptions, traceability, living docs, change). CI runs it on every task PR.
@@ -31,7 +31,20 @@ remote() { printf '%s' "${KIT_REMOTE:-origin}"; }
 require_clean() {
   git diff --quiet && git diff --cached --quiet || die "working tree has uncommitted changes — run: kit-task checkpoint \"<msg>\" (or stash) first"
 }
-PLANNING_RE='^(docs/|openspec/|\.agent/(tasks|memory|context)/)'
+run_task_plugins() {
+  local p rc=0
+  for p in "$KIT_DIR"/plugins/*/task.sh; do
+    [ -f "$p" ] || continue
+    ( source "$p" "$@" ) || rc=1
+  done
+  return $rc
+}
+plugin_re_join() {
+  local base="$1" hook="$2" extra
+  extra="$(run_task_plugins "$hook" | grep . | paste -sd'|' - || true)"
+  if [ -n "$extra" ]; then printf '%s|%s' "$base" "$extra"; else printf '%s' "$base"; fi
+}
+PLANNING_RE="^($(plugin_re_join 'docs/|\.agent/(tasks|memory|context)/' planning_re))"
 require_clean_code() { # planning docs (BA, specs, changes, tasks, ADRs) may travel into the task branch; code may not
   local dirty
   dirty="$(git status --porcelain | cut -c4- | sed 's/.* -> //' | grep -vE "$PLANNING_RE" || true)"
@@ -89,8 +102,8 @@ cmd_new() {
     --?*|-[A-Za-z]*) die "kit-task new: unknown option '$1' (a title starting with '-': put -- before it)" ;;
     *) title="${title:+$title }$1"; shift ;;
   esac; done
-  [ -n "$title" ] || die 'usage: kit-task new "<title>" [--type feature] [--priority P2] [--change <openspec-change>] [--tags <tags>]   (title starting with "-": put -- before it)'
-  if [ -n "$change" ] && [ ! -d "$(change_dir "$change")" ]; then warn "OpenSpec change '$change' not found under openspec/changes/ (create it: kit-new change $change)"; fi
+  [ -n "$title" ] || die 'usage: kit-task new "<title>" [--type feature] [--priority P2] [--change <id>] [--tags <tags>]   (title starting with "-": put -- before it)'
+  run_task_plugins new_check "" "" "$change"
   local last n id f
   last="$(task_names_all | xargs -n1 basename 2>/dev/null | grep -oE '^TASK-[0-9]+' | sed 's/TASK-//' | sort -n | tail -n1 || true)"
   n=$(( 10#${last:-0} + 1 )); id="$(printf 'TASK-%03d' "$n")"
@@ -133,14 +146,14 @@ cmd_start() {
   git tag -f "kit/$id/base" >/dev/null
   fm_set "$f" status in-progress; fm_set "$f" branch "$br"; fm_set "$f" started "$(today)"
   log_progress "$f" "started on $br (base: $base @ $(git rev-parse --short HEAD))"
-  # the task file + any planning docs written on the base branch (BA, ADR, OpenSpec change) travel with the first commit
+  # the task file + any planning docs written on the base branch travel with the first commit
   git add -A "$KIT_TASKS" "$KIT_DIR/memory" "$KIT_DIR/context" 2>/dev/null || true
   [ -d "$KIT_ROOT/docs" ] && git add -A "$KIT_ROOT/docs"
-  [ -d "$KIT_ROOT/openspec" ] && git add -A "$KIT_ROOT/openspec"
+  local ch; ch="$(fm_get "$f" change)"
+  run_task_plugins start_stage "$id" "$f" "$ch" || true
   git commit -q -m "chore($id): start task" || true
   info "on $br — restore point kit/$id/base created"
-  local ch; ch="$(fm_get "$f" change)"
-  [ -n "$ch" ] && info "OpenSpec change: openspec/changes/$ch/ (proposal, specs, design, tasks) — read it before coding"
+  run_task_plugins start_info "$id" "$f" "$ch" || true
   local tags; tags="$(norm_tags_re "$(fm_get "$f" tags)")"
   if [ -n "$tags" ] && [ -f "$KIT_DIR/memory/LESSONS.md" ]; then
     local matched_lessons
@@ -336,8 +349,9 @@ cmd_verify() {
   [ -n "$s1" ] && gate ok "1 Understand filled" || gate no "1 Understand is empty — restate the problem and link its source (change / UC / US)"
   [ "$tpl" -ge 2 ] && case "$type" in
     feature|feat|bugfix|fix|hotfix|refactor)
-      if [ -n "$change" ] || printf '%s\n' "$s1" | grep -qE '(UC|US|BR|FR)-[0-9]+|[Ss]ource:|openspec/specs/[a-z0-9]'; then gate ok "1 source linked (change / UC / US / BR / spec / Source:)"
-      else gate no "1 Understand links no source — set 'change:' in the front matter, cite a UC/US/BR/FR id or an openspec/specs/<capability> link, or add 'Source: <issue / request, who, date>'"; fi ;;
+      local src_re; src_re="$(plugin_re_join '[Ss]ource:|docs/[a-z0-9]' source_re)"
+      if [ -n "$change" ] || printf '%s\n' "$s1" | grep -qE "$src_re"; then gate ok "1 source linked (change / doc / issue / Source:)"
+      else gate no "1 Understand links no source — cite a spec/doc/change or add 'Source: <issue / request, who, date>' (set 'change:' when using a spec plugin)"; fi ;;
   esac
   # 2 Clarify: the ambiguity checklist must be walked (every box ticked, n/a items too) and every asked question answered
   s2="$(section_body "$f" '^## 2\. Clarifications')"
@@ -363,17 +377,17 @@ cmd_verify() {
   [ -n "$(section_body "$f" '^## 3\. Solution')" ] && gate ok "3 Solution filled" || gate no "3 Solution is empty — approach, reuse found, files touched"
   # assumptions written by the agent must be confirmed by a human before the work is finished
   if [ -x "$KIT_DIR/scripts/kit-trace" ]; then
-    local scope=("$f") asm
-    [ "$tpl" -ge 2 ] && [ -n "$change" ] && [ -d "$(change_dir "$change")" ] && scope+=("$(change_dir "$change")")
-    # project-level BA / SA assumptions (scope, architecture) block every finish until a human confirms them
-    local pdoc; for pdoc in docs/ba/BRIEF.md docs/architecture/SOLUTION.md; do [ -f "$KIT_ROOT/$pdoc" ] && scope+=("$KIT_ROOT/$pdoc"); done
+    local scope=("$f") asm pdoc
+    if [ "$tpl" -ge 2 ]; then
+      while IFS= read -r pdoc; do [ -n "$pdoc" ] && scope+=("$pdoc"); done < <(run_task_plugins assumptions "$id" "$f" "$change" || true)
+    fi
     if [ "$tpl" -lt 2 ]; then :   # legacy task: its ASSUMPTION lines followed the old "confirm later" rule
-    elif asm="$("$KIT_DIR/scripts/kit-trace" assumptions "${scope[@]}" 2>&1)"; then gate ok "no unconfirmed ASSUMPTION in the task / change / BRIEF.md / SOLUTION.md"
+    elif asm="$("$KIT_DIR/scripts/kit-trace" assumptions "${scope[@]}" 2>&1)"; then gate ok "no unconfirmed ASSUMPTION in the task / plugin docs"
     else gate no "unconfirmed assumptions — the human answers each one; the answer is rewritten as 'CONFIRMED: <answer> (who, date)':
 $(printf '%s\n' "$asm" | head -n 10 | sed 's/^/    /')"; fi
     local tr
     if [ "$tpl" -lt 2 ]; then :   # legacy task: repo-wide traceability is still checked by CI (guard job), not per old task
-    elif tr="$("$KIT_DIR/scripts/kit-trace" 2>&1)"; then gate ok "traceability: every UC/US/BR/FR/NFR/ADR id referenced exists"
+    elif tr="$("$KIT_DIR/scripts/kit-trace" 2>&1)"; then gate ok "traceability: every referenced id exists"
     else gate no "traceability errors (ids referenced but not defined) — fix them (CI keeps develop clean, so they come from this branch):
 $(printf '%s\n' "$tr" | grep -E '^[[:space:]]+[^ ]*E[^ ]*[[:space:]]' | head -n 10 | sed 's/^[[:space:]]*/    /')"; fi
   fi
@@ -426,41 +440,16 @@ $(printf '%s\n' "$bad_ref" | sed 's/^/      /' | head -n 10)"
       if [ -n "$base" ]; then
         changed="$( { git -c core.quotePath=false diff --name-only "$base" 2>/dev/null; git -c core.quotePath=false ls-files --others --exclude-standard; } | sort -u)"
         code="$(printf '%s\n' "$changed" | grep -vE "$PLANNING_RE"'|\.md$|(^|/)(tests?|__tests__|spec|e2e)/|\.(test|spec)\.[a-z]+$|_test\.[a-z]+$' | grep . || true)"
-        # spec deltas count, an OpenSpec change's tasks.md / proposal.md checklist does not
-        docs="$(printf '%s\n' "$changed" | grep -E '^(openspec/specs/|openspec/changes/[^/]+/(specs/|design\.md$)|docs/(api|architecture|data|platform|security)/|README\.md$)' || true)"
+        local docs_re; docs_re="^($(plugin_re_join 'README\.md$' living_docs_re))"
+        docs="$(printf '%s\n' "$changed" | grep -E "$docs_re" || true)"
         if [ -z "$code" ] || [ -n "$docs" ] || printf '%s\n' "$s7" | grep -qiE '(^|[^a-z])docs?[*_]*:[*_]*[[:space:]]*(none|n/?a|no[[:space:]]|không)'; then gate ok "living docs updated with the code (or 'Docs: none — <why>' in §7)"
-        else gate no "code changed but no spec / living doc did (openspec change, docs/api, docs/architecture, README) — update them, or write 'Docs: none — <why>' in §7"; fi
+        else gate no "code changed but no spec / living doc did (README.md or active plugin living docs) — update them, or write 'Docs: none — <why>' in §7"; fi
       fi
     fi ;;
   esac
-  if [ -n "$change" ] && has_openspec; then
-    if [ -d "$(change_dir "$change")" ]; then
-      if "$KIT_DIR/scripts/kit-openspec" validate "$change" --strict --no-interactive >/dev/null 2>&1; then gate ok "OpenSpec change '$change' valid (--strict)"
-      else gate no "OpenSpec change '$change' invalid — run: .agent/scripts/kit-openspec validate $change --strict"; fi
-    elif ls -d "$KIT_ROOT"/openspec/changes/archive/*-"$change" >/dev/null 2>&1; then gate ok "OpenSpec change '$change' already archived"
-    else gate no "OpenSpec change '$change' not found"; fi
-  fi
+  run_task_plugins verify "$id" "$f" "$change" || bad=1
   [ $bad -eq 0 ] || return 1
   info "gates OK"
-}
-
-archive_change_if_last() { # archive_change_if_last <id> <task-file> — OpenSpec archive on the last task of a change
-  local id="$1" f="$2" change p st open="" unchecked
-  change="$(fm_get "$f" change)"
-  [ -n "$change" ] && has_openspec && [ -d "$(change_dir "$change")" ] || return 0
-  for p in $(tasks_of_change "$change"); do
-    [ "$(basename "$p")" = "$(basename "$f")" ] && continue
-    st="$(task_effective_status "$(task_view "$p")")"
-    case "$st" in done|abandoned|review) ;; *) open="$open $(basename "$p" .md | grep -oE '^TASK-[0-9]+')" ;; esac
-  done
-  if [ -n "$open" ]; then info "OpenSpec change '$change' still has open tasks:$open — it is archived by the last one"; return 0; fi
-  unchecked="$(grep -cE '^[[:space:]]*- \[ \]' "$(change_dir "$change")/tasks.md" 2>/dev/null || true)"
-  [ "${unchecked:-0}" -eq 0 ] || die "openspec/changes/$change/tasks.md has $unchecked unticked item(s) — finish them or move them to a new task/change first"
-  info "archiving OpenSpec change '$change' → openspec/specs (merged with this PR)"
-  "$KIT_DIR/scripts/kit-openspec" archive "$change" -y >/dev/null || die "openspec archive failed — run: .agent/scripts/kit-openspec archive $change"
-  log_progress "$f" "OpenSpec change $change archived into openspec/specs"
-  git add -A "$KIT_ROOT/openspec" "$KIT_TASKS"
-  git commit -q -m "docs($id): archive OpenSpec change $change into specs" || true
 }
 
 cmd_finish() {
@@ -471,7 +460,7 @@ cmd_finish() {
   "$KIT_DIR/scripts/kit-run" check || die "checks failed — fix before finishing"
   local f type base br title
   f="$(task_file "$id")"; type="$(fm_get "$f" type)"; base="$(base_for_type "${type:-feature}")"
-  archive_change_if_last "$id" "$f"
+  run_task_plugins archive "$id" "$f" "$(fm_get "$f" change)"
   br="$(current_branch)"; title="$(fm_get "$f" title)"
   fm_set "$f" status review
   log_progress "$f" "finished, PR to $base"

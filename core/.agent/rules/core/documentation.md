@@ -4,15 +4,15 @@ Separate by **lifetime**. Agents read living docs to understand the system; chan
 
 | Kind | Question it answers | Location | Updated | Read |
 |---|---|---|---|---|
-| **Living — behaviour** | What does the system do now? | `openspec/specs/<capability>/spec.md` | By archiving the change, in the PR that changes the code | Always first |
-| **Living — structure** | How is it built? | `docs/architecture/` (SOLUTION, project-structure, ui-design-system, data model), `.agent/rules/project/modules.md`, `.agent/context/ARCHITECTURE.md` (summary) | When structure/data/infrastructure changes | Before design |
-| **Living — contracts** | How do others call it? | `docs/api/` (OpenAPI) | Same PR as the API change | When touching APIs |
-| **Business** | What do users need? | `docs/ba/` (brief, use cases, stories, rules, RTM) | When requirements change | When planning |
-| **Change in progress** | What are we changing and why? | `openspec/changes/<change>/` (proposal, spec deltas, design, tasks) | During the change; archived when done | During that change |
+| **Living — behaviour** | What does the system do now? | `README.md` (+ `openspec/specs/` when `openspec` enabled) | In the PR that changes code | Always first |
+| **Living — structure** | How is it built? | `.agent/context/ARCHITECTURE.md`, `.agent/rules/project/modules.md` (+ `docs/architecture/` when `sa` enabled) | When structure changes | Before design |
+| **Living — contracts** | How do others call it? | `docs/api/` (when `api` enabled) | Same PR as API change | When touching APIs |
+| **Plugin docs** | Domain / ops / data / security docs | `docs/ba/`, `docs/platform/`, `docs/data/`, `docs/security/` (when matching module installed) | When requirements/design change | On demand |
+| **Change in progress** | What are we changing and why? | Active change folder (e.g. `openspec/changes/` when `openspec` enabled) | During the change | During that change |
 | **Execution record** | What did this task do, ask, decide, verify? | `.agent/tasks/TASK-NNN-*.md` + `docs/qa/TASK-NNN.md` | Live during the task (timestamped log) | Only the active task |
 | **Decisions** | Why A and not B? | `docs/adr/NNNN-*.md` (immutable; superseded, never edited) | When deciding | When questioning a choice |
 | **Reports** | What happened today/this week? | `docs/daily/` | End of session | Rarely |
-| **History** | — | `.agent/tasks/archive/YYYY-MM/`, `openspec/changes/archive/` | Never edited | Archaeology only |
+| **History** | — | `.agent/tasks/archive/YYYY-MM/` (and `openspec/changes/archive/` if enabled) | Never edited | Archaeology only |
 
 ## Rules & Style Guide
 Full documentation style guide: `docs/STYLEGUIDE.md`. Every agent creating or editing markdown docs MUST obey:

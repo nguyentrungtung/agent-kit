@@ -1076,5 +1076,104 @@ commit_all "$UP2"
 check "upgrade removes stale .agents/skills symlink when harnesses=claude" "[ ! -e \"\$UP2/.agents\" ] && [ ! -L \"\$UP2/.agents/skills\" ]"
 check "upgrade migrates pre-0.17 cmd_dup with comment & CRLF" "grep -qF -- '--config .agent/config/jscpd.json .' \"\$UP2/.agent/project.yaml\""
 
+# ---------------------------------------------------------------- Core-Plugin decoupling & Unified MCP (0.18.0)
+printf '\n== core-plugin decoupling, dynamic AGENTS.md, and unified MCP registry (0.18)\n'
+P0="$WORK/core-only"; fresh "$P0"; (cd "$P0" && git init -q -b main && printf '{"name":"p0","version":"1.0.0"}\n' > package.json)
+"$KIT" init "$P0" --stack node --modules none --yes --no-deps --no-setup --no-tools >"$P0.log" 2>&1
+check "core-only install has no plugins dir content" "[ ! -d \"\$P0/.agent/plugins\" ] || [ -z \"\$(ls -A \"\$P0/.agent/plugins\")\" ]"
+check "core-only AGENTS.md has no ghost kit-ba/openspec/mp- refs" "grep -q 'Core-only install' \"\$P0/AGENTS.md\" && ! grep -qE 'kit-ba|kit-sa|openspec/specs|mp-code-review' \"\$P0/AGENTS.md\""
+check "core-only settings.json excludes module scripts" "! grep -qE 'kit-openspec|kit-diagrams|kit-ops-lint|kit-sec-scan' \"\$P0/.claude/settings.json\""
+tools0="$(cd "$P0" && .agent/scripts/kit-tools status 2>&1 || true)"
+doc0="$(cd "$P0" && .agent/scripts/kit-doctor 2>&1 || true)"
+ci0="$(cd "$P0" && .agent/scripts/kit-ci api 2>&1 || true)"
+new0_rc=0; new0="$(cd "$P0" && .agent/scripts/kit-new change x 2>&1)" || new0_rc=$?
+gf_nospec="$(jq -cn '{tool_name:"Write",tool_input:{file_path:"openspec/specs/a/spec.md"}}' | CLAUDE_PROJECT_DIR="$P0" "$P0/.agent/hooks/guard-files.sh" 2>&1 || true)"
+check "core-only kit-tools omits openspec/codegraph/mmdc" "! printf '%s\n' \"\$tools0\" | grep -qE '^(openspec|codegraph|mmdc|uvx) '"
+check "core-only kit-doctor reports no module plugins" "printf '%s\n' \"\$doc0\" | grep -q 'no module tool plugins installed' && ! printf '%s\n' \"\$doc0\" | grep -q 'openspec/ missing'"
+check "core-only kit-ci api skips cleanly without api plugin" "printf '%s\n' \"\$ci0\" | grep -q 'no plugin handles'"
+check "core-only kit-new rejects change without openspec plugin" "[ $new0_rc -ne 0 ] && printf '%s\n' \"\$new0\" | grep -q 'unknown document kind'"
+check "core-only guard-files has no OpenSpec ask without plugin" "! printf '%s\n' \"\$gf_nospec\" | grep -q 'editing a living spec'"
+
+"$KIT" add openspec --dir "$P0" --yes >"$P0.add.log" 2>&1 || true
+gf_spec="$(jq -cn '{tool_name:"Write",tool_input:{file_path:"openspec/specs/a/spec.md"}}' | CLAUDE_PROJECT_DIR="$P0" "$P0/.agent/hooks/guard-files.sh" 2>&1 || true)"
+tools1="$(cd "$P0" && .agent/scripts/kit-tools status 2>&1 || true)"
+doc1="$(cd "$P0" && .agent/scripts/kit-doctor 2>&1 || true)"
+check "kit add openspec installs plugin & merges settings without .bak-kit" "[ -f \"\$P0/.agent/plugins/openspec/task.sh\" ] && grep -q 'kit-openspec' \"\$P0/.claude/settings.json\" && [ ! -e \"\$P0/.claude/settings.json.bak-kit\" ]"
+check "openspec plugin activates guard-files living-spec prompt" "printf '%s\n' \"\$gf_spec\" | grep -q 'editing a living spec'"
+check "openspec plugin populates kit-tools, kit-doctor & AGENTS.md" "printf '%s\n' \"\$tools1\" | grep -q '^openspec ' && printf '%s\n' \"\$doc1\" | grep -qE 'openspec/ (initialised|missing)' && grep -q 'openspec/specs/' \"\$P0/AGENTS.md\""
+
+# Custom 3rd-party plugin discovery + Unified MCP sync (codegraph + serena + gemini + claude)
+mkdir -p "$P0/.agent/plugins/acme"
+cat > "$P0/.agent/plugins/acme/tools.tsv" <<'EOF'
+acme-cli|echo 1.0||||plugin acme|0
+EOF
+cat > "$P0/.agent/plugins/acme/doctor.sh" <<'EOF'
+ok "acme custom plugin loaded"
+return 0
+EOF
+cat > "$P0/.agent/plugins/acme/ci-custom.sh" <<'EOF'
+echo "ACME CI CUSTOM OK"
+EOF
+doc_acme="$(cd "$P0" && .agent/scripts/kit-doctor 2>&1 || true)"
+tools_acme="$(cd "$P0" && .agent/scripts/kit-tools status 2>&1 || true)"
+ci_acme="$(cd "$P0" && .agent/scripts/kit-ci custom 2>&1 || true)"
+check "custom plugin discovered automatically by doctor/tools/ci" "printf '%s\n' \"\$doc_acme\" | grep -q 'acme custom plugin loaded' && printf '%s\n' \"\$tools_acme\" | grep -q '^acme-cli ' && printf '%s\n' \"\$ci_acme\" | grep -q 'ACME CI CUSTOM OK'"
+
+M1="$WORK/mcp-sync"; fresh "$M1"; (cd "$M1" && git init -q -b main && touch app.py)
+"$KIT" init "$M1" --stack python --modules codegraph,serena --harness claude,gemini --yes --no-deps --no-setup --no-tools >"$M1.log" 2>&1
+check "canonical .agent/mcp.json & gemini mcpServers wired on init" "[ -f \"\$M1/.agent/mcp.json\" ] && jq -e '.mcpServers.codegraph and .mcpServers.serena' \"\$M1/.agent/mcp.json\" >/dev/null && jq -e '.mcpServers.serena' \"\$M1/.gemini/settings.json\" >/dev/null && [ ! -e \"\$M1/.mcp.json\" ]"
+printf '{"mcpServers":{"user-custom":{"command":"echo"}}}\n' > "$M1/.mcp.json"
+(cd "$M1" && .agent/scripts/kit-mcp sync >/dev/null 2>&1)
+check "kit-mcp sync merges plugin servers into .mcp.json keeping user entries" "jq -e '.mcpServers[\"user-custom\"] and .mcpServers.codegraph and .mcpServers.serena' \"\$M1/.mcp.json\" >/dev/null"
+# Upgrade keeps user plugin .agent/plugins/acme and removes unused kit plugins cleanly
+(cd "$P0" && git add -A && git -c core.hooksPath=/dev/null commit -qm 'chore: custom plugin' --no-verify)
+sed -i.bak 's/^modules:.*/modules: ba/' "$P0/.agent/project.yaml" "$P0/.agent/kit.lock" && rm -f "$P0/.agent/project.yaml.bak" "$P0/.agent/kit.lock.bak"
+commit_all "$P0"
+"$KIT" upgrade "$P0" >"$P0.up.log" 2>&1
+check "upgrade cleans removed kit plugin, installs new module plugin, keeps custom plugin" "[ ! -d \"\$P0/.agent/plugins/openspec\" ] && [ -d \"\$P0/.agent/plugins/ba\" ] && [ -d \"\$P0/.agent/plugins/acme\" ]"
+check "cmd_add tracked AGENTS.md so removing openspec updates AGENTS.md cleanly without .kit-new" "[ ! -e \"\$P0/AGENTS.md.kit-new\" ] && ! grep -q 'openspec/specs/' \"\$P0/AGENTS.md\" && grep -q 'kit-ba' \"\$P0/AGENTS.md\""
+
+# Removing last MCP plugin cleans stale .agent/mcp.json
+sed -i.bak 's/^modules:.*/modules:/' "$M1/.agent/project.yaml" "$M1/.agent/kit.lock" && rm -f "$M1/.agent/project.yaml.bak" "$M1/.agent/kit.lock.bak"
+(cd "$M1" && git add -A && git -c core.hooksPath=/dev/null commit -qm 'chore: drop mcp modules' --no-verify)
+"$KIT" upgrade "$M1" >"$M1.up.log" 2>&1
+check "upgrade removes stale .agent/mcp.json when last MCP plugin is removed" "[ ! -e \"\$M1/.agent/mcp.json\" ] && (cd \"\$M1\" && .agent/scripts/kit-mcp status 2>&1 | grep -q 'no MCP plugins installed')"
+
+# Security/edge-case hardening from 0.18 review
+check "settings.json gates kit-mcp sync with ask while allowing status only" "! jq -e '.permissions.allow[] | select(. == \"Bash(.agent/scripts/kit-mcp:*)\")' \"\$P0/.claude/settings.json\" >/dev/null && jq -e '.permissions.allow[] | select(. == \"Bash(.agent/scripts/kit-mcp status)\")' \"\$P0/.claude/settings.json\" >/dev/null && jq -e '.permissions.ask[] | select(. == \"Bash(.agent/scripts/kit-mcp sync)\")' \"\$P0/.claude/settings.json\" >/dev/null"
+kit_force_rc=0; (cd "$P0" && "$KIT" init "$P0" --stack node --modules ba --force --yes --no-deps --no-setup --no-tools >/dev/null 2>&1) || kit_force_rc=$?
+check "kit init --force retains .claude/settings.json in kit.manifest" "[ $kit_force_rc -eq 0 ] && grep -q '  \.claude/settings\.json$' \"\$P0/.agent/kit.manifest\""
+
+# openspec doctor.sh survives broken openspec shim (non-zero --version) under set -e
+P_OS="$WORK/os-shim"; fresh "$P_OS"; (cd "$P_OS" && git init -q -b main && printf '{"name":"p","version":"1.0.0"}\n' > package.json)
+"$KIT" init "$P_OS" --stack node --modules openspec --yes --no-deps --no-setup --no-tools >/dev/null 2>&1
+mkdir -p "$WORK/badbin"; printf '#!/bin/sh\nexit 1\n' > "$WORK/badbin/openspec"; chmod +x "$WORK/badbin/openspec"
+os_doc_rc=0; os_doc_out="$(cd "$P_OS" && PATH="$WORK/badbin:$PATH" .agent/scripts/kit-doctor 2>&1)" || os_doc_rc=$?
+check "kit-doctor survives non-zero openspec --version shim" "[ $os_doc_rc -le 1 ] && printf '%s\n' \"\$os_doc_out\" | grep -q 'failed to report version' && printf '%s\n' \"\$os_doc_out\" | grep -qE 'all .* checks ok|warning\(s\)|problem\(s\)'"
+
+# guard-files.rules edge cases: no trailing newline, empty pattern skipped, CRLF, & expansion, .agent/plugins/ ask
+mkdir -p "$P_OS/.agent/plugins/r"
+printf 'ask\t\tshould_not_match\r\n  # comment\r\nask\t^docs/foo/\tedit $rel' > "$P_OS/.agent/plugins/r/guard-files.rules"
+gf_other="$(jq -cn '{tool_name:"Edit",tool_input:{file_path:"src/app.js"}}' | CLAUDE_PROJECT_DIR="$P_OS" "$P_OS/.agent/hooks/guard-files.sh" 2>&1 || true)"
+gf_nonl="$(jq -cn '{tool_name:"Edit",tool_input:{file_path:"docs/foo/a&b.md"}}' | CLAUDE_PROJECT_DIR="$P_OS" "$P_OS/.agent/hooks/guard-files.sh" 2>&1 || true)"
+gf_plug="$(jq -cn '{tool_name:"Edit",tool_input:{file_path:".agent/plugins/r/guard-files.rules"}}' | CLAUDE_PROJECT_DIR="$P_OS" "$P_OS/.agent/hooks/guard-files.sh" 2>&1 || true)"
+check "guard-files.rules handles empty-pattern, EOF no-newline, CRLF, & path, and .agent/plugins ask" "[ -z \"\$gf_other\" ] && printf '%s' \"\$gf_nonl\" | grep -q 'edit docs/foo/a&b.md' && printf '%s' \"\$gf_plug\" | grep -q 'editing plugin definition'"
+
+# kit-tools CRLF tools.tsv + literal metachar ensure + kit-mcp bad flags/invalid JSON cleanup
+mkdir -p "$P_OS/.agent/plugins/aa"
+printf 'crlf-tool|echo ok||||plugin r|1\r\nfoo.bar|echo ok||||plugin r|0\r\n' > "$P_OS/.agent/plugins/r/tools.tsv"
+printf -- '- **aa** — no newline' > "$P_OS/.agent/plugins/aa/agent-summary.md"
+"$KIT" init "$P_OS" --stack node --modules openspec --force --yes --no-deps --no-setup --no-tools >/dev/null 2>&1
+check "kit-tools handles CRLF required flag and render_playbooks no-newline summary" "(cd \"\$P_OS\" && .agent/scripts/kit-tools status 2>&1 | grep -E 'crlf-tool .*required') >/dev/null && grep -qE '^- \*\*Specs \(.openspec.\)' \"\$P_OS/AGENTS.md\""
+ensure_dot_rc=0; (cd "$P_OS" && .agent/scripts/kit-tools ensure 'foo+bar' --yes >/dev/null 2>&1) || ensure_dot_rc=$?
+check "kit-tools ensure matches tool name literally (not regex)" "[ $ensure_dot_rc -ne 0 ]"
+bad_mcp_rc=0; (cd "$P_OS" && .agent/scripts/kit-mcp sync --target bogus >/dev/null 2>&1) || bad_mcp_rc=$?
+bad_flag_rc=0; (cd "$P_OS" && .agent/scripts/kit-mcp sync --target >/dev/null 2>&1) || bad_flag_rc=$?
+check "kit-mcp sync rejects invalid target and missing flag value" "[ $bad_mcp_rc -ne 0 ] && [ $bad_flag_rc -ne 0 ]"
+printf '{broken json' > "$P_OS/.mcp.json"
+mkdir -p "$P_OS/.agent/plugins/r" && printf '{"mcpServers":{"x":{"command":"echo"}}}\n' > "$P_OS/.agent/plugins/r/mcp.json"
+(cd "$P_OS" && .agent/scripts/kit-mcp sync --target claude >/dev/null 2>&1 || true)
+check "kit-mcp cleans up temp files when destination JSON is invalid" "[ ! -e \"\$P_OS/.mcp.json.tmp\" ]"
+
 printf '\n%d failure(s) — workdir %s\n' "$fail" "$WORK"
 [ $fail -eq 0 ]

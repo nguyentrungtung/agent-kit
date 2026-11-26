@@ -10,7 +10,7 @@ Goal: after this, any fresh session can work correctly by reading `.agent/` only
 1. **Branch:** `kit-task new "Onboard project into agent-kit" --type docs` → `kit-task start <id>`.
 2. **Survey cheaply** (delegate to the `explorer` sub-agent if available; ask it for a ≤ 80-line summary):
    - README, build files, CI config, Dockerfiles, `.env.example`/config loaders, folder tree (depth 3), entry points, test layout.
-   - Prefer codegraph / LSP / `git ls-files | head` / grep over opening whole files. Never open `.env`.
+   - Prefer installed code-intelligence / LSP tools (`kit-mcp status`) or `git ls-files | head` / grep over opening whole files. Never open `.env`.
 3. **Fill context files** (in `docs_language`, concise, link to paths):
    - `.agent/context/PROJECT.md` — description, goals, users, constraints, current stage. Unknown business facts → write them under "Open questions", do not invent.
    - `.agent/context/ARCHITECTURE.md` — modules table with paths and allowed dependencies, data stores, integrations, mermaid diagram.
@@ -33,10 +33,8 @@ Goal: after this, any fresh session can work correctly by reading `.agent/` only
    Verify commands in `.agent/project.yaml`: run each `kit-run <step>` (install, format_check, lint, typecheck, arch, test, build, audit).
    - Fix wrong commands (the user will be asked to approve edits to project.yaml). Missing tool → leave empty + note.
    - Record what fails today as **baseline debt** (don't fix it now).
-5. **Baseline specs (if OpenSpec is installed):** for the 3–7 most important existing capabilities, write
-   `openspec/specs/<capability>/spec.md` describing CURRENT behaviour (Purpose + Requirements + Scenarios, verified against code/tests).
-   Use one change `baseline-specs` with ADDED requirements (`kit-new change baseline-specs`), validate `--strict`, archive it in this task.
-   From then on every behaviour change goes through an OpenSpec change.
+5. **Baseline specs (if a spec plugin such as OpenSpec is installed):** for the 3–7 most important existing capabilities, write
+   living specs describing CURRENT behaviour (verified against code/tests) and archive the baseline change in this task.
 6. **Baseline report** → `docs/daily/<YYYY-MM>/<today>.md` via `kit-daily`, plus a "Baseline" section: test count/result, lint warnings count, audit findings, secrets scan result, top 5 risks/tech-debt items.
 7. **Seed the backlog:** create tasks for the top risks (`kit-task new … --type chore|fix`), add them to `docs/plan/ROADMAP.md`.
 8. **Project rules:** add ≤ 15 project-specific lines to AGENTS.md §7 (e.g. "all DB access through repository layer").

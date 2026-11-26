@@ -1,0 +1,1 @@
+- **Security (`security`):** Threat model and PII register in `docs/security/` (`kit-appsec`, SBOM/DAST via `kit-sec-scan`).

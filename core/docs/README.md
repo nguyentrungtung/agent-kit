@@ -3,13 +3,13 @@ Rule: read **living** docs to understand the system; change records only for the
 
 | Where | What | Kind | Created / updated by |
 |---|---|---|---|
-| `../openspec/specs/` | Current behaviour per capability (requirements + scenarios) | living | archiving an OpenSpec change (`kit-task finish`) |
+| `../openspec/specs/` | Current behaviour per capability (requirements + scenarios; module `openspec`) | living | archiving an OpenSpec change (`kit-task finish`) |
 | `architecture/` | Solution architecture (interview, patterns & algorithms), C4, project structure BE+FE, UI design system, data model (module `sa`) | living | `kit-sa` |
-| `api/` | OpenAPI contracts | living | same PR as the API change |
+| `api/` | OpenAPI contracts (module `api`) | living | same PR as the API change |
 | `platform/` | Environments, hosting, CI/CD, SLOs, backup/DR, sizing, runbooks (module `devops`) | living | `kit-devops`, `kit-new runbook` |
 | `data/` | Analytics architecture, pipelines, data contracts (module `data`) | living | `kit-data` |
 | `ba/` | Brief, stakeholders, processes, use cases, stories, rules, RTM (module `ba`) | living (business) | `kit-ba`, `kit-new usecase/story` |
-| `../openspec/changes/` | Changes in progress: proposal, spec deltas, design, tasks | change | `kit-new change`, `/openspec-propose` |
+| `../openspec/changes/` | Changes in progress: proposal, spec deltas, design, tasks (module `openspec`) | change | `kit-new change`, `/openspec-propose` |
 | `../.agent/tasks/` | One execution record per task (archive/ when done) | change | `kit-task` |
 | `qa/` | Test cases per task (`TASK-NNN.md`) + project test plan | change | `kit-new testplan`, `kit-testcases` |
 | `adr/` | Architecture decision records | decision | `kit-new adr`, `kit-adr` |
@@ -17,4 +17,4 @@ Rule: read **living** docs to understand the system; change records only for the
 | `security/` | Threat model, PII register, accepted risks (module `security`) | living | `kit-appsec`, `kit-security` |
 | `STYLEGUIDE.md` | Markdown documentation standards (Diataxis, formatting, alerts) | standard | human / tech lead |
 | `daily/` | Daily / weekly reports | report | `kit-daily` |
-| `GLOSSARY.md` | Ubiquitous language & domain terms (single source of truth) | living | `kit-ba`, `kit-sa`, `mp-domain-modeling` |
+| `GLOSSARY.md` | Ubiquitous language & domain terms (single source of truth) | living | domain owner / active plugins |

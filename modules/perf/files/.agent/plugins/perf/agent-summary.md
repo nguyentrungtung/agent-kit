@@ -1,0 +1,1 @@
+- **Perf smoke (`perf`):** k6 latency/error smoke test in `perf/smoke.js` (`kit-run perf`).

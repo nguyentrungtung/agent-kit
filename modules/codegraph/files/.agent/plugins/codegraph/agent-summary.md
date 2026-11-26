@@ -1,0 +1,1 @@
+- **Code intelligence (`codegraph`):** Indexed in `.codegraph/`; prefer `codegraph_explore` (MCP) or `codegraph explore` over reading whole files.

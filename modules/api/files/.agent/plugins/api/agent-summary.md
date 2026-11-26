@@ -1,0 +1,1 @@
+- **API contracts (`api`):** OpenAPI 3.1 contract in `docs/api/openapi.yaml` (`kit-api`, CI `kit-ci api`).

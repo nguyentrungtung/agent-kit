@@ -1,0 +1,5 @@
+{
+  "allow": [
+    "Bash(.agent/scripts/kit-openspec:*)"
+  ]
+}

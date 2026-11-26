@@ -65,7 +65,7 @@ Monorepo: mỗi component là `path=stack+framework`. Lệnh được ghép ki�
 | `data` | preset `data` | `kit-data` + agent `data-engineer`: kiến trúc dữ liệu (batch/stream, warehouse/lakehouse, medallion / staging→marts), mô hình Kimball (grain, SCD), **data contract** (`kit-new contract`), chất lượng dữ liệu viết test trước, lineage, backfill idempotent, PII; schema OpenSpec **`data-flow`** (`kit-new change <tên> --schema data-flow`); rule `.agent/rules/data/`; hook hỏi trước khi chạy vào prod (`--target prod`, `airflow dags backfill`). **`kit-da`** (Data analyst): kiểm dữ liệu thật bằng SQL chỉ đọc theo 4 tiêu chí **đúng / đủ / sống / sạch** (correct / complete / fresh / clean), đối soát với nguồn; check là file SQL trong `dq/<dataset>/` trả về dòng vi phạm, chạy bằng `.agent/scripts/kit-dq run` qua `cmd_sql` (client của bạn, user chỉ đọc); kit-dq chặn mọi lệnh ghi, chỉ in số đếm (dòng mẫu chỉ khi `--samples`), báo cáo `docs/data/quality/<ngày>.md`. **`kit-catalog`**: tài liệu để biết dùng dữ liệu nào — `docs/data/catalog/` (câu hỏi → bảng nào, bảng nào không dùng; thực thể, khoá, quan hệ + sơ đồ ER; chỉ tiêu và công thức; bộ lọc bắt buộc, bẫy hay gặp), ý nghĩa từng cột giữ một nguồn là file dbt `.yml`; `.agent/scripts/kit-doc-coverage [--list] [--min N]` đo độ phủ mô tả model/cột theo tầng từ `target/manifest.json` (`dbt parse`, không cần kết nối kho). Muốn sâu hơn về dbt: cài thêm bộ skill chính chủ `/plugin marketplace add dbt-labs/dbt-agent-skills` |
 | `api` | preset `app` | `kit-api`: OpenAPI 3.1 **contract-first** (`docs/api/openapi.yaml`), Spectral (`kit-run api`: kebab-case path, camelCase operationId, lỗi RFC 9457), CI **chặn thay đổi phá vỡ tương thích** bằng oasdiff, Swagger UI (`--services swagger-ui`), bảng thư viện sinh docs theo framework |
 | `eng-skills` | ✔ | 13 skill của [mattpocock/skills](https://github.com/mattpocock/skills) v1.3.2 (MIT, copy cố định, tiền tố `mp-`): `mp-grilling`/`mp-grill-with-docs` (hỏi rõ yêu cầu theo vòng), `mp-domain-modeling` (GLOSSARY + ADR), `mp-tdd`, `mp-diagnosing-bugs`, `mp-codebase-design`/`mp-improve-codebase-architecture` (module sâu), `mp-code-review` (2 chiều: chuẩn + spec), `mp-pr`, `mp-wizard` (script cho bước người làm), `mp-retro`, `mp-to-questionnaire`, `mp-writing-for-agents`. Đã gắn vào kit-task/kit-review/kit-ba/kit-sa/kit-devops/kit-handoff. Cập nhật: `scripts/vendor-mattpocock.py` |
-| `serena` | | thêm Serena (LSP qua MCP, chạy bằng uvx) vào `.mcp.json` |
+| `serena` | | đăng ký Serena (LSP qua MCP, chạy bằng uvx) vào `.agent/mcp.json` & cấu hình harness qua `kit-mcp` |
 
 ### Preset và vai trò
 `kit init --preset app|data|platform|minimal` chọn sẵn bộ module (xem `kit list`); `--modules` để chỉnh tay. Ai làm gì, bàn giao thế nào: `.agent/rules/core/roles.md` (RACI).
@@ -388,7 +388,7 @@ Rút ra từ lần chạy thật trên một repo data (Python + dbt) trên GitL
   Agent sửa file này thì phải được người duyệt. Nhớ giữ `protected_regex` khớp với `main_branch`/`develop_branch`/`protected_extra`.
 - Luật riêng của dự án: `AGENTS.md` §7 (ngắn) + `.agent/context/CONVENTIONS.md`.
   Luật quan trọng nên **biến thành test** (ArchUnit, dependency-cruiser, import-linter…) rồi ghi tên công cụ vào cột "Enforced by".
-- Code intelligence: module `codegraph` (mặc định) và `serena` (tuỳ chọn). Playbook ưu tiên dùng chúng thay vì mở cả file.
+- Code intelligence & MCP: các module có MCP (`codegraph`, `serena`) khai báo trong `.agent/plugins/<mod>/mcp.json`, đồng bộ qua `.agent/scripts/kit-mcp` (file chuẩn `.agent/mcp.json`, tự merge vào `.mcp.json` / `.gemini/settings.json` khi cài setup).
 - Người dùng có thể vượt qua chặn khi thật sự cần: `git commit --no-verify`, `KIT_ALLOW_PROTECTED_PUSH=i-am-human git push`. Agent thì bị hook chặn cả hai cách này.
 
 ## 8. Cấu trúc được cài vào dự án (ví dụ: php + laravel, module ba sa docker codegraph)
@@ -397,13 +397,14 @@ Rút ra từ lần chạy thật trên một repo data (Python + dbt) trên GitL
 AGENTS.md  .env.example  .gitignore(+)  .gitattributes(+)
 pint.json  phpstan.neon.dist  deptrac.yaml  .editorconfig  Dockerfile  compose.yaml  .dockerignore   ← chỉ của stack/module đã chọn
 .agent/
-  project.yaml  kit.lock        lệnh (đã ghép theo component) · lựa chọn khi init
+  project.yaml  kit.lock  mcp.json   lệnh · lựa chọn khi init · MCP registry chuẩn
+  plugins/      <module>/            extension slots (tools.tsv · doctor.sh · ci-*.sh · task.sh · mcp.json · …)
   rules/        core/ · stack/php.md, laravel.md · project/
-  stack/php/snippets/           đoạn cần merge (kit-onboard làm)
-  docker/catalog/               service để kit-docker thêm sau
+  stack/php/snippets/                đoạn cần merge (kit-onboard làm)
+  docker/catalog/                    service để kit-docker thêm sau
   context/ memory/ tasks/ checklists/ config/ skills/
-  scripts/      kit-run · kit-task · kit-doctor · kit-diagrams · kit-context · kit-daily · kit-secrets-scan
-  hooks/        guard-bash · guard-files · session-start (Claude Code)
+  scripts/      kit-run · kit-task · kit-doctor · kit-mcp · kit-context · kit-daily · kit-secrets-scan
+  hooks/        guard-bash · guard-files · session-start · post-edit · stop-gate (Claude Code)
   githooks/     pre-commit · commit-msg · pre-push
 .claude/  settings.json · CLAUDE.md · rules/stack-php.md · skills/kit-* · agents/*
 .github/  workflows/ci.yml (setup đúng runtime) · PULL_REQUEST_TEMPLATE.md · ISSUE_TEMPLATE/
@@ -414,7 +415,7 @@ docs/     ba/ (+_templates) · architecture/ · plan/ · adr/ · qa/ · security
 
 - **Stack mới:** tạo `stacks/<tên>/stack.yaml` (`title detect globs app_port frameworks dev_deps cmd_*`, có thể dùng `inherit: <stack>` để mượn rules/files/snippets), thêm `rules.md`, `files/`, `ci.yml`, `docker/Dockerfile`, rồi thêm tên vào `DETECT_ORDER` trong `kit`.
 - **Framework mới:** `stacks/<stack>/frameworks/<fw>/framework.yaml` (`detect`, các `cmd_*` cần ghi đè, `dev_deps` để thay hoặc `dev_deps_add` để cộng thêm, `exclude_files`, `app_port`), kèm `rules.md` và `files/`. Nhớ thêm tên vào `frameworks:` của stack.
-- **Module mới:** `modules/<tên>/module.yaml` (`title default setup_desc`), `files/`, và nếu cần thì `project.add`, `gitignore.add`, `setup.sh`.
+- **Module (plugin) mới:** `modules/<tên>/module.yaml` (`title default setup_desc`), `files/`, `files/.agent/plugins/<tên>/` (extension slots: `tools.tsv`, `doctor.sh`, `task.sh`, `context.sh`, `new-*.sh`, `ci-*.sh`, `claude-permissions.json`, `guard-files.rules`, `mcp.json`, `agent-summary.md`), và nếu cần thì `project.add`, `gitignore.add`, `setup.sh`. Core hoàn toàn không phụ thuộc cứng vào module.
 - **Docker service mới:** `modules/docker/catalog/<tên>.yml` (header `# title:` `# env:` `# volumes:` + fragment service thụt 2 khoảng trắng).
 
 ## 10. Lưu ý quan trọng khi đưa vào dự án thực tế

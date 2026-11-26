@@ -11,8 +11,5 @@ description: End a session cleanly so the next session (fresh, small context) ca
 4. New lessons → `.agent/memory/LESSONS.md`; new decisions → kit-adr.
 5. Run the **kit-daily** playbook.
 6. Commit memory/doc updates as part of the checkpoint (`kit-task checkpoint "handoff notes"`).
-7. Tell the human: "Safe to start a new session; it will resume from STATE.md + TASK-NNN."
-
-## Retro (optional, with module eng-skills)
-When the session hit friction, run **mp-retro**: it proposes environment fixes (navigation pointers, automated checks, rules).
-Mechanical rules become checks (lint/arch test/hook); judgement calls go to `.agent/rules/project/`; record the lesson in LESSONS.md.
+7. If the session hit repeated friction, record an enforceable rule in `.agent/rules/project/` and a 1-line lesson in `.agent/memory/LESSONS.md`.
+8. Tell the human: "Safe to start a new session; it will resume from STATE.md + TASK-NNN."

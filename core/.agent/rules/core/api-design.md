@@ -1,7 +1,7 @@
 # API design (HTTP/REST)
 
-- Contract first: `docs/api/openapi.yaml` (OpenAPI 3.1) changed in the same PR as the code — playbook `kit-api` (module api).
-  Lint: `kit-run api` (Spectral). Breaking changes are blocked in CI (oasdiff) unless versioned + deprecated.
+- Contract first: update the API contract (e.g. `docs/api/openapi.yaml` when the `api` module is installed) in the same PR as the code.
+  Lint when enabled: `kit-run api` / `kit-ci api`. Breaking changes must be versioned + deprecated.
 - Resources are plural nouns (`/orders/{id}`), verbs via HTTP methods; JSON `camelCase` fields; ISO-8601 UTC dates.
 - Status codes: 200/201(+Location)/204, 400 validation, 401 unauthenticated, 403 forbidden, 404, 409 conflict, 422 business rule, 429, 5xx.
 - Errors as RFC 9457 Problem Details. Validation errors list field + message.

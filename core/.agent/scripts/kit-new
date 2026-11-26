@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
 # kit-new <kind> … — create documents from the templates in .agent/templates (never let an agent invent the skeleton)
-#   kit-new task "<title>" [--type …] [--priority …] [--change <c>]   → .agent/tasks/TASK-NNN-slug.md (kit-task new)
-#   kit-new change <kebab-name> ["<description>"] [--schema data-flow] → openspec/changes/<name>/ (default schema kit-flow)
-#   kit-new contract "<dataset>"                                       → docs/data/contracts/<slug>.md (module data)
+#   kit-new task "<title>" [--type …] [--priority …]                  → .agent/tasks/TASK-NNN-slug.md (kit-task new)
 #   kit-new testplan TASK-NNN                                          → docs/qa/TASK-NNN.md, one row per acceptance criterion
 #   kit-new adr "<title>" [--task TASK-NNN]                            → docs/adr/NNNN-slug.md + index in DECISIONS.md
-#   kit-new usecase "<title>"                                          → docs/ba/use-cases/UC-NN-slug.md   (module ba)
-#   kit-new story "<title>" [--uc UC-NN]                               → docs/ba/stories/US-NN-slug.md     (module ba)
 #   kit-new module <name> [--style layered|modular] [--component <path>]  → folders of one module per the architecture skeleton
-#   kit-new runbook "<alert or operation>"                             → docs/platform/runbooks/<slug>.md (module devops)
-#   kit-new postmortem "<incident title>"                              → docs/platform/incidents/<date>-<slug>.md (module devops)
 #   kit-new doc <path.md> "<title>"                                    → living document with front matter
 # Prints the created path. Never overwrites an existing file.
 source "$(dirname "$0")/lib.sh"
 cd "$KIT_ROOT"
 TPL="$KIT_DIR/templates"
 
-usage() { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() {
+  sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+  local p
+  for p in "$KIT_DIR"/plugins/*/new-*.sh; do
+    [ -f "$p" ] && sed -n 's/^# //p' "$p" | head -n1
+  done
+  echo "Prints the created path. Never overwrites an existing file."
+  exit 1
+}
 slug() { ascii_slug "$1" 50; }
 esc() { printf '%s' "$1" | sed 's/[\/&|]/\\&/g'; }
 next_num() { # next_num <dir> <prefix-regex> <width>  → zero-padded next number
@@ -37,18 +39,6 @@ render() { # render <template> <dest> <key=value>...
 kind="${1:-}"; shift || true
 case "$kind" in
   task) exec "$KIT_DIR/scripts/kit-task" new "$@" ;;
-
-  change)
-    name=""; desc=""; schema=kit-flow
-    while [ $# -gt 0 ]; do case "$1" in --schema) schema="$2"; shift 2 ;; *) if [ -z "$name" ]; then name="$1"; else desc="${desc:+$desc }$1"; fi; shift ;; esac; done
-    [ -n "$name" ] || die 'usage: kit-new change <kebab-name> ["<description>"] [--schema data-flow]'
-    printf '%s' "$name" | grep -qE '^[a-z0-9]+(-[a-z0-9]+)*$' || die "change name must be kebab-case (e.g. add-order-export)"
-    has_openspec || die "OpenSpec module not installed (kit add openspec)"
-    [ -d "$KIT_ROOT/openspec/schemas/$schema" ] || die "schema '$schema' not installed (data-flow comes with module data)"
-    "$KIT_DIR/scripts/kit-openspec" new change "$name" --schema "$schema" ${desc:+--description "$desc"} >/dev/null || die "openspec new change failed"
-    echo "openspec/changes/$name/"
-    info "next: write proposal → specs → design → tasks (Claude Code: /openspec-propose $name, or: .agent/scripts/kit-openspec instructions proposal --change $name)"
-    ;;
 
   testplan)
     id="${1:-}"; [ -n "$id" ] || id="$(task_from_branch)"; [ -n "$id" ] || die "usage: kit-new testplan TASK-NNN"
@@ -72,25 +62,6 @@ case "$kind" in
     out="$(render "$TPL/adr.md" "$KIT_ROOT/docs/adr/$num-$(slug "$title").md" NUM="$num" TITLE="$title" DATE="$(today)" TASK="${task:-}")"
     [ -f "$KIT_DIR/memory/DECISIONS.md" ] && printf '| ADR-%s | %s | %s | proposed | %s |\n' "$num" "$(today)" "$title" "$out" >> "$KIT_DIR/memory/DECISIONS.md"
     echo "$out"
-    ;;
-
-  usecase)
-    title="$*"; [ -n "$title" ] || die 'usage: kit-new usecase "<title>"'
-    num="$(next_num docs/ba/use-cases 'UC-' 2)"
-    render "$TPL/usecase.md" "$KIT_ROOT/docs/ba/use-cases/UC-$num-$(slug "$title").md" NUM="$num" TITLE="$title" DATE="$(today)"
-    ;;
-
-  story)
-    title=""; uc=""
-    while [ $# -gt 0 ]; do case "$1" in --uc) uc="$2"; shift 2 ;; *) title="${title:+$title }$1"; shift ;; esac; done
-    [ -n "$title" ] || die 'usage: kit-new story "<title>" [--uc UC-NN]'
-    num="$(next_num docs/ba/stories 'US-' 2)"
-    render "$TPL/story.md" "$KIT_ROOT/docs/ba/stories/US-$num-$(slug "$title").md" NUM="$num" TITLE="$title" UC="$uc" DATE="$(today)"
-    ;;
-
-  contract)
-    title="$*"; [ -n "$title" ] || die 'usage: kit-new contract "<dataset>"'
-    render "$TPL/data-contract.md" "$KIT_ROOT/docs/data/contracts/$(slug "$title").md" TITLE="$title" DATE="$(today)"
     ;;
 
   module)
@@ -127,21 +98,16 @@ case "$kind" in
     info "module $pascal ($style, $stack): $made folder(s). Next: kit-task for its first use case; architecture rules: ${skel#"$KIT_ROOT"/}"
     ;;
 
-  runbook)
-    title="$*"; [ -n "$title" ] || die 'usage: kit-new runbook "<alert or operation>"'
-    render "$TPL/runbook.md" "$KIT_ROOT/docs/platform/runbooks/$(slug "$title").md" TITLE="$title" DATE="$(today)"
-    ;;
-
-  postmortem)
-    title="$*"; [ -n "$title" ] || die 'usage: kit-new postmortem "<incident title>"'
-    render "$TPL/postmortem.md" "$KIT_ROOT/docs/platform/incidents/$(today)-$(slug "$title").md" TITLE="$title" DATE="$(today)"
-    ;;
-
   doc)
     path="${1:-}"; shift || true; title="$*"
     [ -n "$path" ] && [ -n "$title" ] || die 'usage: kit-new doc <path.md> "<title>"'
     render "$TPL/living-doc.md" "$KIT_ROOT/$path" TITLE="$title" DATE="$(today)"
     ;;
 
-  *) usage ;;
+  *)
+    for p in "$KIT_DIR"/plugins/*/new-"${kind}".sh; do
+      [ -f "$p" ] && { source "$p" "$@"; exit 0; }
+    done
+    [ -z "$kind" ] || [ "$kind" = -h ] || [ "$kind" = --help ] || die "unknown document kind '$kind' (install its module or see kit-new --help)"
+    usage ;;
 esac

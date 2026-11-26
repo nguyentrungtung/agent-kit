@@ -1,0 +1,1 @@
+- **Data engineering (`data`):** Pipelines, contracts, data quality (`dq/`) and catalog in `docs/data/` (`kit-data`, `kit-da`, `kit-catalog`, `kit-new contract`).

@@ -4,6 +4,7 @@
 #  - guardrail files (hooks, git hooks, Claude settings, .git/): read-only for the agent
 #  - CI workflows: editing needs human confirmation
 source "$(dirname "$0")/_hooklib.sh"
+shopt -u patsub_replacement 2>/dev/null || true
 
 tool="$(json_get tool_name)"
 p="$(json_get tool_input.file_path)"
@@ -62,11 +63,25 @@ case "$tool" in
     if re '(?i)(^|/)(\.php-cs-fixer(\.dist)?\.php|phpstan\.neon(\.dist)?|deptrac\.ya?ml|pint\.json|eslint\.config\.[cm]?[jt]s|\.eslintrc[^/]*|\.prettierrc[^/]*|\.dependency-cruiser\.[cm]?js|ruff\.toml|mypy\.ini|\.importlinter|\.golangci\.ya?ml|rustfmt\.toml|clippy\.toml|deny\.toml|\.editorconfig|Directory\.Build\.props|checkstyle[^/]*\.xml)$' "$rel"; then
       ask "editing quality-tool config '$rel' (must not weaken rules — needs an ADR if relaxing)"
     fi
-    if re '(?i)^openspec/(config\.ya?ml|schemas/)' "$rel"; then
-      ask "editing the OpenSpec workflow/config '$rel' (team-wide workflow change)"
-    fi
-    if re '(?i)^openspec/specs/' "$rel"; then
-      ask "editing a living spec directly — behaviour changes go through an OpenSpec change (openspec/changes/<name>/specs/); direct edits only for Purpose/typos"
+    for rf in "$PROJECT_DIR"/.agent/plugins/*/guard-files.rules; do
+      [ -f "$rf" ] || continue
+      while IFS=$'\t' read -r act pat msg || [ -n "${act:-}${pat:-}${msg:-}" ]; do
+        act="${act%$'\r'}"; pat="${pat%$'\r'}"; msg="${msg%$'\r'}"
+        act="${act#"${act%%[![:space:]]*}"}"
+        [ -n "$act" ] || continue
+        case "$act" in '#'*) continue ;; esac
+        [ -n "$pat" ] || continue
+        if re "(?i)$pat" "$rel"; then
+          msg="${msg//\$rel/$rel}"
+          case "$act" in
+            deny) deny "$msg" ;;
+            ask)  ask "$msg" ;;
+          esac
+        fi
+      done < "$rf"
+    done
+    if re '(?i)^\.agent/plugins/' "$rel"; then
+      ask "editing plugin definition '$rel' (controls permissions, guards, or CI hooks)"
     fi
     if re '(?i)^(infra|deploy|k8s|helm|terraform)/' "$rel"; then
       ask "editing infrastructure/deployment code '$rel' (a human will review and apply it)"

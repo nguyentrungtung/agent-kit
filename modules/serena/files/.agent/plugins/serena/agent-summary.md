@@ -1,0 +1,1 @@
+- **Semantic LSP (`serena`):** Configured via `serena` MCP (`kit-mcp`) for symbol navigation and safe refactoring.

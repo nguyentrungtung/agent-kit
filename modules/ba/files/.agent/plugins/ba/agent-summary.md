@@ -1,0 +1,1 @@
+- **Business Analysis (`ba`):** Brief, use cases, user stories, business rules, RTM in `docs/ba/` (`kit-ba`, `kit-new usecase/story`).
