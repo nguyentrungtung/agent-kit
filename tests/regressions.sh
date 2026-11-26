@@ -795,6 +795,13 @@ check "PostToolUse: a tool missing in a chain (bash: command not found) is not a
 check "PostToolUse: ESLint's ignored-file warning alone is skipped; with a real error it is reported" "[ -z \"\$(pe \"\$H/web/i.jsx\")\" ] && pe \"\$H/web/j.tsx\" | grep -q 'x is unused'"
 check "PostToolUse: '&' in a file name stays part of the name" "[ -z \"\$(pe \"\$H/api/a&b.ts\")\" ]"
 
+mkdir -p "$H/scripts"; echo BAD > "$H/scripts/x.ts"
+check "PostToolUse: a file outside every component is not checked with a guessed config" "[ -z \"\$(pe \"\$H/scripts/x.ts\")\" ]"
+printf 'components: api=python\ncheck_file_py: grep -q "#TODO" {file} || { echo "no marker {file}"; exit 1; }   # comment\n' > "$H/.agent/project.yaml"
+echo '#TODO' > "$H/api/mark.py"
+check "PostToolUse: a # inside the command is kept, the trailing comment dropped" "[ -z \"\$(pe \"\$H/api/mark.py\")\" ] && echo x > \"\$H/api/nomark.py\" && pe \"\$H/api/nomark.py\" | grep -q 'no marker nomark.py'"
+check "Laravel: the per-file check uses Pint like format_check" "grep -q '^check_file: php -l {file} >/dev/null && vendor/bin/pint --test {file}' \"\$ROOT/stacks/php/frameworks/laravel/framework.yaml\""
+
 # the stacks' own check_file commands, with stub tools on PATH
 F="$WORK/il-stubs"; fresh "$F"; mkdir -p "$F/bin" "$F/p"
 cat > "$F/bin/gofmt" <<'EOS'
@@ -833,6 +840,8 @@ check "Stop gate: nothing left to check clears the count" "! printf '%s' \"\$o6\
 A="$WORK/il-two"; fresh "$A"; (cd "$A" && git init -q -b main && mkdir -p api worker && printf '[project]\nname="a"\n' > api/pyproject.toml && : > api/uv.lock && printf 'x\n' > worker/requirements.txt)
 "$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules none --stack python:api,python:worker --mode new >"$A.log" 2>&1
 check "two python components (uv / pip): key left empty with a note, no per-component keys" "grep -qx 'check_file_py:' \"\$A/.agent/project.yaml\" && ! grep -q '^check_file_py__' \"\$A/.agent/project.yaml\" && grep -q 'check_file_py left empty' \"\$A.log\""
+commit_all "$A"; sed -i.bak '/^check_file_py:/d' "$A/.agent/project.yaml" && rm -f "$A/.agent/project.yaml.bak"; commit_all "$A"; "$KIT" upgrade "$A" >"$A.up.log" 2>&1 || true
+check "upgrade tells why check_file_py stays empty" "grep -qx 'check_file_py:' \"\$A/.agent/project.yaml\" && grep -q 'check_file_py left empty' \"\$A.up.log\""
 A="$WORK/il-biome"; ad "$A" 'printf "{\"name\":\"x\",\"version\":\"1\",\"devDependencies\":{\"prettier\":\"3\",\"@biomejs/biome\":\"1\"}}\n" > package.json && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify' --stack node
 check "existing repo with prettier but no eslint: no per-file check that would call eslint" "! grep -E '^check_file_ts:' \"\$A/.agent/project.yaml\" | grep -q eslint"
 
@@ -845,6 +854,8 @@ check "upgrade: check_file_py added EMPTY, suggestion printed" "grep -qx 'check_
 check "upgrade: PostToolUse hook merged into the project's settings" "jq -e '.hooks.PostToolUse' \"\$A/.claude/settings.json\" >/dev/null && [ -x \"\$A/.agent/hooks/post-edit.sh\" ]"
 n0="$(ls "$A/.agent/tasks" | wc -l)"; ho="$(cd "$A" && .agent/scripts/kit-task new --help 2>&1 || true)"; n1="$(ls "$A/.agent/tasks" | wc -l)"
 check "kit-task new --help prints usage and creates no task" "[ \"\$n0\" = \"\$n1\" ] && printf '%s' \"\$ho\" | grep -q 'usage: kit-task new'"
+check "kit-task new: a ' - ' inside an unquoted title is title text" "(cd \"\$A\" && .agent/scripts/kit-task new Fix login - SSO timeout >/dev/null 2>&1) && ls \"\$A/.agent/tasks\" | grep -q 'fix-login-sso-timeout'"
+check "kit-doctor and the Stop gate fallback know test_fast" "grep -q 'arch test test_fast build' \"\$A/.agent/scripts/kit-doctor\" && grep -q 'format_check lint test_fast}' \"\$A/.agent/hooks/stop-gate.sh\""
 check "kit-task new rejects an unknown option" "printf '%s' \"\$(cd \"\$A\" && .agent/scripts/kit-task new --typo x 2>&1 || true)\" | grep -q \"unknown option '--typo'\""
 check "a tracker title starting with '-' still makes a task (kit-task pull passes it after --)" "(cd \"\$A\" && .agent/scripts/kit-task new -- '--force flag is ignored' >/dev/null 2>&1) && ls \"\$A/.agent/tasks\" | grep -q 'force-flag-is-ignored'"
 check "reviewers use the session's model" "grep -qx 'model: inherit' \"\$A/.claude/agents/code-reviewer.md\""

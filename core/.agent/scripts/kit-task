@@ -86,7 +86,7 @@ cmd_new() {
     --type) type="$2"; [ "$type" = bug ] && type=bugfix; shift 2 ;; --priority) prio="$2"; shift 2 ;; --change) change="$2"; shift 2 ;; --tags) tags="$2"; shift 2 ;;
     --) shift; title="${title:+$title }$*"; break ;;
     -h|--help) title=""; break ;;
-    -*) die "kit-task new: unknown option '$1' (titles cannot start with '-')" ;;
+    --?*|-[A-Za-z]*) die "kit-task new: unknown option '$1' (a title starting with '-': put -- before it)" ;;
     *) title="${title:+$title }$1"; shift ;;
   esac; done
   [ -n "$title" ] || die 'usage: kit-task new "<title>" [--type feature] [--priority P2] [--change <openspec-change>] [--tags <tags>]   (title starting with "-": put -- before it)'

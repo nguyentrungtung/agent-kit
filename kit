@@ -897,13 +897,14 @@ sync_project_keys() { # add keys that newer kits introduced; never change values
     name="CMD_$step"; kv_line "cmd_$step" "${!name}" >> "$cfg"; added="$added cmd_$step"
   done
   # per-file checks: added empty — an existing project's tools or versions may differ from the kit's defaults; the suggestion is printed
-  local sug=""
+  local sug="" cf; cf="$(mktemp)"; check_file_lines > "$cf"   # not < <(…): its NOTES must reach this shell
   while IFS= read -r line; do
     k="${line%%:*}"; grep -q "^$k:" "$cfg" && continue
     echo "$k:" >> "$cfg"; added="$added $k"
     v="${line#*:}"; v="${v# }"; [ -z "$v" ] || sug="$sug
    $k: $v"
-  done < <(check_file_lines)
+  done < "$cf"; rm -f "$cf"
+  printf '%s\n' "$NOTES" | grep -q 'check_file_.* left empty' && note "$(printf '%s\n' "$NOTES" | grep 'check_file_.* left empty' | sed 's/^ *- //')"
   [ -z "$sug" ] || note "project.yaml: set these to have each edited file checked at once (PostToolUse hook) — use your own tool versions:$sug"
   while IFS= read -r line; do
     k="$(printf '%s' "$line" | sed -n 's/^\([a-z_][a-z_0-9]*\):.*/\1/p')"; [ -n "$k" ] || continue

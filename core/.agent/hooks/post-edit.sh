@@ -20,11 +20,13 @@ case "$ext" in *[!A-Za-z0-9]*) exit 0 ;; esac
 cmd="$(cfg_hook "check_file_$ext")"
 
 # the component that holds the file: the longest matching path of `components:` (default: the repo root)
-comp="."
-for c in $(cfg_hook components); do
-  p="${c%%=*}"; [ "$p" = "." ] && continue
-  case "$rel/" in "$p"/*) if [ "$comp" = "." ] || [ ${#p} -gt ${#comp} ]; then comp="$p"; fi ;; esac
+comp=""; rootcomp=0; comps="$(cfg_hook components)"
+[ -n "$comps" ] || rootcomp=1                   # no components listed: the repo root is the project
+for c in $comps; do
+  p="${c%%=*}"; [ "$p" = "." ] && { rootcomp=1; continue; }
+  case "$rel/" in "$p"/*) if [ -z "$comp" ] || [ ${#p} -gt ${#comp} ]; then comp="$p"; fi ;; esac
 done
+if [ -z "$comp" ]; then [ $rootcomp -eq 1 ] || exit 0; comp="."; fi   # outside every component: its tool config is unknown — skip
 inner="$rel"; [ "$comp" = "." ] || inner="${rel#"$comp"/}"
 [ -n "$cmd" ] || exit 0
 q="$(printf '%q' "$inner")"

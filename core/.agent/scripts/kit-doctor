@@ -101,7 +101,7 @@ check_cmd() { # check_cmd <step> <command>
 }
 
 echo "Project commands (.agent/project.yaml)"
-for step in install format format_check lint typecheck arch test build audit docs up; do
+for step in install format format_check lint typecheck arch test test_fast build audit docs up; do
   cmd="$(cfg "cmd_$step")"
   if [ -z "$cmd" ]; then
     case "$step" in format_check|lint|test) meh "cmd_$step empty — this gate is skipped" ;; esac

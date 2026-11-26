@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # kit-run <step...> — run project commands defined in .agent/project.yaml
-# Steps: install format format_check lint typecheck arch test coverage specs trace dup build audit secrets docs ops sbom e2e perf api apigen up down logs
+# Steps: install format format_check lint typecheck arch test test_fast coverage specs trace dup build audit secrets docs ops sbom e2e perf api apigen up down logs
 #        trace   = kit-trace (ids referenced in docs/specs/tasks exist; built in, no cmd_ needed)
 #        testcov = coverage if cmd_coverage is set (fails under coverage_min), else test
 #        check   = format_check lint typecheck arch test specs trace secrets   (before every commit/PR)

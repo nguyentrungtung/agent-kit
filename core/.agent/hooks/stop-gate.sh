@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stop hook: before the agent ends its turn on a task branch with uncommitted CODE changes,
-# run the fast gates (project.yaml: stop_checks, default "format_check lint"). If they fail,
+# run the fast gates (project.yaml: stop_checks, default "format_check lint test_fast"; empty commands are skipped). If they fail,
 # block the stop once and hand the errors back so the agent fixes them (or explains why it can't).
 # Counts the same failure across turns (.agent/local/stop-gate.state); at stop_repeat_max it tells the agent to roll back or ask.
 # Never loops: when Claude is already continuing because of this hook (stop_hook_active), it lets go.
@@ -17,7 +17,7 @@ changed="$(git status --porcelain 2>/dev/null | cut -c4- | sed 's/.* -> //' \
   | grep -vE '^(docs/|\.agent/(tasks|memory|context|local)/)|\.md$' || true)"
 [ -n "$changed" ] || { rm -f "$state"; exit 0; }
 
-steps="$(cfg_hook stop_checks)"; steps="${steps:-format_check lint}"
+steps="$(cfg_hook stop_checks)"; steps="${steps:-format_check lint test_fast}"
 [ "$steps" = none ] && exit 0
 
 out="$(.agent/scripts/kit-run $steps 2>&1)" && { rm -f "$state"; exit 0; }
