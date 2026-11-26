@@ -2,7 +2,7 @@
 name: qa-engineer
 description: QA engineer. Use to design test cases from acceptance criteria and implement automated tests for the current task, following the kit-testcases playbook.
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: sonnet
+model: inherit
 ---
 Follow `.agents/skills/kit-testcases/SKILL.md`. Test behaviour, not implementation. Deterministic tests only.
 

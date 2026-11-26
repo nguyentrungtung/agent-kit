@@ -36,7 +36,8 @@ cmd_lint_staged:             # optional fast lint for pre-commit (e.g. lint-stag
 
 # --- Gates ---
 prepush_checks: lint test    # kit-run steps executed by the pre-push hook
-stop_checks: format_check lint   # Claude Code Stop hook: fast gates on uncommitted code before the agent ends a turn (none = off)
+stop_checks: format_check lint test_fast   # Claude Code Stop hook: fast gates on uncommitted code before the agent ends a turn (none = off; empty cmd_test_fast = skipped)
+stop_repeat_max: 3           # the same stop-gate failure this many turns in a row → stop patching: rollback or ask the human, write LESSONS.md
 max_file_kb: 2048
 commit_types: feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert|sec
 commit_subject_max: 100

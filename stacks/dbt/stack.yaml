@@ -14,6 +14,8 @@ cmd_test: dbt build --target ci --exclude package:dbt_project_evaluator
 cmd_coverage: 
 cmd_build: dbt docs generate --target ci
 cmd_audit:
+check_file_ext:
+check_file:
 post_note: copy .agent/stack/dbt/snippets/profiles.example.yml into your dbt profiles (target ci = DuckDB, no warehouse needed in CI), add packages.yml from the snippets, then kit-run install.
 
 ci_image: python:3.12

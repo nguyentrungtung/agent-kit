@@ -90,6 +90,17 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.agent/hooks/post-edit.sh"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

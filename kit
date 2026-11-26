@@ -29,7 +29,7 @@ set -euo pipefail
 KIT_SRC="$(cd "$(dirname "$0")" && pwd)"
 CORE="$KIT_SRC/core"; STACKS="$KIT_SRC/stacks"; MODULES="$KIT_SRC/modules"
 VERSION="$(cat "$KIT_SRC/VERSION" 2>/dev/null || echo dev)"
-STEPS="install format format_check lint typecheck arch test coverage build audit"
+STEPS="install format format_check lint typecheck arch test test_fast coverage build audit"
 DETECT_ORDER="java-maven java-gradle php dbt python go rust dotnet node"
 
 if [ -t 2 ]; then G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; B=$'\033[1m'; D=$'\033[2m'; N=$'\033[0m'; else G=; Y=; R=; B=; D=; N=; fi
@@ -432,7 +432,7 @@ comp_raw() { # comp_raw <idx> <key>
       elif [ ! -f "$dir/package-lock.json" ]; then v="$(printf '%s' "$v" | sed 's#npm ci#npm install#')"; fi ;;
     python)
       if [ -f "$dir/uv.lock" ]; then
-        v="$(printf '%s' "$v" | sed -E -e 's#^pip install -r requirements.txt$#uv sync#' -e 's#^pip install #uv add --dev #' -e 's#^(ruff|mypy|pytest|pip-audit|lint-imports)#uv run \1#')"
+        v="$(printf '%s' "$v" | sed -E -e 's#^pip install -r requirements.txt$#uv sync#' -e 's#^pip install #uv add --dev #' -e 's#(^|&& )(ruff|mypy|pytest|pip-audit|lint-imports)( |$)#\1uv run \2\3#g')"
         # dev tools declared as [project.optional-dependencies] dev are only installed with --extra dev
         if [ "$v" = "uv sync" ] && awk '/^\[project\.optional-dependencies\]/{f=1;next} /^\[/{f=0} f && /^dev[[:space:]]*=/{x=1} END{exit !x}' "$dir/pyproject.toml" 2>/dev/null; then
           v="uv sync --extra dev"
@@ -460,6 +460,16 @@ comp_raw() { # comp_raw <idx> <key>
       fi ;;
   esac
   printf '%s' "$v"
+}
+check_file_lines() { # "check_file_<ext>: <cmd>" per extension of every stack (first component of a stack wins); <cmd> runs in the
+  # file's component directory with {file} = the path relative to it (Claude Code PostToolUse hook, .agent/hooks/post-edit.sh)
+  local i e v seen=""
+  for i in "${!C_PATH[@]}"; do
+    for e in $(yget "$(stack_yaml "${C_STACK[$i]}")" check_file_ext); do
+      case " $seen " in *" $e "*) continue ;; esac; seen="$seen $e"
+      v="$(comp_value "$i" check_file)"; kv_line "check_file_$e" "$v"
+    done
+  done
 }
 build_commands() { # sets CMD_<step> (joined across components)
   local step i v p cur name
@@ -865,11 +875,20 @@ write_manifest() { # sha256 of every kit-managed file as it is now (after render
 }
 
 sync_project_keys() { # add keys that newer kits introduced; never change values the project already has
-  local cfg="$TARGET/.agent/project.yaml" step name k line added=""
+  local cfg="$TARGET/.agent/project.yaml" step name k v line added=""
   for step in $STEPS; do
     grep -q "^cmd_$step:" "$cfg" && continue
     name="CMD_$step"; kv_line "cmd_$step" "${!name}" >> "$cfg"; added="$added cmd_$step"
   done
+  # per-file checks: added empty — an existing project's tools or versions may differ from the kit's defaults; the suggestion is printed
+  local sug=""
+  while IFS= read -r line; do
+    k="${line%%:*}"; grep -q "^$k:" "$cfg" && continue
+    echo "$k:" >> "$cfg"; added="$added $k"
+    v="${line#*:}"; v="${v# }"; [ -z "$v" ] || sug="$sug
+   $k: $v"
+  done < <(check_file_lines)
+  [ -z "$sug" ] || note "project.yaml: set these to have each edited file checked at once (PostToolUse hook) — use your own tool versions:$sug"
   while IFS= read -r line; do
     k="$(printf '%s' "$line" | sed -n 's/^\([a-z_][a-z_0-9]*\):.*/\1/p')"; [ -n "$k" ] || continue
     case "$line" in *'{{'*) continue ;; esac
@@ -887,6 +906,8 @@ write_project_yaml() {
   fi
   tmp="$(mktemp)"
   for step in $STEPS; do name="CMD_$step"; kv_line "cmd_$step" "${!name}" >> "$tmp"; done
+  { echo "# Checked right after the agent edits a file of that extension (Claude Code PostToolUse; {file} = path in its component; empty = off)"
+    check_file_lines; } >> "$tmp"
   awk -v cf="$tmp" '/\{\{COMMANDS\}\}/{while((getline l < cf)>0) print l; next} {print}' "$CORE/.agent/project.yaml.tpl" \
     | sed -e "s|{{NAME}}|$PROJECT_NAME|" -e "s|{{DESCRIPTION}}|TODO|" -e "s|{{KIT_VERSION}}|$VERSION|" \
           -e "s|{{STACK}}|${C_STACK[0]}|" -e "s|{{COMPONENTS}}|$(components_str)|" -e "s|{{MODULES}}|$MODS|" \

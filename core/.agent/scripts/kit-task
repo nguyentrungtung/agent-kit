@@ -83,7 +83,10 @@ sync_done() {
 cmd_new() {
   local title="" type=feature prio=P2 change="" tags="[]"
   while [ $# -gt 0 ]; do case "$1" in
-    --type) type="$2"; [ "$type" = bug ] && type=bugfix; shift 2 ;; --priority) prio="$2"; shift 2 ;; --change) change="$2"; shift 2 ;; --tags) tags="$2"; shift 2 ;; *) title="${title:+$title }$1"; shift ;;
+    --type) type="$2"; [ "$type" = bug ] && type=bugfix; shift 2 ;; --priority) prio="$2"; shift 2 ;; --change) change="$2"; shift 2 ;; --tags) tags="$2"; shift 2 ;;
+    -h|--help) title=""; break ;;
+    -*) die "kit-task new: unknown option '$1' (titles cannot start with '-')" ;;
+    *) title="${title:+$title }$1"; shift ;;
   esac; done
   [ -n "$title" ] || die 'usage: kit-task new "<title>" [--type feature] [--priority P2] [--change <openspec-change>] [--tags <tags>]'
   if [ -n "$change" ] && [ ! -d "$(change_dir "$change")" ]; then warn "OpenSpec change '$change' not found under openspec/changes/ (create it: kit-new change $change)"; fi

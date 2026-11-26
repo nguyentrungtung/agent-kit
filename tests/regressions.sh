@@ -761,5 +761,49 @@ check "data without devops: the checklist gives a way to create the runbook that
 check "data checklist: catch-up before freshness, and a rollback section" "grep -q 'catch-up load first' \"\$B/.agent/checklists/data-deploy.md\" && grep -q '^## 6. If a trigger fires' \"\$B/.agent/checklists/data-deploy.md\""
 check "without module data there is no data checklist; release.md says it is module data" "[ ! -e \"\$A/.agent/checklists/data-deploy.md\" ] && grep -q 'module data' \"\$A/.agent/checklists/release.md\""
 
+# ---------------------------------------------------------------- inner loop (0.16): per-file check, repeated stop failures, test_fast, --help
+printf '\n== inner loop: file check after each edit, same failure 3 turns, test_fast, kit-task new --help\n'
+pv() { sed -n "s/^$2:[[:space:]]*//p" "$1/.agent/project.yaml" | head -n1; }   # whole value (yv stops at the first space)
+A="$WORK/il-new"; fresh "$A"; (cd "$A" && git init -q -b main)
+"$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules none --stack python >"$A.log" 2>&1
+check "new python project: per-file check and PostToolUse hook installed" "[ \"\$(pv \"\$A\" check_file_py)\" = 'ruff format --check -q {file} && ruff check -q {file}' ] && [ -x \"\$A/.agent/hooks/post-edit.sh\" ] && jq -e '.hooks.PostToolUse[0].matcher == \"Edit|Write|MultiEdit\"' \"\$A/.claude/settings.json\" >/dev/null"
+check "new project: Stop gate runs test_fast; empty cmd_test_fast is skipped" "grep -q '^stop_checks: format_check lint test_fast' \"\$A/.agent/project.yaml\" && printf '%s' \"\$(cd \"\$A\" && .agent/scripts/kit-run test_fast 2>&1)\" | grep -q 'skip.*test_fast'"
+A="$WORK/il-uv"; fresh "$A"; (cd "$A" && git init -q -b main && printf '[project]\nname="x"\n' > pyproject.toml && : > uv.lock)
+"$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules none --stack python --mode new >"$A.log" 2>&1
+check "uv project: every chained python tool runs through uv" "[ \"\$(pv \"\$A\" check_file_py)\" = 'uv run ruff format --check -q {file} && uv run ruff check -q {file}' ] && [ \"\$(pv \"\$A\" cmd_audit)\" = 'uv run pip-audit' ]"
+
+# the hook itself, on a two-component project: the check runs in the file's component with the path relative to it
+H="$WORK/il-hook"; fresh "$H"; mkdir -p "$H/.agent/hooks" "$H/api" "$H/.agent/tasks"
+cp "$ROOT"/core/.agent/hooks/{_hooklib.sh,post-edit.sh,stop-gate.sh} "$H/.agent/hooks/"
+printf 'components: api=python web=node\ncheck_file_py: test -f {file} && grep -q GOOD {file} || { echo "bad file {file}"; exit 1; }\ncheck_file_sh: no-such-tool-xyz {file}\n' > "$H/.agent/project.yaml"
+pe() { printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$1" | CLAUDE_PROJECT_DIR="$H" "$H/.agent/hooks/post-edit.sh"; }
+echo 'x = 1' > "$H/api/bad.py"; echo 'GOOD = 1' > "$H/api/good.py"; echo 'echo' > "$H/api/t.sh"; echo 'x' > "$H/.agent/tasks/n.py"
+check "PostToolUse: a failing file is handed back, path relative to its component" "pe \"\$H/api/bad.py\" | jq -e '.decision == \"block\" and (.reason | test(\"api/bad.py fails\") and test(\"bad file bad.py\"))' >/dev/null"
+check "PostToolUse: passing file, kit files, missing tool, no key → silent" "[ -z \"\$(pe \"\$H/api/good.py\")\" ] && [ -z \"\$(pe \"\$H/.agent/tasks/n.py\")\" ] && [ -z \"\$(pe \"\$H/api/t.sh\")\" ] && echo x > \"\$H/api/a.md\" && [ -z \"\$(pe \"\$H/api/a.md\")\" ]"
+check "PostToolUse: a path with spaces is quoted" "mkdir -p \"\$H/api/sub dir\" && echo GOOD > \"\$H/api/sub dir/o k.py\" && [ -z \"\$(pe \"\$H/api/sub dir/o k.py\")\" ]"
+
+# Stop gate: the same failure three turns in a row asks for a rollback; a different failure restarts the count
+G="$WORK/il-stop"; fresh "$G"; mkdir -p "$G/.agent/hooks" "$G/.agent/scripts"
+cp "$ROOT"/core/.agent/hooks/{_hooklib.sh,stop-gate.sh} "$G/.agent/hooks/"; cp "$ROOT"/core/.agent/scripts/{kit-run,lib.sh} "$G/.agent/scripts/"
+(cd "$G" && git init -q -b main && printf 'stop_checks: lint\ncmd_lint: echo "lint error at line 12"; false\n' > .agent/project.yaml && git add -A && git -c core.hooksPath=/dev/null commit -qm base --no-verify && git checkout -q -b feature/TASK-001-x && echo 'x' > app.py)
+sg() { printf '{"stop_hook_active":false}' | CLAUDE_PROJECT_DIR="$G" "$G/.agent/hooks/stop-gate.sh"; }
+o1="$(sg)"; o2="$(cd "$G" && sed -i.bak 's/line 12/line 40/' .agent/project.yaml && rm -f .agent/project.yaml.bak; sg)"; o3="$(sg)"
+check "Stop gate: same failure (line numbers aside) on turn 3 → stop patching" "printf '%s' \"\$o1\" | jq -e '.decision == \"block\"' >/dev/null && ! printf '%s' \"\$o2\" | grep -q 'SAME FAILURE' && printf '%s' \"\$o3\" | grep -q 'SAME FAILURE 3 turns'"
+(cd "$G" && printf 'stop_checks: lint\ncmd_lint: echo "another problem"; false\n' > .agent/project.yaml); o4="$(sg)"
+check "Stop gate: a new failure starts counting again" "printf '%s' \"\$o4\" | jq -e '.decision == \"block\"' >/dev/null && ! printf '%s' \"\$o4\" | grep -q 'SAME FAILURE'"
+
+# upgrade: keys added empty with a suggestion, hook merged; --help creates nothing
+A="$WORK/il-up"; fresh "$A"; (cd "$A" && git init -q -b main)
+"$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules none --stack python >"$A.log" 2>&1
+sed -i.bak '/^check_file_/d; /^# Checked right after/d; /^cmd_test_fast:/d' "$A/.agent/project.yaml" && rm -f "$A/.agent/project.yaml.bak"
+jq 'del(.hooks.PostToolUse)' "$A/.claude/settings.json" > "$A/s.tmp" && mv "$A/s.tmp" "$A/.claude/settings.json"; rm -f "$A/.agent/hooks/post-edit.sh"; grep -v ' .agent/hooks/post-edit.sh$' "$A/.agent/kit.manifest" > "$A/m.tmp" && mv "$A/m.tmp" "$A/.agent/kit.manifest"   # = a 0.15 install
+commit_all "$A"; "$KIT" upgrade "$A" >"$A.up.log" 2>&1 || true
+check "upgrade: check_file_py added EMPTY, suggestion printed" "grep -qx 'check_file_py:' \"\$A/.agent/project.yaml\" && grep -q 'check_file_py: ruff format' \"\$A.up.log\""
+check "upgrade: PostToolUse hook merged into the project's settings" "jq -e '.hooks.PostToolUse' \"\$A/.claude/settings.json\" >/dev/null && [ -x \"\$A/.agent/hooks/post-edit.sh\" ]"
+n0="$(ls "$A/.agent/tasks" | wc -l)"; ho="$(cd "$A" && .agent/scripts/kit-task new --help 2>&1 || true)"; n1="$(ls "$A/.agent/tasks" | wc -l)"
+check "kit-task new --help prints usage and creates no task" "[ \"\$n0\" = \"\$n1\" ] && printf '%s' \"\$ho\" | grep -q 'usage: kit-task new'"
+check "kit-task new rejects an unknown option" "printf '%s' \"\$(cd \"\$A\" && .agent/scripts/kit-task new --typo x 2>&1 || true)\" | grep -q \"unknown option '--typo'\""
+check "reviewers use the session's model" "grep -qx 'model: inherit' \"\$A/.claude/agents/code-reviewer.md\""
+
 printf '\n%d failure(s) — workdir %s\n' "$fail" "$WORK"
 [ $fail -eq 0 ]

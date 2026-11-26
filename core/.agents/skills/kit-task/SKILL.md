@@ -69,6 +69,8 @@ Update STATE.md, run kit-daily. After merge: `kit-task merged TASK-NNN`; worktre
 
 ## Stop gate (Claude Code)
 Ending a turn with failing `stop_checks` on uncommitted code is blocked once — fix, or explain exactly what fails.
+The same failure `stop_repeat_max` turns in a row means you are patching in circles: roll back to the last green checkpoint or ask, and write LESSONS.md.
+Each edited file is also checked at once (`check_file_<ext>`, PostToolUse hook): fix what it reports before moving to the next file.
 
 ## Never
 Commit on protected branches · skip/disable/weaken tests or lint · touch secrets · change unrelated code · merge your own PR ·
