@@ -783,13 +783,42 @@ check "PostToolUse: passing file, kit files, missing tool, no key → silent" "[
 check "PostToolUse: a path with spaces is quoted" "mkdir -p \"\$H/api/sub dir\" && echo GOOD > \"\$H/api/sub dir/o k.py\" && [ -z \"\$(pe \"\$H/api/sub dir/o k.py\")\" ]"
 
 # review findings: a hanging chain is killed as a whole, wrapper "not installed" is not a finding, & in a name, per-component keys
-printf 'components: api=python web=node\ncheck_file_timeout: 1\ncheck_file_py: sleep 8 && echo late\ncheck_file_js: echo "npm error npx canceled due to missing packages"; exit 1\ncheck_file_ts: test -f {file} || { echo "missing {file}"; exit 1; }\ncheck_file_ts__web: grep -q WEB {file} || { echo "web rule {file}"; exit 1; }\n' > "$H/.agent/project.yaml"
+printf 'components: api=python web=node\ncheck_file_timeout: 1\ncheck_file_py: sleep 8 && echo late\ncheck_file_js: echo "npm error npx canceled due to missing packages"; exit 1\ncheck_file_ts: test -f {file} && ! grep -q BAD {file} || { echo "shared rule {file}"; exit 1; }\ncheck_file_ts__web: grep -q WEB {file} || { echo "web rule {file}"; exit 1; }\ncheck_file_ts__api:\ncheck_file_ts__root: echo "root rule {file}"; exit 1\ncheck_file_js__web: off\ncheck_file_mjs: echo "Error [ERR_MODULE_NOT_FOUND]: Cannot find module ./rules"; exit 1\ncheck_file_cjs: echo " ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command \\"eslint\\" not found"; exit 1\n' > "$H/.agent/project.yaml"
 mkdir -p "$H/web"; echo x > "$H/web/a.js"; echo x > "$H/web/b.ts"; echo x > "$H/api/c.ts"; echo x > "$H/api/a&b.ts"
 t0=$SECONDS; o="$(pe "$H/api/good.py")"; dt=$((SECONDS - t0))
 check "PostToolUse: timeout kills the whole chain (returns in seconds, silent)" "[ -z \"\$o\" ] && [ \$dt -le 4 ]"
-check "PostToolUse: a tool missing behind npx / uv is not reported as a lint error" "[ -z \"\$(pe \"\$H/web/a.js\")\" ]"
+echo x > "$H/api/a.js"; echo x > "$H/web/m.mjs"; echo x > "$H/web/c.cjs"; echo x > "$H/root.ts"
+check "PostToolUse: a tool missing behind npx / pnpm is not reported as a lint error" "[ -z \"\$(pe \"\$H/api/a.js\")\" ] && [ -z \"\$(pe \"\$H/web/c.cjs\")\" ]"
+check "PostToolUse: a real error that mentions a missing module IS reported" "pe \"\$H/web/m.mjs\" | grep -q 'Cannot find module'"
+check "PostToolUse: component key 'off' turns it off there; empty component key falls back to the shared one" "[ -z \"\$(pe \"\$H/web/a.js\")\" ] && echo BAD > \"\$H/api/e.ts\" && pe \"\$H/api/e.ts\" | grep -q 'shared rule e.ts'"
+check "PostToolUse: files at the repo root use check_file_<ext>__root" "pe \"\$H/root.ts\" | grep -q 'root rule root.ts'"
 check "PostToolUse: a component's own key wins (web), the shared key elsewhere (api)" "pe \"\$H/web/b.ts\" | grep -q 'web rule b.ts' && [ -z \"\$(pe \"\$H/api/c.ts\")\" ]"
 check "PostToolUse: '&' in a file name stays part of the name" "[ -z \"\$(pe \"\$H/api/a&b.ts\")\" ]"
+
+# the stacks' own check_file commands, with stub tools on PATH
+F="$WORK/il-stubs"; fresh "$F"; mkdir -p "$F/bin" "$F/p"
+cat > "$F/bin/gofmt" <<'EOS'
+#!/bin/sh
+for a; do f=$a; done; grep -q SYNTAXERR "$f" && { echo "$f:1:1: expected '}'" >&2; exit 2; }; exit 0
+EOS
+cat > "$F/bin/rustfmt" <<'EOS'
+#!/bin/sh
+echo "$@" > "$STUB_LOG"; exit 0
+EOS
+cat > "$F/bin/ruff" <<'EOS'
+#!/bin/sh
+echo "$@" >> "$STUB_LOG"; case " $* " in *" --force-exclude "*) exit 0 ;; esac; echo "E999 excluded.py would be checked"; exit 1
+EOS
+chmod +x "$F/bin/"*
+sv() { sed -n "s/^check_file: //p" "$ROOT/stacks/$1/stack.yaml"; }
+runc() { (cd "$F/p" && PATH="$F/bin:$PATH" STUB_LOG="$F/log" bash -c "${1//\{file\}/$2}") >/dev/null 2>&1; }
+echo 'package main SYNTAXERR' > "$F/p/m.go"
+check "go: a file that does not parse fails the check" "! runc \"\$(sv go)\" m.go"
+printf '[package]\nname = "x"\nedition = "2024"\n' > "$F/p/Cargo.toml"; echo 'fn main(){}' > "$F/p/l.rs"
+check "rust: the edition comes from Cargo.toml" "runc \"\$(sv rust)\" l.rs && grep -q -- '--edition 2024' \"\$F/log\""
+echo 'x=1' > "$F/p/excluded.py"; : > "$F/log"
+check "python: files the project excludes stay excluded" "runc \"\$(sv python)\" excluded.py"
+check "node: unknown file types and warnings handled by flags" "sv node | grep -q -- '--ignore-unknown' && sv node | grep -q -- '--max-warnings=0'"
 
 G="$WORK/il-stop"; fresh "$G"; mkdir -p "$G/.agent/hooks" "$G/.agent/scripts"
 cp "$ROOT"/core/.agent/hooks/{_hooklib.sh,stop-gate.sh} "$G/.agent/hooks/"; cp "$ROOT"/core/.agent/scripts/{kit-run,lib.sh} "$G/.agent/scripts/"
@@ -801,8 +830,10 @@ check "Stop gate: same failure (line numbers aside) on turn 3 → stop patching"
 check "Stop gate: a new failure starts counting again" "printf '%s' \"\$o4\" | jq -e '.decision == \"block\"' >/dev/null && ! printf '%s' \"\$o4\" | grep -q 'SAME FAILURE'"
 
 (cd "$G" && printf 'stop_checks: lint\ncmd_lint: echo "same again"; false\n' > .agent/project.yaml); sg >/dev/null; sg >/dev/null
-(cd "$G" && git add app.py && git -c core.hooksPath=/dev/null commit -qm wip --no-verify && echo y > app2.py); o5="$(sg)"
-check "Stop gate: the count restarts after a commit (not consecutive work)" "printf '%s' \"\$o5\" | jq -e '.decision == \"block\"' >/dev/null && ! printf '%s' \"\$o5\" | grep -q 'SAME FAILURE'"
+(cd "$G" && git add app.py && git -c core.hooksPath=/dev/null commit -qm checkpoint --no-verify && echo y > app2.py); o5="$(sg)"
+check "Stop gate: a checkpoint commit does not reset the count (3rd turn still flagged)" "printf '%s' \"\$o5\" | grep -q 'SAME FAILURE 3 turns'"
+(cd "$G" && git add -A && git -c core.hooksPath=/dev/null commit -qm done --no-verify); sg >/dev/null; (cd "$G" && echo z > app3.py); o6="$(sg)"
+check "Stop gate: nothing left to check clears the count" "! printf '%s' \"\$o6\" | grep -q 'SAME FAILURE'"
 
 # kit init: components of one stack that need different commands get their own keys; an existing repo keeps only tools it uses
 A="$WORK/il-two"; fresh "$A"; (cd "$A" && git init -q -b main && mkdir -p api worker && printf '[project]\nname="a"\n' > api/pyproject.toml && : > api/uv.lock && printf 'x\n' > worker/requirements.txt)
