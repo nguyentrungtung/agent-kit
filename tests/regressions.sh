@@ -754,6 +754,11 @@ rb="$A/docs/platform/runbooks/deploy-gold.md"
 check "new runbook has prerequisites and stop criteria before the steps" "[ \"\$(grep -E '^## (Prerequisites and access|Stop and roll back when|Diagnose)\$' \"\$rb\" | tr '\n' '|')\" = '## Prerequisites and access|## Stop and roll back when|## Diagnose|' ]"
 A="$WORK/dd-nodata"; fresh "$A"; (cd "$A" && git init -q -b main)
 "$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules devops --stack python >"$A.log" 2>&1
+check "point of no return stays visible once comments are stripped" "(cd \"\$A\" && .agent/scripts/kit-new runbook \"Visible\" >/dev/null) && perl -0pe 's/<!--.*?-->//gs' \"\$A/docs/platform/runbooks/visible.md\" | grep -q 'Point of no return.*who approves'"
+B="$WORK/dd-dataonly"; fresh "$B"; (cd "$B" && git init -q -b main)
+"$KIT" init "$B" --yes --no-deps --no-setup --no-tools --modules data --stack python >"$B.log" 2>&1
+check "data without devops: the checklist gives a way to create the runbook that works" "grep -q 'kit-new doc docs/platform/runbooks/' \"\$B/.agent/checklists/data-deploy.md\" && (cd \"\$B\" && .agent/scripts/kit-new doc docs/platform/runbooks/deploy.md Deploy >/dev/null) && [ -f \"\$B/docs/platform/runbooks/deploy.md\" ]"
+check "data checklist: catch-up before freshness, and a rollback section" "grep -q 'catch-up load first' \"\$B/.agent/checklists/data-deploy.md\" && grep -q '^## 6. If a trigger fires' \"\$B/.agent/checklists/data-deploy.md\""
 check "without module data there is no data checklist; release.md says it is module data" "[ ! -e \"\$A/.agent/checklists/data-deploy.md\" ] && grep -q 'module data' \"\$A/.agent/checklists/release.md\""
 
 printf '\n%d failure(s) — workdir %s\n' "$fail" "$WORK"

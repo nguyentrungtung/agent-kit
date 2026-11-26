@@ -39,7 +39,9 @@ updated: {{DATE}}
 1.
 
 ## Rollback
-<!-- Point of no return (the step after which only restore or forward-fix works): -->
+<!-- Point of no return: the first step after which only restore or forward-fix works. Write `none` if there is none. -->
+**Point of no return** (step · who approves passing it):
+
 1.
 
 ## After the incident
