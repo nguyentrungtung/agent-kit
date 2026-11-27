@@ -62,6 +62,7 @@ in_shard() { local n="$1"; [ "$SHARD_TOTAL" -le 1 ] && return 0; [ $(( (n - 1) %
 
 export GIT_AUTHOR_NAME=kit GIT_AUTHOR_EMAIL=kit@example.invalid GIT_COMMITTER_NAME=kit GIT_COMMITTER_EMAIL=kit@example.invalid
 export GIT_CONFIG_GLOBAL=/dev/null   # the developer's global git config (excludesFile, hooks…) must not hide or cause failures
+unset GITHUB_ACTIONS GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF GITHUB_REF_NAME GITLAB_CI CI_MERGE_REQUEST_IID CI_MERGE_REQUEST_SOURCE_BRANCH_NAME CI_MERGE_REQUEST_TARGET_BRANCH_NAME CI_COMMIT_BRANCH 2>/dev/null || true
 fail=0
 check() { if eval "$2"; then printf '  ok   %s\n' "$1"; else printf '  FAIL %s\n' "$1"; fail=$((fail+1)); fi; }
 fresh() { rm -rf "$1" "$1".*; mkdir -p "$1"; }   # every case starts clean, so the script can re-run in the same workdir
