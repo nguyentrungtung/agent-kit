@@ -83,9 +83,10 @@ kit-ba ─▶ kit-sa (giải pháp tổng thể) ─┬─▶ kit-devops (hạ t
 ### Rules nằm ở đâu
 ```
 .agent/rules/
-  core/      workflow · documentation · roles · git-workflow · security · testing · error-handling · logging · api-design · database (+ code-intelligence)
+  core/      workflow · clean-code · documentation · roles · git-workflow · security · testing · error-handling · logging · api-design · database (+ code-intelligence)
   devops/    infrastructure · containers · ci-cd · observability          (module devops)
   security/  authn-authz · data-protection · supply-chain                 (module security)
+  data/      kiến trúc dữ liệu · data contracts · chất lượng              (module data)
   stack/     <stack>.md + <framework>.md   — chuẩn cộng đồng, mỗi rule ghi tool ép nó
   project/   luật riêng của dự án (kit-onboard / kit-sa / người viết)
 .claude/rules/stack-*.md   — chỉ trỏ tới file trên, có `paths:` nên Claude Code chỉ nạp khi đụng đúng loại file
@@ -241,7 +242,7 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 | `.agent/scripts/kit-review-bot [on\|off\|status]` | Bật/tắt review **tự động** của CodeRabbit cho repo (ghi `reviews.auto_review.enabled` vào `.coderabbit.yaml`, giữ nguyên các khoá khác). Tắt rồi vẫn gọi được khi cần: comment `@coderabbitai review` trên PR/MR; tạm dừng một PR/MR: `@coderabbitai pause`. Dùng được trên GitHub lẫn GitLab |
 | `.agent/scripts/kit-adopt-scan` | Kiểm kê repo có sẵn cho `kit-migrate` (chỉ đọc): luật agent cũ, link sẽ gãy khi xoá chúng, thư mục docs của bạn vs chỗ của kit, nội dung giống secret trong docs (không in giá trị), dòng `.gitignore` đang ẩn file kit, `*.kit-new`, hai pipeline CI, kiểm tra riêng của CI/hook chưa có trong `cmd_*`. Báo cáo ở `.agent/local/adopt-scan.md` |
 | `.agent/scripts/kit-hook <pre-commit\|commit-msg\|pre-push>` | Một cửa gọi các kiểm tra git của kit (chặn commit lên nhánh protected, secret, Conventional Commits, kiểm tra trước push). Dùng khi repo đã có Husky/lefthook: hook manager của bạn gọi script này thay vì để kit chiếm `core.hooksPath`. Thuần git cục bộ, không phụ thuộc nhà cung cấp |
-| `.agent/scripts/kit-board [--json\|--html\|--open]` | Bảng kanban đọc trạng thái thật từ từng nhánh task; JSON cho UI/orchestrator; HTML tự chứa ở `.agent/local/board.html` |
+| `.agent/scripts/kit-board [--ready] [--json\|--html\|--open]` | Bảng kanban đọc trạng thái thật từ từng nhánh task (`--ready`: task hết phụ thuộc, sẵn sàng chạy song song); JSON cho UI/orchestrator |
 | `.agent/scripts/kit-doctor [--run]` | Kiểm tra hook, rules, tool cần cho từng `cmd_*` theo từng component, tool của module |
 | `.agent/scripts/kit-diagrams check\|export` | Render mọi sơ đồ Mermaid/PlantUML trong docs (module `ba`) |
 | `.agent/scripts/kit-task new "<title>" [--type] [--priority] [--tags]` | Tạo file task (hỗ trợ gắn thẻ chủ đề như auth, api) |
@@ -284,7 +285,7 @@ Mặc định OpenSpec chỉ init cho `claude` (hoặc theo `--harness` đã ch�
 - File task (`.agent/tasks/*.md`) là **nguồn gốc duy nhất**. Board, GitHub Issues và mọi UI sau này chỉ là lớp hiển thị. Schema frontmatter cố định, xem `.agent/tasks/README.md`.
 - **Hook Stop** (Claude Code): khi agent sắp kết thúc lượt trên nhánh task mà code chưa commit làm fail `stop_checks` (mặc định `format_check lint test_fast`; `cmd_test_fast` trống thì bỏ qua), hook chặn **một lần** và trả lỗi để agent sửa. Tắt bằng `stop_checks: none`. Cùng một lỗi lặp `stop_repeat_max` lượt (mặc định 3) thì hook yêu cầu dừng sửa vòng vòng: rollback về điểm xanh hoặc hỏi người, ghi `LESSONS.md`.
 - **Hook PostToolUse** (Claude Code): ngay sau mỗi lần agent sửa file, chạy `check_file_<đuôi>` trong `.agent/project.yaml` (ví dụ `check_file_py: ruff format --check --force-exclude -q {file} && ruff check --force-exclude -q {file}`, chạy trong thư mục component của file) và trả lỗi cho agent sửa ngay. Khoá trống = không kiểm; công cụ chưa cài hoặc chạy quá `check_file_timeout` giây thì bỏ qua (mặc định 50 giây, cả chuỗi lệnh bị dừng). Các component cùng stack cần lệnh khác nhau (uv và pip, pnpm và npm) thì kit để khoá trống và ghi chú — đặt một lệnh chạy được ở mọi component. Rust không có kiểm từng file (`rustfmt` theo file sai edition trong workspace); Stop gate và CI vẫn chạy `cargo fmt --check`.
-- **Đường lên UI kiểu Vibe Kanban:** `kit-board --json` đã có đủ dữ liệu một UI cần (trạng thái, nhánh, worktree, issue, checkpoint, số file chưa commit). Một UI chỉ cần đọc JSON này và gọi `kit-task start --worktree` / `finish` để điều khiển agent. Không cần đổi format dữ liệu.
+- **Đường lên UI kiểu Vibe Kanban:** `kit-board --json` (hoặc `--ready --json` lọc batch sẵn sàng chạy song song) đã có đủ dữ liệu một UI/orchestrator cần (trạng thái, nhánh, worktree, issue, checkpoint, số file chưa commit); playbook `kit-parallel` quy định rõ chia ownership file và để từng worktree verify/finish PR riêng rồi merge theo thứ tự. Không cần đổi format dữ liệu.
 
 ## 5c. Gitflow: nhánh, môi trường, đặt tên (`.agent/rules/core/git-workflow.md`)
 
@@ -299,7 +300,7 @@ Mặc định OpenSpec chỉ init cho `claude` (hoặc theo `--harness` đã ch�
 
 Tên nhánh: `<type>/<TASK-NNN>-<mô-tả-kebab-case>` (chữ thường, `a-z 0-9 -`, ≤ 60 ký tự; release/hotfix có thể là phiên bản `v1.4.0`).
 Lỗi tìm thấy khi test develop/UAT → `bugfix/` (từ develop); lỗi production → `hotfix/` (từ main). `kit-task new --type feature|bugfix|hotfix|…`
-tạo đúng tên và đúng nhánh gốc. CI (`kit-ci guard`) **chặn** tên sai và merge sai hướng (vd `feature/*` → `main`) khi `gitflow_enforce: block`
+ghi `type:` vào file task để `kit-task start TASK-NNN` tạo đúng tên nhánh và rẽ từ đúng nhánh gốc. CI (`kit-ci guard`) **chặn** tên sai và merge sai hướng (vd `feature/*` → `main`) khi `gitflow_enforce: block`
 (mặc định project mới; project nâng cấp: `warn`); pre-push hook cảnh báo; nhánh do bot tạo được miễn (`branch_exempt_regex`).
 Release: `kit-release prepare` (cắt `release/vX.Y.Z`, CHANGELOG, bump version) → STAGING + UAT → PR vào `main` → `kit-release tag` → merge
 `main` ngược về `develop`. Trunk-based: `develop_branch: main`.
@@ -415,8 +416,8 @@ docs/     ba/ (+_templates) · architecture/ · plan/ · adr/ · qa/ · security
 
 - **Stack mới:** tạo `stacks/<tên>/stack.yaml` (`title detect globs app_port frameworks dev_deps cmd_*`, có thể dùng `inherit: <stack>` để mượn rules/files/snippets), thêm `rules.md`, `files/`, `ci.yml`, `docker/Dockerfile`, rồi thêm tên vào `DETECT_ORDER` trong `kit`.
 - **Framework mới:** `stacks/<stack>/frameworks/<fw>/framework.yaml` (`detect`, các `cmd_*` cần ghi đè, `dev_deps` để thay hoặc `dev_deps_add` để cộng thêm, `exclude_files`, `app_port`), kèm `rules.md` và `files/`. Nhớ thêm tên vào `frameworks:` của stack.
-- **Module (plugin) mới:** `modules/<tên>/module.yaml` (`title default setup_desc`), `files/`, `files/.agent/plugins/<tên>/` (extension slots: `tools.tsv`, `doctor.sh`, `task.sh`, `context.sh`, `new-*.sh`, `ci-*.sh`, `claude-permissions.json`, `guard-files.rules`, `mcp.json`, `agent-summary.md`), và nếu cần thì `project.add`, `gitignore.add`, `setup.sh`. Core hoàn toàn không phụ thuộc cứng vào module.
-- **Docker service mới:** `modules/docker/catalog/<tên>.yml` (header `# title:` `# env:` `# volumes:` + fragment service thụt 2 khoảng trắng).
+- **Module (plugin) mới:** `modules/<tên>/module.yaml` (`title default setup_desc`), `files/`, `files/.agent/plugins/<tên>/` (extension slots: `tools.tsv`, `doctor.sh`, `task.sh`, `context.sh`, `new-*.sh`, `ci-*.sh`, `claude-permissions.json`, `guard-files.rules`, `trace-paths`, `mcp.json`, `agent-summary.md`), và nếu cần thì `project.add`, `gitignore.add`, `setup.sh`. Core hoàn toàn không phụ thuộc cứng vào module.
+- **Docker service mới:** `modules/devops/catalog/<tên>.yml` (header `# title:` `# env:` `# volumes:` + fragment service thụt 2 khoảng trắng).
 
 ## 10. Lưu ý quan trọng khi đưa vào dự án thực tế
 

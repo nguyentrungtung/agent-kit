@@ -2,18 +2,82 @@
 # Regression tests for kit behaviours that broke once (no network, no tool installs).
 #   1. kit upgrade from < 0.11 keeps a customised shared skeleton when skeletons/<framework>/ is created
 #   2. project CI "Task workflow gates": verifies tasks a PR finishes, skips tasks already finished on the base branch
-# Usage: tests/regressions.sh [workdir]
+# Usage: tests/regressions.sh [--jobs N | --shard i/N] [workdir]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; KIT="$ROOT/kit"
-WORK="${1:-$(mktemp -d)}"; mkdir -p "$WORK"; WORK="$(cd "$WORK" && pwd)"   # absolute: cases cd around
+SHARD_IDX=0; SHARD_TOTAL=0; JOBS="${KIT_TEST_JOBS:-4}"; WORK_ARG=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --jobs) [ $# -ge 2 ] || { echo "--jobs requires a value" >&2; exit 2; }; JOBS="$2"; shift 2 ;;
+    --shard)
+      [ $# -ge 2 ] || { echo "--shard requires i/N" >&2; exit 2; }
+      case "$2" in
+        [1-9]*/[1-9]*)
+          SHARD_IDX="${2%%/*}"; SHARD_TOTAL="${2##*/}"
+          case "$SHARD_IDX" in ''|*[!0-9]*) echo "invalid --shard '$2'" >&2; exit 2 ;; esac
+          case "$SHARD_TOTAL" in ''|*[!0-9]*) echo "invalid --shard '$2'" >&2; exit 2 ;; esac
+          [ "$SHARD_IDX" -ge 1 ] && [ "$SHARD_IDX" -le "$SHARD_TOTAL" ] || { echo "invalid --shard '$2' (expected 1<=i<=N)" >&2; exit 2; } ;;
+        *) echo "invalid --shard '$2' (expected i/N)" >&2; exit 2 ;;
+      esac
+      shift 2 ;;
+    -h|--help) sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "unknown option: $1" >&2; exit 2 ;;
+    *) WORK_ARG="$1"; shift ;;
+  esac
+done
+WORK="${WORK_ARG:-$(mktemp -d)}"; mkdir -p "$WORK"; WORK="$(cd "$WORK" && pwd)"   # absolute: cases cd around
+
+if [ "$SHARD_TOTAL" -eq 0 ]; then
+  case "$JOBS" in ''|*[!0-9]*) JOBS=4 ;; esac
+  [ "$JOBS" -le 7 ] || JOBS=7
+  if [ "$JOBS" -gt 1 ]; then
+    pids=(); total_fail=0
+    for s in $(seq 1 "$JOBS"); do
+      rm -f "$WORK/.shard-$s/.fail" "$WORK/.shard-$s.log"
+      "$0" --shard "$s/$JOBS" "$WORK/.shard-$s" >"$WORK/.shard-$s.log" 2>&1 &
+      pids+=($!)
+    done
+    wrc=()
+    for i in "${!pids[@]}"; do
+      prc=0; wait "${pids[$i]}" || prc=$?
+      wrc[$i]=$prc
+    done
+    for i in "${!pids[@]}"; do
+      s=$((i + 1))
+      [ -f "$WORK/.shard-$s.log" ] && cat "$WORK/.shard-$s.log"
+      if [ -f "$WORK/.shard-$s/.fail" ]; then
+        sf="$(cat "$WORK/.shard-$s/.fail")"
+        total_fail=$((total_fail + sf))
+        if [ "${wrc[$i]}" -ne 0 ] && [ "${sf:-0}" -eq 0 ]; then total_fail=$((total_fail + 1)); fi
+      else
+        total_fail=$((total_fail + 1))
+      fi
+    done
+    printf '\n%d failure(s) — workdir %s\n' "$total_fail" "$WORK"
+    [ "$total_fail" -eq 0 ]
+    exit $?
+  fi
+fi
+in_shard() { local n="$1"; [ "$SHARD_TOTAL" -le 1 ] && return 0; [ $(( (n - 1) % SHARD_TOTAL + 1 )) -eq "$SHARD_IDX" ]; }
+
 export GIT_AUTHOR_NAME=kit GIT_AUTHOR_EMAIL=kit@example.invalid GIT_COMMITTER_NAME=kit GIT_COMMITTER_EMAIL=kit@example.invalid
 export GIT_CONFIG_GLOBAL=/dev/null   # the developer's global git config (excludesFile, hooks…) must not hide or cause failures
 fail=0
 check() { if eval "$2"; then printf '  ok   %s\n' "$1"; else printf '  FAIL %s\n' "$1"; fail=$((fail+1)); fi; }
 fresh() { rm -rf "$1" "$1".*; mkdir -p "$1"; }   # every case starts clean, so the script can re-run in the same workdir
 sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1; else sha256sum "$1" | cut -d' ' -f1; fi; }
+ad() { # ad <dir> "<setup shell>" [kit init args…] — an existing git repo (main), then kit init (no modules unless asked); log in <dir>.log
+  local dir="$1" setup="$2"; shift 2; fresh "$dir"
+  (cd "$dir" && git init -q -b main && eval "$setup")
+  "$KIT" init "$dir" --yes --no-deps --no-setup --no-tools --modules none "$@" >"$dir.log" 2>&1 || true
+}
+commit_all() { (cd "$1" && git add -A && git -c core.hooksPath=/dev/null commit -qm "chore: base" --no-verify); }
+yv() { sed -n "s/^$2:[[:space:]]*\([^ #]*\).*/\1/p" "$1/.agent/project.yaml" | head -n1; }
+pv() { sed -n "s/^$2:[[:space:]]*//p" "$1/.agent/project.yaml" | head -n1; }   # whole value (yv stops at the first space)
+hp() { git -C "$1" config --get core.hooksPath 2>/dev/null || true; }
 
 # ---------------------------------------------------------------- 1. upgrade keeps customised skeletons
+if in_shard 1; then
 old_layout() { # turn a fresh Laravel install into the < 0.11 layout: framework skeleton in the shared folder, recorded in the manifest
   local d="$1" sk=".agent/stack/php/skeletons" f
   rm -rf "$d/$sk/laravel"
@@ -106,8 +170,10 @@ sub="$d/.agent/stack/node/skeletons/react/modular.txt"
 check "react gets its own shipped skeleton"         "cmp -s '$sub' '$ROOT/stacks/node/frameworks/react/skeletons/modular.txt'"
 check "the user is told the edit is not react's"    "printf '%s\n' \"\$up\" | grep -q \"is not react's skeleton\""
 check "the edited shared skeleton is kept"          "grep -q 'USER EDIT' '$d/.agent/stack/node/skeletons/modular.txt'"
+fi
 
 # ---------------------------------------------------------------- legacy task files
+if in_shard 2; then
 printf '\n== a task file from an older template is not blocked by the new checklist / review gates\n'
 d="$WORK/legacy"; fresh "$d"
 (cd "$d" && git init -q && printf '{"name":"x","version":"1.0.0"}\n' > package.json)
@@ -175,7 +241,9 @@ out="$(cd "$d" && f="$(ls .agent/tasks/TASK-002-*.md)" && perl -0pi -e 's/(- \[ 
 check "an unticked '*' item blocks too"             "printf '%s\n' \"\$out\" | grep -q 'tick every item of the checklist'"
 out="$(cd "$d" && f="$(ls .agent/tasks/TASK-002-*.md)" && perl -0pi -e 's/\* \[ \] star bullet left open\n/1. [x] numbered item done\n+ [x] plus item done\n/' "$f" && { .agent/scripts/kit-task verify TASK-002 2>&1 || true; })"
 check "ticked '1.' and '+' items pass"              "printf '%s\n' \"\$out\" | grep -q '2 clarification checklist done'"
+fi
 
+if in_shard 3; then
 printf '\n== kit add fills an empty key in a CRLF project.yaml and keeps the CRLF ending\n'
 c="$WORK/crlf"; fresh "$c"
 (cd "$c" && git init -q && printf '{"name":"x","version":"1.0.0"}\n' > package.json)
@@ -252,7 +320,6 @@ hk() { # hk <dir> [init args…] — a git repo with package.json, then kit init
   [ -z "${PRE:-}" ] || (cd "$dir" && eval "$PRE")
   "$KIT" init "$dir" --stack node --modules none --yes --no-deps --no-setup --no-tools "$@" >"$dir.log" 2>&1 || true
 }
-hp() { git -C "$1" config --get core.hooksPath 2>/dev/null || true; }
 H="$WORK/hk-husky"
 PRE='mkdir -p .husky && printf "echo existing-hook-ran >> hook-ran.log" > .husky/pre-commit' hk "$H"
 check "husky found → core.hooksPath left unset"     "[ -z \"\$(hp \"\$H\")\" ]"
@@ -285,16 +352,11 @@ H="$WORK/hk-keep"; hk "$H" --hooks keep
 check "--hooks keep on a plain repo prints the lines" "[ -z \"\$(hp \"\$H\")\" ] && grep -q 'kit-hook commit-msg' \"\$H.log\""
 rc=0; "$KIT" init "$WORK/hk-bad" --hooks nonsense >/dev/null 2>&1 || rc=$?
 check "--hooks rejects other values"                "[ $rc -ne 0 ]"
+fi
 
 # ---------------------------------------------------------------- adopting an existing repo cleanly (lessons from a real GitLab data repo)
+if in_shard 4; then
 printf '\n== kit init in an existing repo: Git host, flow, hooks, configs and files the repo already has\n'
-ad() { # ad <dir> "<setup shell>" [kit init args…] — an existing git repo (main), then kit init (no modules unless asked); log in <dir>.log
-  local dir="$1" setup="$2"; shift 2; fresh "$dir"
-  (cd "$dir" && git init -q -b main && eval "$setup")
-  "$KIT" init "$dir" --yes --no-deps --no-setup --no-tools --modules none "$@" >"$dir.log" 2>&1 || true
-}
-commit_all() { (cd "$1" && git add -A && git -c core.hooksPath=/dev/null commit -qm "chore: base" --no-verify); }
-yv() { sed -n "s/^$2:[[:space:]]*\([^ #]*\).*/\1/p" "$1/.agent/project.yaml" | head -n1; }
 
 # --- Git host: a self-hosted GitLab whose URL does not say "gitlab", recognised by its pipeline file
 A="$WORK/ad-gitlab"
@@ -561,8 +623,10 @@ rc=0; (cd "$A" && .agent/scripts/kit-doc-coverage transform --min 80 >/dev/null 
 check "--min fails below the threshold"               "[ $rc -eq 1 ]"
 rc=0; (cd "$A" && .agent/scripts/kit-doc-coverage transform --min 30 >/dev/null 2>&1) || rc=$?
 check "--min passes at or above it"                   "[ $rc -eq 0 ]"
+fi
 
 # ---------------------------------------------------------------- issue sync: GitLab (REST) and GitHub (gh) behind one interface
+if in_shard 5; then
 printf '\n== kit-task sync / pull: GitLab through its REST API (fake server), GitHub through gh (fake gh)\n'
 issue_project() { # issue_project <dir> <provider> <remote-url> → a kit project on develop with git_provider set
   local dir="$1"; fresh "$dir"
@@ -760,10 +824,11 @@ B="$WORK/dd-dataonly"; fresh "$B"; (cd "$B" && git init -q -b main)
 check "data without devops: the checklist gives a way to create the runbook that works" "grep -q 'kit-new doc docs/platform/runbooks/' \"\$B/.agent/checklists/data-deploy.md\" && (cd \"\$B\" && .agent/scripts/kit-new doc docs/platform/runbooks/deploy.md Deploy >/dev/null) && [ -f \"\$B/docs/platform/runbooks/deploy.md\" ]"
 check "data checklist: catch-up before freshness, and a rollback section" "grep -q 'catch-up load first' \"\$B/.agent/checklists/data-deploy.md\" && grep -q '^## 6. If a trigger fires' \"\$B/.agent/checklists/data-deploy.md\""
 check "without module data there is no data checklist; release.md says it is module data" "[ ! -e \"\$A/.agent/checklists/data-deploy.md\" ] && grep -q 'module data' \"\$A/.agent/checklists/release.md\""
+fi
 
 # ---------------------------------------------------------------- inner loop (0.16): per-file check, repeated stop failures, test_fast, --help
+if in_shard 6; then
 printf '\n== inner loop: file check after each edit, same failure 3 turns, test_fast, kit-task new --help\n'
-pv() { sed -n "s/^$2:[[:space:]]*//p" "$1/.agent/project.yaml" | head -n1; }   # whole value (yv stops at the first space)
 A="$WORK/il-new"; fresh "$A"; (cd "$A" && git init -q -b main)
 "$KIT" init "$A" --yes --no-deps --no-setup --no-tools --modules none --stack python >"$A.log" 2>&1
 check "new python project: per-file check and PostToolUse hook installed" "[ \"\$(pv \"\$A\" check_file_py)\" = 'ruff format --check --force-exclude -q {file} && ruff check --force-exclude -q {file}' ] && [ -x \"\$A/.agent/hooks/post-edit.sh\" ] && jq -e '.hooks.PostToolUse[0].matcher == \"Edit|Write|MultiEdit\"' \"\$A/.claude/settings.json\" >/dev/null"
@@ -918,8 +983,10 @@ printf '{"threshold": 5}\n' > "$UP3/.jscpd.json"
 commit_all "$UP3"
 "$KIT" upgrade "$UP3" >"$UP3.up.log" 2>&1
 check "upgrade preserves differing root CLAUDE.md & .jscpd.json in .bak-kit" "[ -f \"\$UP3/.claude/CLAUDE.md.bak-kit\" ] && grep -q 'USER CUSTOM ROOT' \"\$UP3/.claude/CLAUDE.md.bak-kit\" && [ -f \"\$UP3/.agent/config/jscpd.json.bak-kit\" ] && grep -q 'threshold' \"\$UP3/.agent/config/jscpd.json.bak-kit\""
+fi
 
 # ---------------------------------------------------------------- hardening & slim root (0.17.1): hook bypasses, tag parsing, feat gate, openspec setup, unused_config, docs/agents
+if in_shard 7; then
 printf '\n== hardening & slim root: hook path/redirection bypasses, tags, feat gate, clean applied repo\n'
 G2="$WORK/guard-hard"; fresh "$G2"; (cd "$G2" && git init -q -b main && mkdir -p .agent/hooks .agent/githooks .agent/scripts .claude src)
 cp "$ROOT"/core/.agent/hooks/{_hooklib.sh,guard-bash.sh,guard-files.sh} "$G2/.agent/hooks/"
@@ -1175,5 +1242,28 @@ mkdir -p "$P_OS/.agent/plugins/r" && printf '{"mcpServers":{"x":{"command":"echo
 (cd "$P_OS" && .agent/scripts/kit-mcp sync --target claude >/dev/null 2>&1 || true)
 check "kit-mcp cleans up temp files when destination JSON is invalid" "[ ! -e \"\$P_OS/.mcp.json.tmp\" ]"
 
+# kit-board --ready filters to runnable todo tasks + kit-parallel skill installed
+B_RDY="$WORK/board-ready"; fresh "$B_RDY"; (cd "$B_RDY" && git init -q -b main && touch app.py)
+"$KIT" init "$B_RDY" --stack python --modules none --yes --no-deps --no-setup --no-tools >/dev/null 2>&1
+(cd "$B_RDY" && git add -A && git -c core.hooksPath=/dev/null commit -qm 'chore: init' --no-verify && git branch develop && git checkout -q develop \
+  && .agent/scripts/kit-task new "Ready A" --priority P1 >/dev/null \
+  && .agent/scripts/kit-task new "Blocked B" --priority P1 >/dev/null \
+  && .agent/scripts/kit-task new "Done Dep" --priority P2 >/dev/null \
+  && .agent/scripts/kit-task new "Ready After Done" --priority P2 >/dev/null)
+perl -pi -e 's/^depends_on: \[\]/depends_on: ["TASK-001"]/' "$B_RDY"/.agent/tasks/TASK-002-*.md
+perl -pi -e 's/^status: todo/status: done/' "$B_RDY"/.agent/tasks/TASK-003-*.md
+perl -pi -e 's/^depends_on: \[\]/depends_on: ["TASK-003"] # ready after done\r/' "$B_RDY"/.agent/tasks/TASK-004-*.md
+b_json="$(cd "$B_RDY" && .agent/scripts/kit-board --ready --json 2>&1 || true)"
+b_txt="$(cd "$B_RDY" && .agent/scripts/kit-board --ready 2>&1 || true)"
+b_html_rc=0; (cd "$B_RDY" && .agent/scripts/kit-board --ready --html >/dev/null 2>&1) || b_html_rc=$?
+check "kit-board --ready handles quoted/commented/CRLF deps and excludes done/blocked tasks" "printf '%s' \"\$b_json\" | jq -e '(.tasks | map(.id) | sort) == [\"TASK-001\",\"TASK-004\"]' >/dev/null && printf '%s\n' \"\$b_txt\" | grep -q 'READY TODO (2)' && printf '%s\n' \"\$b_txt\" | grep -q 'TASK-001' && ! printf '%s\n' \"\$b_txt\" | grep -q 'TASK-002'"
+check "kit-board rejects --ready with --html and keeps --help clean" "[ $b_html_rc -ne 0 ] && ! (cd \"\$B_RDY\" && .agent/scripts/kit-board --help | grep -q 'lib\.sh')"
+check "kit-parallel skill wired into AGENTS.md and .claude/skills" "[ -f \"\$B_RDY/.agent/skills/kit-parallel/SKILL.md\" ] && [ -L \"\$B_RDY/.claude/skills/kit-parallel\" ] && grep -q 'kit-parallel' \"\$B_RDY/AGENTS.md\""
+fi
+
+if [ "$SHARD_TOTAL" -gt 0 ]; then
+  printf '%d\n' "$fail" > "$WORK/.fail"
+  exit $((fail > 0 ? 1 : 0))
+fi
 printf '\n%d failure(s) — workdir %s\n' "$fail" "$WORK"
 [ $fail -eq 0 ]

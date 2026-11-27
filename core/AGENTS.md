@@ -56,7 +56,7 @@ source / plugin planning ─▶ kit-task start ─▶ 1 understand ─▶ 2 clar
 - **One task per session.** Before the context gets large, or when done: run **kit-handoff**, then start a new session.
 - Delegate wide reading to sub-agents when supported (`explorer`, `qa-engineer`, `security-reviewer`, `code-reviewer`) and keep only summaries.
 - Prefer installed code-intelligence / LSP / MCP tools or targeted grep over reading whole files. Read line ranges only.
-- **Parallel agents:** `kit-task start TASK-NNN --worktree`, then a new session in `../<repo>-TASK-NNN` (overview: `.agent/scripts/kit-board`).
+- **Parallel agents:** `.agent/scripts/kit-board --ready --json` + `kit-parallel` playbook; writers use `kit-task start TASK-NNN --worktree` (`../<repo>-TASK-NNN`).
 - Persist durable facts in task logs, `STATE.md`, `LESSONS.md`, or an ADR — never rely on chat memory.
 
 ## 5. Documentation & reporting
