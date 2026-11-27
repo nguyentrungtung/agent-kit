@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# kit-board [--json | --html [file] | --open] — task board from .agent/tasks across all task branches
+# kit-board [--ready] [--json | --html [file] | --open] — task board from .agent/tasks across all task branches
 #   (default) kanban in the terminal: TODO · IN PROGRESS · REVIEW · DONE (+ abandoned count)
+#   --ready   filter terminal/--json output to runnable todo tasks (no unmet depends_on)
 #   --json    machine-readable list (stable schema, see .agent/tasks/README.md) — for UIs / orchestrators
 #   --html    self-contained board page (default .agent/local/board.html, git-ignored); --open also opens it
 # Status is read from each task's own branch (where kit-task records it); merged review tasks show as done.
 source "$(dirname "$0")/lib.sh"
 cd "$KIT_ROOT"
 
-mode=text; out="$KIT_DIR/local/board.html"; open=0
+mode=text; ready=0; out="$KIT_DIR/local/board.html"; open=0
 while [ $# -gt 0 ]; do
   case "$1" in
+    --ready) ready=1; shift ;;
     --json) mode=json; shift ;;
     --html) mode=html; shift; [ $# -gt 0 ] && [ "${1#--}" = "$1" ] && { out="$1"; shift; } ;;
     --open) mode=html; open=1; shift ;;
@@ -17,9 +19,12 @@ while [ $# -gt 0 ]; do
     *) die "unknown option $1" ;;
   esac
 done
+[ $ready -eq 1 ] && [ "$mode" = html ] && die "--ready supports terminal and --json output only (not --html/--open)"
+
+fmv_list() { fmv "$1" "$2" | sed -E 's/(^|[[:space:]]+)#.*$//' | tr -d "\r\t[]\"' "; }
 
 # collect one TSV row per task: id status prio type title branch worktree issue goal deps started done points dirty file
-rows="$(mktemp)"; trap 'rm -f "$rows"' EXIT
+rows="$(mktemp)"; trap 'rm -f "$rows" "$rows.u" "$rows.r"' EXIT
 for name in $(task_names_all); do
   c="$(task_view "$name")"; [ -n "$c" ] || continue
   id="$(fmv "$c" id)"; [ -n "$id" ] || continue
@@ -29,9 +34,9 @@ for name in $(task_names_all); do
   wt="$(fmv "$c" worktree)"; dirty=""
   if [ -n "$wt" ] && [ -d "$KIT_ROOT/$wt" ]; then dirty="$(git -C "$KIT_ROOT/$wt" status --porcelain 2>/dev/null | grep -c . || true)"; else wt=""; fi
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$id" "$st" "$(fmv "$c" priority)" "$(fmv "$c" type)" "$(fmv "$c" title | tr '\t' ' ')" "$br" "$wt" "$(issue_of "$id" "$c")" \
-    "$(fmv "$c" goal_ref)" "$(fmv "$c" depends_on | tr -d '[] ')" "$(fmv "$c" started)" "$(fmv "$c" done)" "${pts:-0}" "$dirty" "$name" \
-    "$(fmv "$c" tags | tr -d '[] ')" >> "$rows"
+    "$id" "$st" "$(fmv "$c" priority)" "$(fmv "$c" type)" "$(fmv "$c" title | tr '\r\t' '  ')" "$br" "$wt" "$(issue_of "$id" "$c")" \
+    "$(fmv "$c" goal_ref)" "$(fmv_list "$c" depends_on)" "$(fmv "$c" started)" "$(fmv "$c" done)" "${pts:-0}" "$dirty" "$name" \
+    "$(fmv_list "$c" tags)" >> "$rows"
 done
 
 # keep only unmet dependencies (deps whose task is not done)
@@ -39,6 +44,9 @@ awk -F'\t' -v OFS='\t' 'NR==FNR {st[$1]=$2; next} {
   n = split($10, a, ","); o = ""
   for (i = 1; i <= n; i++) if (a[i] != "" && st[a[i]] != "done") o = o (o == "" ? "" : ",") a[i]
   $10 = o; print }' "$rows" "$rows" > "$rows.u" && mv "$rows.u" "$rows"
+if [ $ready -eq 1 ]; then
+  awk -F'\t' '$2=="todo" && $10==""' "$rows" > "$rows.r" && mv "$rows.r" "$rows"
+fi
 
 json() {
   local repo; repo="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@github.com:#https://github.com/#; s#\.git$##' || true)"
@@ -55,6 +63,15 @@ json() {
 case "$mode" in
   json) json; exit 0 ;;
   text)
+    if [ $ready -eq 1 ]; then
+      n="$(grep -c . "$rows" || true)"
+      printf '\n%sREADY TODO%s (%s)\n' "$c_grn" "$c_off" "$n"
+      [ "$n" -eq 0 ] && printf '  %s(no runnable todo tasks — check in-progress/depends_on)%s\n' "$c_dim" "$c_off"
+      sort -t"$(printf '\t')" -k3,3 -k1,1 "$rows" | awk -F'\t' -v dim="$c_dim" -v off="$c_off" '{
+        x = ""; if ($8 != "") x = x " #" $8; if ($16 != "") x = x " [" $16 "]"
+        printf "  %-9s %-3s %s%s%s%s\n", $1, $3, $5, dim, x, off }'
+      echo; exit 0
+    fi
     for col in todo in-progress review done; do
       n="$(awk -F'\t' -v s="$col" '$2==s' "$rows" | grep -c . || true)"
       printf '\n%s%s%s (%s)\n' "$c_grn" "$(printf '%s' "$col" | tr '[:lower:]-' '[:upper:] ')" "$c_off" "$n"

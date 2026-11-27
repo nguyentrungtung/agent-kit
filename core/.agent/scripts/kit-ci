@@ -23,6 +23,7 @@ else
 fi
 
 ci_error() { if [ "${GITHUB_ACTIONS:-}" = true ]; then echo "::error::$*"; else echo "ERROR: $*" >&2; fi; }
+ci_warn()  { if [ "${GITHUB_ACTIONS:-}" = true ]; then echo "::warning::$*"; else echo "WARNING: $*" >&2; fi; }
 fetch_base() { # make origin/<target> available (shallow or single-branch clones do not have it)
   if [ -n "$BASE_REF" ]; then git fetch -q origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" 2>/dev/null || warn "could not fetch origin/$BASE_REF"; fi
   return 0
@@ -50,11 +51,16 @@ cmd_guard() {
   "$KIT_DIR/scripts/kit-secrets-scan" --all
   if [ "$EVENT" = pr ]; then
     [ -n "$BASE_REF" ] || die "kit-ci: a pull / merge request needs its target branch (KIT_CI_BASE)"
+    local p gf=""   # gitflow first: cheap, and the clearest message (rules: .agent/rules/core/git-workflow.md)
+    p="$(branch_name_problem "$HEAD_REF")"; [ -z "$p" ] || gf="branch '$HEAD_REF': $p"
+    p="$(merge_target_problem "$HEAD_REF" "$BASE_REF")"; [ -z "$p" ] || gf="${gf:+$gf · }gitflow: $p"
+    if [ -n "$gf" ]; then
+      if [ "$(gitflow_mode)" = block ]; then ci_error "$gf"; return 1; fi
+      ci_warn "$gf (gitflow_enforce: warn — set it to block in .agent/project.yaml once open branches follow the convention)"
+    fi
     fetch_base
     if command -v gitleaks >/dev/null 2>&1; then gitleaks detect --no-banner --redact --log-opts="origin/$BASE_REF..HEAD"
     else warn "gitleaks not installed — history scan skipped"; fi
-    printf '%s' "$HEAD_REF" | grep -Eq '^(feature|fix|hotfix|refactor|chore|docs|test|release|revert)/' \
-      || { ci_error "branch '$HEAD_REF' must be <type>/TASK-NNN-slug"; return 1; }
     local types bad=0 s; types="$(cfg commit_types 'feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert|sec')"
     while IFS= read -r s; do
       case "$s" in Merge\ *|Revert\ *) continue ;; esac
@@ -63,6 +69,9 @@ cmd_guard() {
     [ $bad -eq 0 ] || return 1
   fi
   "$KIT_DIR/scripts/kit-trace"
+  local p
+  for p in "$KIT_DIR"/plugins/*/ci-guard.sh; do [ -f "$p" ] || continue; source "$p"; done
+  return 0
 }
 
 cmd_task_gates() {
@@ -71,7 +80,7 @@ cmd_task_gates() {
   local id ids changed_tasks f base_st t bad=0
   id="$(printf '%s' "$HEAD_REF" | grep -oE 'TASK-[0-9]+' | head -n1 || true)"
   case "$HEAD_REF" in
-    feature/*|fix/*|hotfix/*|refactor/*)
+    feature/*|feat/*|bugfix/*|fix/*|hotfix/*|refactor/*)
       [ -n "$id" ] || { ci_error "code branch '$HEAD_REF' has no TASK-NNN — every code change needs a task (kit-task new / start)"; return 1; } ;;
   esac
   fetch_base
@@ -96,32 +105,18 @@ cmd_task_gates() {
   return $bad
 }
 
-cmd_api() {
-  [ -f docs/api/openapi.yaml ] || { info "no docs/api/openapi.yaml — API checks skipped"; return 0; }
-  "$KIT_DIR/scripts/kit-run" api
-  if grep -qE '^cmd_apigen:[[:space:]]*[^#[:space:]]' "$KIT_CFG"; then
-    local before; before="$(git status --porcelain)"
-    "$KIT_DIR/scripts/kit-run" apigen
-    [ "$before" = "$(git status --porcelain)" ] || { git status --short; ci_error "generated API client is stale — run .agent/scripts/kit-run apigen and commit"; return 1; }
-  else
-    info "cmd_apigen is not set — frontend types are not checked against docs/api/openapi.yaml (set it when a frontend consumes the API, kit-api §3b)"
-  fi
-  if [ "$EVENT" = pr ] && [ -n "$BASE_REF" ]; then
-    fetch_base
-    local base; base="$(mktemp)"
-    if git show "origin/$BASE_REF:docs/api/openapi.yaml" > "$base" 2>/dev/null; then
-      if command -v docker >/dev/null 2>&1; then
-        docker run --rm -v "$(dirname "$base"):/base" -v "$PWD/docs/api:/head" tufin/oasdiff:v1.11.1 breaking "/base/$(basename "$base")" /head/openapi.yaml --fail-on ERR
-      else warn "docker not available — breaking-change check (oasdiff) skipped"; fi
-    else info "no base contract yet"; fi
-    rm -f "$base"
-  fi
-}
-
-case "${1:-}" in
+sub="${1:-}"; [ -n "$sub" ] && shift || true
+case "$sub" in
   prepare) cmd_prepare ;;
   guard) cmd_guard ;;
   task-gates) cmd_task_gates ;;
-  api) cmd_api ;;
-  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  "") sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *)
+    ran=0
+    for p in "$KIT_DIR"/plugins/*/ci-"$sub".sh; do
+      [ -f "$p" ] || continue
+      ran=1; source "$p"
+    done
+    [ $ran -eq 1 ] || info "no plugin handles 'kit-ci $sub' — skipped"
+    ;;
 esac

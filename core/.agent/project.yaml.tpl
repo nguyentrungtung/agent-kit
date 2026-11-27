@@ -11,7 +11,12 @@ kit_version: {{KIT_VERSION}}
 
 # --- Branching (gitflow) ---
 main_branch: main            # production
-develop_branch: develop      # integration; set to "main" for trunk-based
+develop_branch: develop      # integration + UAT (gitflow); set to "main" for trunk-based
+staging_branch:              # optional long-lived pre-production branch (e.g. staging); empty = release/* is what STAGING runs
+branch_types: feature feat bugfix fix hotfix release support refactor chore docs test ci perf build style revert
+branch_max_len: 60           # <type>/<TASK-NNN>-<kebab-case-description>, checked by CI (kit-ci guard) and pre-push
+gitflow_enforce: block       # block = CI fails on a bad branch name / merge direction · warn = CI only warns
+branch_exempt_regex: ^(dependabot/|renovate/|snyk-|revert-[0-9]+-|gh-readonly-queue/)   # tool-made branches, never checked
 protected_extra: master release/* hotfix/*
 protected_regex: ^(main|master|develop|release/.*|hotfix/.*)$
 push_checkpoints: true       # push task branch to origin on every checkpoint (remote backup)
@@ -26,12 +31,13 @@ gh_project:                  # optional GitHub Project for kit-task sync, as <ow
 # Steps: install format format_check lint typecheck arch test build audit docs up down logs
 # Multi-component repos: each cmd runs per component as (cd <path> && …) joined with &&.
 {{COMMANDS}}
-cmd_dup: npx -y jscpd@4.0.5 --config .jscpd.json .
+cmd_dup: npx -y jscpd@4.0.5 --config .agent/config/jscpd.json .
 cmd_lint_staged:             # optional fast lint for pre-commit (e.g. lint-staged, ruff on changed files)
 
 # --- Gates ---
 prepush_checks: lint test    # kit-run steps executed by the pre-push hook
-stop_checks: format_check lint   # Claude Code Stop hook: fast gates on uncommitted code before the agent ends a turn (none = off)
+stop_checks: format_check lint test_fast   # Claude Code Stop hook: fast gates on uncommitted code before the agent ends a turn (none = off; empty cmd_test_fast = skipped)
+stop_repeat_max: 3           # the same stop-gate failure this many turns in a row → stop patching: rollback or ask the human, write LESSONS.md
 max_file_kb: 2048
 commit_types: feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert|sec
 commit_subject_max: 100

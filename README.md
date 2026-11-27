@@ -25,7 +25,7 @@ kit doctor . --run        # kiểm tra tool/config và chạy thử các cổng 
 ```
 agent-kit/
 ├── kit                       CLI: init · add · doctor · list
-├── core/                     luôn được cài: AGENTS.md, .agent/ (rules/core, scripts, hooks, tasks, memory), .claude/, .githooks/, CI
+├── core/                     luôn được cài: AGENTS.md, .agent/ (rules/core, scripts, hooks, githooks, tasks, memory), .claude/, CI
 ├── stacks/<stack>/           chỉ stack được chọn mới được cài
 │   ├── stack.yaml            detect, lệnh cmd_*, dev_deps, cổng app
 │   ├── rules.md              chuẩn cộng đồng + tool nào ép rule nào  → .agent/rules/stack/<stack>.md
@@ -65,7 +65,7 @@ Monorepo: mỗi component là `path=stack+framework`. Lệnh được ghép ki�
 | `data` | preset `data` | `kit-data` + agent `data-engineer`: kiến trúc dữ liệu (batch/stream, warehouse/lakehouse, medallion / staging→marts), mô hình Kimball (grain, SCD), **data contract** (`kit-new contract`), chất lượng dữ liệu viết test trước, lineage, backfill idempotent, PII; schema OpenSpec **`data-flow`** (`kit-new change <tên> --schema data-flow`); rule `.agent/rules/data/`; hook hỏi trước khi chạy vào prod (`--target prod`, `airflow dags backfill`). **`kit-da`** (Data analyst): kiểm dữ liệu thật bằng SQL chỉ đọc theo 4 tiêu chí **đúng / đủ / sống / sạch** (correct / complete / fresh / clean), đối soát với nguồn; check là file SQL trong `dq/<dataset>/` trả về dòng vi phạm, chạy bằng `.agent/scripts/kit-dq run` qua `cmd_sql` (client của bạn, user chỉ đọc); kit-dq chặn mọi lệnh ghi, chỉ in số đếm (dòng mẫu chỉ khi `--samples`), báo cáo `docs/data/quality/<ngày>.md`. **`kit-catalog`**: tài liệu để biết dùng dữ liệu nào — `docs/data/catalog/` (câu hỏi → bảng nào, bảng nào không dùng; thực thể, khoá, quan hệ + sơ đồ ER; chỉ tiêu và công thức; bộ lọc bắt buộc, bẫy hay gặp), ý nghĩa từng cột giữ một nguồn là file dbt `.yml`; `.agent/scripts/kit-doc-coverage [--list] [--min N]` đo độ phủ mô tả model/cột theo tầng từ `target/manifest.json` (`dbt parse`, không cần kết nối kho). Muốn sâu hơn về dbt: cài thêm bộ skill chính chủ `/plugin marketplace add dbt-labs/dbt-agent-skills` |
 | `api` | preset `app` | `kit-api`: OpenAPI 3.1 **contract-first** (`docs/api/openapi.yaml`), Spectral (`kit-run api`: kebab-case path, camelCase operationId, lỗi RFC 9457), CI **chặn thay đổi phá vỡ tương thích** bằng oasdiff, Swagger UI (`--services swagger-ui`), bảng thư viện sinh docs theo framework |
 | `eng-skills` | ✔ | 13 skill của [mattpocock/skills](https://github.com/mattpocock/skills) v1.3.2 (MIT, copy cố định, tiền tố `mp-`): `mp-grilling`/`mp-grill-with-docs` (hỏi rõ yêu cầu theo vòng), `mp-domain-modeling` (GLOSSARY + ADR), `mp-tdd`, `mp-diagnosing-bugs`, `mp-codebase-design`/`mp-improve-codebase-architecture` (module sâu), `mp-code-review` (2 chiều: chuẩn + spec), `mp-pr`, `mp-wizard` (script cho bước người làm), `mp-retro`, `mp-to-questionnaire`, `mp-writing-for-agents`. Đã gắn vào kit-task/kit-review/kit-ba/kit-sa/kit-devops/kit-handoff. Cập nhật: `scripts/vendor-mattpocock.py` |
-| `serena` | | thêm Serena (LSP qua MCP, chạy bằng uvx) vào `.mcp.json` |
+| `serena` | | đăng ký Serena (LSP qua MCP, chạy bằng uvx) vào `.agent/mcp.json` & cấu hình harness qua `kit-mcp` |
 
 ### Preset và vai trò
 `kit init --preset app|data|platform|minimal` chọn sẵn bộ module (xem `kit list`); `--modules` để chỉnh tay. Ai làm gì, bàn giao thế nào: `.agent/rules/core/roles.md` (RACI).
@@ -83,9 +83,10 @@ kit-ba ─▶ kit-sa (giải pháp tổng thể) ─┬─▶ kit-devops (hạ t
 ### Rules nằm ở đâu
 ```
 .agent/rules/
-  core/      workflow · documentation · roles · git-workflow · security · testing · error-handling · logging · api-design · database (+ code-intelligence)
+  core/      workflow · clean-code · documentation · roles · git-workflow · security · testing · error-handling · logging · api-design · database (+ code-intelligence)
   devops/    infrastructure · containers · ci-cd · observability          (module devops)
   security/  authn-authz · data-protection · supply-chain                 (module security)
+  data/      kiến trúc dữ liệu · data contracts · chất lượng              (module data)
   stack/     <stack>.md + <framework>.md   — chuẩn cộng đồng, mỗi rule ghi tool ép nó
   project/   luật riêng của dự án (kit-onboard / kit-sa / người viết)
 .claude/rules/stack-*.md   — chỉ trỏ tới file trên, có `paths:` nên Claude Code chỉ nạp khi đụng đúng loại file
@@ -138,7 +139,11 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 | Cập nhật dependency tự động | `.github/dependabot.yml` sinh theo từng component (+ Docker, GitHub Actions) |
 | Sự cố production + post-mortem không đổ lỗi | `kit-incident`, `kit-new postmortem "<tiêu đề>"` |
 | Checklist release (gồm DAST/pentest trên staging, rollback) | `.agent/checklists/release.md` |
+| Checklist deploy dữ liệu (module `data`): ngưỡng rollback, tạm dừng lịch, baseline, đối soát trước/sau | `.agent/checklists/data-deploy.md` |
 | Nâng cấp kit cho dự án đã cài | `kit upgrade <dir>`: file bạn chưa sửa thì cập nhật, file bạn đã sửa thì giữ nguyên + `*.kit-new`, file bạn đã xoá thì không tạo lại; thêm key mới vào `project.yaml` (dựa trên `.agent/kit.manifest`) |
+| Lên 0.16.0 (vòng phản hồi nhanh) | Hook mới `PostToolUse` (`.agent/hooks/post-edit.sh`) kiểm từng file ngay khi agent sửa; `kit upgrade` gộp hook vào `.claude/settings.json` và thêm khoá `check_file_<đuôi>` **trống** (in gợi ý — điền theo công cụ và version của bạn; dự án mới nhận sẵn giá trị). Bước mới `test_fast` (`cmd_test_fast`, trống = bỏ qua); dự án mới có `stop_checks: format_check lint test_fast`, dự án nâng cấp giữ giá trị cũ. `stop_repeat_max` (mặc định 3). Sub-agent `code-reviewer`, `qa-engineer`, `data-engineer`, `devops-engineer` dùng model của phiên (`model: inherit`) thay vì ghim `sonnet`. `kit-task new --help` in cách dùng thay vì tạo task |
+| Lên 0.15.0 (deploy an toàn) | Không có gate mới. Module `data` có thêm `.agent/checklists/data-deploy.md`; mẫu runbook (module `devops`) thêm hai mục **Prerequisites and access** và **Stop and roll back when**; `release.md` yêu cầu chốt ngưỡng rollback trước khi deploy. Runbook đã viết giữ nguyên; mẫu hoặc checklist bạn đã sửa được giữ lại, bản mới nằm ở `.kit-new` |
+| Lên 0.14.0 (gitflow) | CI (`kit-ci guard`) kiểm tên nhánh theo `<type>/<TASK-NNN>-<kebab-case>` và hướng merge (vào `main` chỉ từ `release/*`, `hotfix/*`); thêm loại `bugfix/` (và `feat/`, `ci/`, `perf/`…); `project.yaml` có thêm `staging_branch`, `branch_types`, `branch_max_len` (kit upgrade tự thêm). Project nâng cấp nhận `gitflow_enforce: warn` (CI chỉ cảnh báo) — chuyển `block` khi các nhánh đang mở đã đúng chuẩn (đổi tên nhánh đã push sẽ đóng PR đang mở của nó). Nhánh do công cụ tạo (Dependabot, Renovate, nút Revert của GitHub) được miễn (`branch_exempt_regex`). Thêm `type:bugfix|feat|ci|perf` vào nhãn issue |
 | Lên 0.13.0 (áp dụng / nâng cấp repo có sẵn) | `kit init` trên repo đã có commit chạy **chế độ repo có sẵn** (`--mode new` để cài đầy đủ như trước) và ghi `mode:` vào `kit.lock`. `kit upgrade` nhớ lệnh nó sinh ra (`.agent/kit.cmds`): `cmd_*` bạn chưa sửa sẽ theo kit mới, `cmd_*` bạn đã sửa giữ nguyên. Project cài trước 0.13 chưa có `kit.cmds` nên chỉ được **gợi ý** lệnh mới; repo có code từ trước khi cài kit thì chạy một lần `kit upgrade --mode existing`: bỏ `mypy.ini` / `.sqlfluff` / `.env.example` do kit đặt mà chưa ai sửa, đặt lại `cmd_*` như init ở chế độ repo có sẵn (sao lưu `.agent/project.yaml.bak-kit`), gọn khối `.gitignore` của kit. Playbook mới `kit-migrate` + `.agent/scripts/kit-adopt-scan` |
 | Lên 0.12.0 (repo có sẵn, GitLab) | `kit init` đoán Git host và ghi `git_provider:`; repo GitLab không còn nhận `.github/` (kit giữ nguyên file `.github/` đã cài, chỉ ngừng cập nhật) mà nhận `.gitlab-ci.yml` / `.gitlab-ci.kit.yml` + template MR. Gate CI chuyển vào `.agent/scripts/kit-ci`: `.github/workflows/ci.yml` mới gọi script này (nếu bạn đã sửa `ci.yml`, bản mới ở `ci.yml.kit-new`). Repo có sẵn mà chưa có `develop` giờ mặc định trunk-based. Module `perf` tách khỏi `devops` (project cũ giữ nguyên file `perf/`). `kit-task sync-gh` / `pull-gh` đổi tên `sync` / `pull` (tên cũ vẫn chạy) và hỗ trợ GitLab |
 | Lên 0.11.0 (anti-drift gates) | Task đang làm dở (không có `template: 2` trong front matter) giữ luật cũ — các gate mới (checklist §2, nguồn §1, assumption, review, tài liệu sống) chỉ áp dụng cho task tạo sau khi nâng cấp. Chạy `.agent/scripts/kit-trace` một lần để dọn id UC/US/BR/FR/ADR không tồn tại (kể cả id mẫu còn sót từ template BA). `ASSUMPTION:` trong `docs/ba/BRIEF.md` / `docs/architecture/SOLUTION.md` phải được người đổi thành `CONFIRMED:`. CI của dự án giờ chặn PR từ branch `feature/`·`fix/`·`hotfix/`·`refactor/` không có `TASK-NNN` — PR đang mở theo kiểu cũ cần đổi tên branch hoặc gắn task. Skeleton framework chuyển sang `.agent/stack/<stack>/skeletons/<framework>/`; skeleton bạn đã sửa được `kit upgrade` mang sang (bản kit ở `.kit-new`) |
@@ -165,7 +170,7 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 │    AGENTS.md (luật) · .agent/context/ (mục tiêu, kiến trúc, convention)      │
 │    .agent/memory/ (STATE, DECISIONS, LESSONS) · .agent/tasks/ (1 file/task)  │
 ├──────────────────────────────────────────────────────────────────────────────┤
-│ 2. QUY TRÌNH (playbook = .agents/skills/*/SKILL.md + sub-agent)              │
+│ 2. QUY TRÌNH (playbook = .agent/skills/*/SKILL.md + sub-agent)              │
 │    onboard → BA → plan → task → testcases → review → security → handoff     │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ 3. HÀNG RÀO BẮT BUỘC (máy chặn, không phụ thuộc agent có "nghe lời" không)   │
@@ -237,7 +242,7 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 | `.agent/scripts/kit-review-bot [on\|off\|status]` | Bật/tắt review **tự động** của CodeRabbit cho repo (ghi `reviews.auto_review.enabled` vào `.coderabbit.yaml`, giữ nguyên các khoá khác). Tắt rồi vẫn gọi được khi cần: comment `@coderabbitai review` trên PR/MR; tạm dừng một PR/MR: `@coderabbitai pause`. Dùng được trên GitHub lẫn GitLab |
 | `.agent/scripts/kit-adopt-scan` | Kiểm kê repo có sẵn cho `kit-migrate` (chỉ đọc): luật agent cũ, link sẽ gãy khi xoá chúng, thư mục docs của bạn vs chỗ của kit, nội dung giống secret trong docs (không in giá trị), dòng `.gitignore` đang ẩn file kit, `*.kit-new`, hai pipeline CI, kiểm tra riêng của CI/hook chưa có trong `cmd_*`. Báo cáo ở `.agent/local/adopt-scan.md` |
 | `.agent/scripts/kit-hook <pre-commit\|commit-msg\|pre-push>` | Một cửa gọi các kiểm tra git của kit (chặn commit lên nhánh protected, secret, Conventional Commits, kiểm tra trước push). Dùng khi repo đã có Husky/lefthook: hook manager của bạn gọi script này thay vì để kit chiếm `core.hooksPath`. Thuần git cục bộ, không phụ thuộc nhà cung cấp |
-| `.agent/scripts/kit-board [--json\|--html\|--open]` | Bảng kanban đọc trạng thái thật từ từng nhánh task; JSON cho UI/orchestrator; HTML tự chứa ở `.agent/local/board.html` |
+| `.agent/scripts/kit-board [--ready] [--json\|--html\|--open]` | Bảng kanban đọc trạng thái thật từ từng nhánh task (`--ready`: task hết phụ thuộc, sẵn sàng chạy song song); JSON cho UI/orchestrator |
 | `.agent/scripts/kit-doctor [--run]` | Kiểm tra hook, rules, tool cần cho từng `cmd_*` theo từng component, tool của module |
 | `.agent/scripts/kit-diagrams check\|export` | Render mọi sơ đồ Mermaid/PlantUML trong docs (module `ba`) |
 | `.agent/scripts/kit-task new "<title>" [--type] [--priority] [--tags]` | Tạo file task (hỗ trợ gắn thẻ chủ đề như auth, api) |
@@ -253,17 +258,17 @@ Luật: `.agent/rules/core/clean-code.md` (tái sử dụng trước khi viết 
 
 ## 5. Dùng với từng harness (Claude Code, Codex, Gemini CLI, Antigravity, dsh)
 
-Một nguồn duy nhất cho mọi harness: luật ở `AGENTS.md`, playbook ở **`.agents/skills/`** (chuẩn Agent Skills), rule theo stack ở `.agent/rules/`.
+Một nguồn duy nhất cho mọi harness: luật ở `AGENTS.md`, playbook ở **`.agent/skills/`** (chuẩn Agent Skills), rule theo stack ở `.agent/rules/`.
 
 | Harness | Luật | Playbook | Hook chặn của Claude |
 |---|---|---|---|
-| Claude Code | `CLAUDE.md` → `AGENTS.md`, `.claude/rules/` | `.claude/skills/` (symlink tới `.agents/skills/`), sub-agent `.claude/agents/` | ✅ |
-| Codex | `AGENTS.md` | `.agents/skills/` | ❌ → git hooks + CI |
-| Gemini CLI | `AGENTS.md` (qua `.gemini/settings.json` › `context.fileName`) | `.agents/skills/` (thư mục phải được `/trust`) | ❌ → git hooks + CI |
-| Antigravity | `AGENTS.md`, `.agents/rules/stack-*.md` (`trigger: glob`) | `.agents/skills/` | ❌ → git hooks + CI |
-| dsh / harness khác | `AGENTS.md` hoặc dán `kit-context` | `.agents/skills/` hoặc mở SKILL.md làm theo | ❌ → git hooks + CI |
+| Claude Code | `.claude/CLAUDE.md` → `AGENTS.md`, `.claude/rules/` | `.claude/skills/` (symlink tới `.agent/skills/`), sub-agent `.claude/agents/` | ✅ |
+| Codex | `AGENTS.md` | `.agent/skills/` | ❌ → git hooks + CI |
+| Gemini CLI | `AGENTS.md` (qua `.gemini/settings.json` › `context.fileName`) | `.agent/skills/` (thư mục phải được `/trust`) | ❌ → git hooks + CI |
+| Antigravity | `AGENTS.md`, `.agents/rules/stack-*.md` (`trigger: glob`) | `.agent/skills/` | ❌ → git hooks + CI |
+| dsh / harness khác | `AGENTS.md` hoặc dán `kit-context` | `.agent/skills/` hoặc mở SKILL.md làm theo | ❌ → git hooks + CI |
 
-OpenSpec được init cho `claude, codex, gemini, antigravity, dsh`. Ở harness không có hook, lớp chặn cuối là **git hooks + CI + branch protection**: commit, push và PR sai vẫn bị chặn, nhưng việc đọc file hay chạy lệnh thì không.
+Mặc định OpenSpec chỉ init cho `claude` (hoặc theo `--harness` đã chọn, vd. `codex, gemini, antigravity, dsh`). Ở harness không có hook, lớp chặn cuối là **git hooks + CI + branch protection**: commit, push và PR sai vẫn bị chặn, nhưng việc đọc file hay chạy lệnh thì không.
 
 ## 5b. Chạy song song, board và GitHub Issues
 
@@ -278,8 +283,27 @@ OpenSpec được init cho `claude, codex, gemini, antigravity, dsh`. Ở harnes
    PR merge (Closes #N)                ──▶ issue tự đóng; kit-task cleanup TASK-007 gỡ worktree
 ```
 - File task (`.agent/tasks/*.md`) là **nguồn gốc duy nhất**. Board, GitHub Issues và mọi UI sau này chỉ là lớp hiển thị. Schema frontmatter cố định, xem `.agent/tasks/README.md`.
-- **Hook Stop** (Claude Code): khi agent sắp kết thúc lượt trên nhánh task mà code chưa commit làm fail `stop_checks` (mặc định `format_check lint`), hook chặn **một lần** và trả lỗi để agent sửa. Tắt bằng `stop_checks: none`.
-- **Đường lên UI kiểu Vibe Kanban:** `kit-board --json` đã có đủ dữ liệu một UI cần (trạng thái, nhánh, worktree, issue, checkpoint, số file chưa commit). Một UI chỉ cần đọc JSON này và gọi `kit-task start --worktree` / `finish` để điều khiển agent. Không cần đổi format dữ liệu.
+- **Hook Stop** (Claude Code): khi agent sắp kết thúc lượt trên nhánh task mà code chưa commit làm fail `stop_checks` (mặc định `format_check lint test_fast`; `cmd_test_fast` trống thì bỏ qua), hook chặn **một lần** và trả lỗi để agent sửa. Tắt bằng `stop_checks: none`. Cùng một lỗi lặp `stop_repeat_max` lượt (mặc định 3) thì hook yêu cầu dừng sửa vòng vòng: rollback về điểm xanh hoặc hỏi người, ghi `LESSONS.md`.
+- **Hook PostToolUse** (Claude Code): ngay sau mỗi lần agent sửa file, chạy `check_file_<đuôi>` trong `.agent/project.yaml` (ví dụ `check_file_py: ruff format --check --force-exclude -q {file} && ruff check --force-exclude -q {file}`, chạy trong thư mục component của file) và trả lỗi cho agent sửa ngay. Khoá trống = không kiểm; công cụ chưa cài hoặc chạy quá `check_file_timeout` giây thì bỏ qua (mặc định 50 giây, cả chuỗi lệnh bị dừng). Các component cùng stack cần lệnh khác nhau (uv và pip, pnpm và npm) thì kit để khoá trống và ghi chú — đặt một lệnh chạy được ở mọi component. Rust không có kiểm từng file (`rustfmt` theo file sai edition trong workspace); Stop gate và CI vẫn chạy `cargo fmt --check`.
+- **Đường lên UI kiểu Vibe Kanban:** `kit-board --json` (hoặc `--ready --json` lọc batch sẵn sàng chạy song song) đã có đủ dữ liệu một UI/orchestrator cần (trạng thái, nhánh, worktree, issue, checkpoint, số file chưa commit); playbook `kit-parallel` quy định rõ chia ownership file và để từng worktree verify/finish PR riêng rồi merge theo thứ tự. Không cần đổi format dữ liệu.
+
+## 5c. Gitflow: nhánh, môi trường, đặt tên (`.agent/rules/core/git-workflow.md`)
+
+| Nhánh | Rẽ từ → merge vào | Môi trường |
+|---|---|---|
+| `main` / `master` | ← chỉ `release/*`, `hotfix/*` (**chỉ golive**, mỗi lần merge gắn tag `vX.Y.Z`) | PRODUCTION |
+| `develop` | ← mọi nhánh task; nhận merge ngược từ `main` | DEV / **UAT** (test tích hợp các tính năng) |
+| `staging` (tuỳ chọn, `staging_branch`) | ← `develop`, `release/*`, `hotfix/*` | STAGING |
+| `release/vX.Y.Z` | từ `develop` → `main` (tag) + merge ngược về `develop` | STAGING (bản ứng viên, chỉ sửa lỗi) |
+| `hotfix/…` | từ `main` → `main` (tag patch) + merge ngược về `develop` | STAGING rồi PRODUCTION |
+| `feature/` (`feat/`), `bugfix/` (`fix/`), `refactor/ chore/ docs/ test/ ci/ perf/ build/ style/ revert/` | từ `develop` → `develop` | DEV / UAT sau khi merge |
+
+Tên nhánh: `<type>/<TASK-NNN>-<mô-tả-kebab-case>` (chữ thường, `a-z 0-9 -`, ≤ 60 ký tự; release/hotfix có thể là phiên bản `v1.4.0`).
+Lỗi tìm thấy khi test develop/UAT → `bugfix/` (từ develop); lỗi production → `hotfix/` (từ main). `kit-task new --type feature|bugfix|hotfix|…`
+ghi `type:` vào file task để `kit-task start TASK-NNN` tạo đúng tên nhánh và rẽ từ đúng nhánh gốc. CI (`kit-ci guard`) **chặn** tên sai và merge sai hướng (vd `feature/*` → `main`) khi `gitflow_enforce: block`
+(mặc định project mới; project nâng cấp: `warn`); pre-push hook cảnh báo; nhánh do bot tạo được miễn (`branch_exempt_regex`).
+Release: `kit-release prepare` (cắt `release/vX.Y.Z`, CHANGELOG, bump version) → STAGING + UAT → PR vào `main` → `kit-release tag` → merge
+`main` ngược về `develop`. Trunk-based: `develop_branch: main`.
 
 ## 6. Thiết lập phía GitHub và sử dụng `gh` CLI (bắt buộc để chặn ở server)
 
@@ -312,7 +336,7 @@ gh run view <run_id> --log-failed
 | Chế độ | Việc kit làm |
 |---|---|
 | `auto` | Có Husky / lefthook / pre-commit framework / `core.hooksPath` sẵn → như `keep`; không có → như `kit` |
-| `kit` | `git config core.hooksPath .githooks`. Hook manager cũ **ngừng chạy** (kit cảnh báo) |
+| `kit` | `git config core.hooksPath .agent/githooks`. Hook manager cũ **ngừng chạy** (kit cảnh báo) |
 | `keep` | Không đụng `core.hooksPath`. **Husky:** tự thêm một dòng gọi `.agent/scripts/kit-hook …` vào `.husky/pre-commit`, `commit-msg`, `pre-push` (giữ nguyên lệnh của bạn, chạy lại không nhân đôi). **lefthook / pre-commit framework / khác:** in sẵn đoạn cần thêm, không tự sửa file cấu hình của bạn |
 
 Hook manager của bạn là **nguồn duy nhất** của git hook; kit chỉ là một lệnh nó gọi. Cách này giống nhau trên GitHub, GitLab (cloud hay tự host), Bitbucket, Gitea. `kit-doctor` nhận ra hook đã chain. Lưu ý: guard `pre-push` cần danh sách ref trên stdin; pre-commit framework không truyền nên chỉ chain được `pre-commit` và `commit-msg` (nhớ bật bảo vệ nhánh trên server).
@@ -365,34 +389,35 @@ Rút ra từ lần chạy thật trên một repo data (Python + dbt) trên GitL
   Agent sửa file này thì phải được người duyệt. Nhớ giữ `protected_regex` khớp với `main_branch`/`develop_branch`/`protected_extra`.
 - Luật riêng của dự án: `AGENTS.md` §7 (ngắn) + `.agent/context/CONVENTIONS.md`.
   Luật quan trọng nên **biến thành test** (ArchUnit, dependency-cruiser, import-linter…) rồi ghi tên công cụ vào cột "Enforced by".
-- Code intelligence: module `codegraph` (mặc định) và `serena` (tuỳ chọn). Playbook ưu tiên dùng chúng thay vì mở cả file.
+- Code intelligence & MCP: các module có MCP (`codegraph`, `serena`) khai báo trong `.agent/plugins/<mod>/mcp.json`, đồng bộ qua `.agent/scripts/kit-mcp` (file chuẩn `.agent/mcp.json`, tự merge vào `.mcp.json` / `.gemini/settings.json` khi cài setup).
 - Người dùng có thể vượt qua chặn khi thật sự cần: `git commit --no-verify`, `KIT_ALLOW_PROTECTED_PUSH=i-am-human git push`. Agent thì bị hook chặn cả hai cách này.
 
 ## 8. Cấu trúc được cài vào dự án (ví dụ: php + laravel, module ba sa docker codegraph)
 
 ```
-AGENTS.md  CLAUDE.md  .env.example  .gitignore(+)  .gitattributes(+)
+AGENTS.md  .env.example  .gitignore(+)  .gitattributes(+)
 pint.json  phpstan.neon.dist  deptrac.yaml  .editorconfig  Dockerfile  compose.yaml  .dockerignore   ← chỉ của stack/module đã chọn
 .agent/
-  project.yaml  kit.lock        lệnh (đã ghép theo component) · lựa chọn khi init
+  project.yaml  kit.lock  mcp.json   lệnh · lựa chọn khi init · MCP registry chuẩn
+  plugins/      <module>/            extension slots (tools.tsv · doctor.sh · ci-*.sh · task.sh · mcp.json · …)
   rules/        core/ · stack/php.md, laravel.md · project/
-  stack/php/snippets/           đoạn cần merge (kit-onboard làm)
-  docker/catalog/               service để kit-docker thêm sau
-  context/ memory/ tasks/ checklists/
-  scripts/      kit-run · kit-task · kit-doctor · kit-diagrams · kit-context · kit-daily · kit-secrets-scan
-  hooks/        guard-bash · guard-files · session-start (Claude Code)
-.claude/  settings.json · rules/stack-php.md · skills/kit-* · agents/*
-.githooks/ pre-commit · commit-msg · pre-push
+  stack/php/snippets/                đoạn cần merge (kit-onboard làm)
+  docker/catalog/                    service để kit-docker thêm sau
+  context/ memory/ tasks/ checklists/ config/ skills/
+  scripts/      kit-run · kit-task · kit-doctor · kit-mcp · kit-context · kit-daily · kit-secrets-scan
+  hooks/        guard-bash · guard-files · session-start · post-edit · stop-gate (Claude Code)
+  githooks/     pre-commit · commit-msg · pre-push
+.claude/  settings.json · CLAUDE.md · rules/stack-php.md · skills/kit-* · agents/*
 .github/  workflows/ci.yml (setup đúng runtime) · PULL_REQUEST_TEMPLATE.md · ISSUE_TEMPLATE/
-docs/     ba/ (+_templates) · architecture/ · plan/ · adr/ · qa/ · security/ · daily/
+docs/     ba/ (+_templates) · architecture/ · plan/ · adr/ · qa/ · security/ · daily/ · GLOSSARY.md
 ```
 
 ## 9. Mở rộng kit
 
 - **Stack mới:** tạo `stacks/<tên>/stack.yaml` (`title detect globs app_port frameworks dev_deps cmd_*`, có thể dùng `inherit: <stack>` để mượn rules/files/snippets), thêm `rules.md`, `files/`, `ci.yml`, `docker/Dockerfile`, rồi thêm tên vào `DETECT_ORDER` trong `kit`.
 - **Framework mới:** `stacks/<stack>/frameworks/<fw>/framework.yaml` (`detect`, các `cmd_*` cần ghi đè, `dev_deps` để thay hoặc `dev_deps_add` để cộng thêm, `exclude_files`, `app_port`), kèm `rules.md` và `files/`. Nhớ thêm tên vào `frameworks:` của stack.
-- **Module mới:** `modules/<tên>/module.yaml` (`title default setup_desc`), `files/`, và nếu cần thì `project.add`, `gitignore.add`, `setup.sh`.
-- **Docker service mới:** `modules/docker/catalog/<tên>.yml` (header `# title:` `# env:` `# volumes:` + fragment service thụt 2 khoảng trắng).
+- **Module (plugin) mới:** `modules/<tên>/module.yaml` (`title default setup_desc`), `files/`, `files/.agent/plugins/<tên>/` (extension slots: `tools.tsv`, `doctor.sh`, `task.sh`, `context.sh`, `new-*.sh`, `ci-*.sh`, `claude-permissions.json`, `guard-files.rules`, `trace-paths`, `mcp.json`, `agent-summary.md`), và nếu cần thì `project.add`, `gitignore.add`, `setup.sh`. Core hoàn toàn không phụ thuộc cứng vào module.
+- **Docker service mới:** `modules/devops/catalog/<tên>.yml` (header `# title:` `# env:` `# volumes:` + fragment service thụt 2 khoảng trắng).
 
 ## 10. Lưu ý quan trọng khi đưa vào dự án thực tế
 
@@ -400,7 +425,7 @@ docs/     ba/ (+_templates) · architecture/ · plan/ · adr/ · qa/ · security
 > Mặc dù bộ khung đã hoàn chỉnh, khi đưa vào dự án thực tế bạn nên chú ý 3 điểm sau:
 >
 > 1. **Thiết lập Branch Protection trên GitHub (Rất quan trọng):**  
->    Các hook ở local (`.githooks/`) có thể bị lập trình viên bỏ qua nếu cố tình dùng terminal máy tính cá nhân (hoặc tham số `--no-verify`). Do đó, bạn **bắt buộc phải cấu hình Branch Protection Rules trên GitHub** (yêu cầu PR, chặn force push, bắt buộc pass các status check `guard`, `quality`, `security`) để làm chốt chặn bảo vệ cuối cùng trên server.
+>    Các hook ở local (`.agent/githooks/`) có thể bị lập trình viên bỏ qua nếu cố tình dùng terminal máy tính cá nhân (hoặc tham số `--no-verify`). Do đó, bạn **bắt buộc phải cấu hình Branch Protection Rules trên GitHub** (yêu cầu PR, chặn force push, bắt buộc pass các status check `guard`, `quality`, `security`) để làm chốt chặn bảo vệ cuối cùng trên server.
 >
 > 2. **Cài đặt các công cụ CLI hỗ trợ trên máy:**  
 >    - Các công cụ bắt buộc: `git`, `jq`, `gh` (để tạo PR, đồng bộ task issue).  
@@ -408,7 +433,7 @@ docs/     ba/ (+_templates) · architecture/ · plan/ · adr/ · qa/ · security
 >
 > 3. **Môi trường hoạt động của Hooks:**  
 >    - Hệ thống hook chặn runtime (`guard-bash.sh`, `guard-files.sh`) tích hợp sâu nhất với **Claude Code** (chặn ngay lập tức trước khi thực thi shell command hoặc đọc/sửa file).  
->    - Khi làm việc với các harness khác như **Gemini CLI, Antigravity, Codex, Cursor**, lớp bảo vệ chính của bạn sẽ là **Git Hooks cục bộ (`.githooks/`) và GitHub Actions CI**.
+>    - Khi làm việc với các harness khác như **Gemini CLI, Antigravity, Codex, Cursor**, lớp bảo vệ chính của bạn sẽ là **Git Hooks cục bộ (`.agent/githooks/`) và GitHub Actions CI**.
 
 ## 11. Giới hạn cần biết
 

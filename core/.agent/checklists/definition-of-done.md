@@ -3,7 +3,7 @@
 ## Workflow (task file)
 - [ ] §1 Understand, §2 Clarifications, §3 Solution, §4 Test plan, §7 Result are filled
 - [ ] Tests were written first and seen failing; `docs/qa/TASK-NNN.md` covers every AC
-- [ ] OpenSpec change (if any) validates with `--strict`; spec deltas describe the new behaviour
+- [ ] Active plugin spec / change gates pass (when enabled)
 
 ## Scope
 - [ ] Every acceptance criterion in the task file is met and ticked
@@ -25,5 +25,5 @@
 ## Docs & memory
 - [ ] Task file: progress log + handoff notes updated
 - [ ] ADR written if a decision was made (`kit-adr`)
-- [ ] Living docs updated in this PR: OpenSpec specs (via the change), docs/api (OpenAPI), docs/architecture, README
+- [ ] Living docs updated in this PR: docs/architecture, README, and active plugin docs (when enabled: e.g. OpenSpec specs, docs/api)
 - [ ] Lesson added to LESSONS.md if something went wrong on the way

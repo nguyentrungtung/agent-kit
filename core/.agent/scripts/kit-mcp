@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# kit-mcp [status|sync] — unified MCP server registry from installed plugins (.agent/plugins/*/mcp.json).
+#   status                         list registered MCP servers, command availability, and synced harness files
+#   sync [--target auto|all|canonical|claude|gemini] [--server <name>]
+#                                  write .agent/mcp.json (canonical) and merge mcpServers into harness configs
+source "$(dirname "$0")/lib.sh"
+cd "$KIT_ROOT"
+
+collect_plugins_json() { # collect_plugins_json [<server-filter>] → combined mcpServers JSON object
+  local srv="${1:-}" files=() f
+  for f in "$KIT_DIR"/plugins/*/mcp.json; do
+    [ -f "$f" ] && files+=("$f")
+  done
+  if [ ${#files[@]} -eq 0 ]; then echo "{}"; return 0; fi
+  jq -s --arg s "$srv" '
+    reduce .[] as $doc ({}; . * ($doc.mcpServers // {}))
+    | if $s != "" then with_entries(select(.key == $s)) else . end
+  ' "${files[@]}"
+}
+
+merge_mcp_file() { # merge_mcp_file <dest_json> <servers_json>
+  local dst="$1" srvs="$2" tmp
+  mkdir -p "$(dirname "$dst")"
+  [ -f "$dst" ] || echo '{}' > "$dst"
+  tmp="$(mktemp)"
+  if ! jq --argjson s "$srvs" '.mcpServers = ($s * (.mcpServers // {}))' "$dst" > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if jq -e --slurpfile a "$dst" --slurpfile b "$tmp" -n '$a[0] == $b[0]' >/dev/null 2>&1; then
+    rm -f "$tmp"
+    return 1
+  fi
+  mv "$tmp" "$dst"
+  return 0
+}
+
+write_canonical() { # write_canonical <servers_json>
+  local srvs="$1" dst="$KIT_DIR/mcp.json" tmp
+  mkdir -p "$KIT_DIR"
+  tmp="$(mktemp)"
+  if ! jq -n --argjson s "$srvs" '{ mcpServers: $s }' > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if [ -f "$dst" ] && jq -e --slurpfile a "$dst" --slurpfile b "$tmp" -n '$a[0] == $b[0]' >/dev/null 2>&1; then
+    rm -f "$tmp"
+  else
+    mv "$tmp" "$dst"
+  fi
+}
+
+cmd_status() {
+  command -v jq >/dev/null 2>&1 || die "jq is required for kit-mcp"
+  local srvs keys k cmd avail
+  srvs="$(collect_plugins_json)"
+  keys="$(printf '%s' "$srvs" | jq -r 'keys[]?' || true)"
+  if [ -z "$keys" ]; then
+    info "no MCP plugins installed (.agent/plugins/*/mcp.json)"
+    return 0
+  fi
+  printf '%-14s %-10s %s\n' SERVER STATUS COMMAND
+  for k in $keys; do
+    cmd="$(printf '%s' "$srvs" | jq -r --arg k "$k" '.[$k].command // ""')"
+    if [ -n "$cmd" ] && command -v "$cmd" >/dev/null 2>&1; then avail=available; else avail=MISSING; fi
+    printf '%-14s %-10s %s\n' "$k" "$avail" "$cmd"
+  done
+  local targets=""
+  [ -f "$KIT_DIR/mcp.json" ] && targets="$targets .agent/mcp.json"
+  [ -f "$KIT_ROOT/.mcp.json" ] && targets="$targets .mcp.json"
+  [ -f "$KIT_ROOT/.gemini/settings.json" ] && targets="$targets .gemini/settings.json"
+  [ -z "$targets" ] || info "targets:$targets"
+  local unsynced=0 har
+  har="$(sed -n 's/^harnesses:[[:space:]]*//p' "$KIT_DIR/kit.lock" 2>/dev/null | head -n1 | tr -d ' \r')"
+  if { [ "$har" = all ] || [[ ",${har:-claude}," == *",claude,"* ]]; } && { [ ! -f "$KIT_ROOT/.mcp.json" ] || ! jq -e --argjson s "$srvs" '(.mcpServers // {}) as $m | ($s | keys) | all(.[]; $m[.] != null)' "$KIT_ROOT/.mcp.json" >/dev/null 2>&1; }; then
+    unsynced=1
+  fi
+  [ $unsynced -eq 0 ] || info "run .agent/scripts/kit-mcp sync to sync enabled MCP servers into harness config"
+}
+
+cmd_sync() {
+  command -v jq >/dev/null 2>&1 || { warn "jq required to sync MCP configs"; return 0; }
+  local target=auto server=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --target) [ $# -ge 2 ] || die "--target requires a value"; target="$2"; shift 2 ;;
+      --server) [ $# -ge 2 ] || die "--server requires a value"; server="$2"; shift 2 ;;
+      *) die "unknown option '$1' (usage: kit-mcp sync [--target auto|all|canonical|claude|gemini] [--server <name>])" ;;
+    esac
+  done
+  case "$target" in
+    auto|all|canonical|claude|gemini) ;;
+    *) die "unknown --target '$target' (expected auto|all|canonical|claude|gemini)" ;;
+  esac
+  local all_srvs srvs
+  all_srvs="$(collect_plugins_json)"
+  srvs="$(collect_plugins_json "$server")"
+  if [ "$(printf '%s' "$all_srvs" | jq 'length')" -gt 0 ]; then
+    write_canonical "$all_srvs"
+  elif [ -f "$KIT_DIR/mcp.json" ]; then
+    rm -f "$KIT_DIR/mcp.json"
+    info "removed stale .agent/mcp.json (no MCP plugins installed)"
+  fi
+  [ "$(printf '%s' "$srvs" | jq 'length')" -gt 0 ] || return 0
+  [ "$target" = canonical ] && return 0
+
+  local har; har="$(sed -n 's/^harnesses:[[:space:]]*//p' "$KIT_DIR/kit.lock" 2>/dev/null | head -n1 | tr -d ' \r')"
+  har="${har:-claude}"
+  if [ "$target" = claude ] || [ "$target" = all ] || { [ "$target" = auto ] && { [ "$har" = all ] || [[ ",$har," == *",claude,"* ]]; }; }; then
+    merge_mcp_file "$KIT_ROOT/.mcp.json" "$srvs" && info "MCP synced → .mcp.json" || true
+  fi
+  if [ "$target" = gemini ] || [ "$target" = all ] || { [ "$target" = auto ] && { [ "$har" = all ] || [[ ",$har," == *",gemini,"* ]]; }; }; then
+    [ -f "$KIT_ROOT/.gemini/settings.json" ] && { merge_mcp_file "$KIT_ROOT/.gemini/settings.json" "$srvs" && info "MCP synced → .gemini/settings.json" || true; }
+  fi
+  return 0
+}
+
+sub="${1:-status}"; [ $# -gt 0 ] && shift || true
+case "$sub" in
+  status) cmd_status ;;
+  sync)   cmd_sync "$@" ;;
+  -h|--help) sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  *) sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

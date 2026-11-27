@@ -1,0 +1,1 @@
+- **Engineering add-ons (`eng-skills`):** Augments core workflows — `mp-grilling` (clarify §2), `mp-tdd` / `mp-diagnosing-bugs` (tests first & bug diagnosis), `mp-code-review` (two-axis review before `kit-task review`), `mp-pr` (PR summary), `mp-retro` (friction retro in `kit-handoff`), `mp-domain-modeling` (`docs/GLOSSARY.md`).

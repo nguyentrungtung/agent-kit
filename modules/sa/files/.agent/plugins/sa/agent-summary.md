@@ -1,0 +1,1 @@
+- **Architecture (`sa`):** Solution architecture, C4, project structure, UI design system in `docs/architecture/` (`kit-sa`, `kit-datamodel`).

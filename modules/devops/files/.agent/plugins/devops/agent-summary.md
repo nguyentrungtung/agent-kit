@@ -1,0 +1,1 @@
+- **Platform / DevOps (`devops`):** Environments, runbooks, postmortems in `docs/platform/` (`kit-devops`, `kit-docker`, `kit-incident`, `kit-ops-lint`).

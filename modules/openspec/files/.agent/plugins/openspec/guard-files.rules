@@ -1,0 +1,2 @@
+ask	^openspec/(config\.ya?ml|schemas/)	editing the OpenSpec workflow/config '$rel' (team-wide workflow change)
+ask	^openspec/specs/	editing a living spec directly — behaviour changes go through an OpenSpec change (openspec/changes/<name>/specs/); direct edits only for Purpose/typos

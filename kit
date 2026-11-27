@@ -12,8 +12,9 @@
 #       --provider github|gitlab|none|auto   where PRs/MRs, CI and issues live (auto: remote host, then .gitlab-ci.yml / .github/);
 #                                 gitlab installs .gitlab-ci + MR/issue templates instead of .github/, none installs neither
 #       --flow gitflow|trunk|auto   gitflow = tasks branch from develop; trunk = from main (auto: trunk when an existing repo has no develop)
-#       --hooks auto|kit|keep     git hooks: kit = core.hooksPath → .githooks; keep = leave Husky/lefthook/… alone and chain the kit's
+#       --hooks auto|kit|keep     git hooks: kit = core.hooksPath → .agent/githooks; keep = leave Husky/lefthook/… alone and chain the kit's
 #                                 checks through .agent/scripts/kit-hook; auto (default) = keep when a manager is found, else kit
+#       --harness <list>          harnesses to configure (default: claude; options: claude,gemini,codex,antigravity,dsh,all)
 #       --mode auto|new|existing  existing = adopt a repo that already has code: the repo is the reference — only gates for tools it
 #                                 already uses, commands taken from its CI, no tool config it does not have (auto: existing when the
 #                                 repo has commits). new = the full kit set-up (every gate, every config)
@@ -29,7 +30,7 @@ set -euo pipefail
 KIT_SRC="$(cd "$(dirname "$0")" && pwd)"
 CORE="$KIT_SRC/core"; STACKS="$KIT_SRC/stacks"; MODULES="$KIT_SRC/modules"
 VERSION="$(cat "$KIT_SRC/VERSION" 2>/dev/null || echo dev)"
-STEPS="install format format_check lint typecheck arch test coverage build audit"
+STEPS="install format format_check lint typecheck arch test test_fast coverage build audit"
 DETECT_ORDER="java-maven java-gradle php dbt python go rust dotnet node"
 
 if [ -t 2 ]; then G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; B=$'\033[1m'; D=$'\033[2m'; N=$'\033[0m'; else G=; Y=; R=; B=; D=; N=; fi
@@ -165,12 +166,19 @@ copy_file() { # copy_file <src> <dest> — never clobbers user edits; on upgrade
     if cmp -s "$s" "$d"; then record "$rel"
     elif [ $UPGRADE -eq 1 ] && mh="$(manifest_hash "$rel")" && [ -n "$mh" ]; then
       if [ "$mh" = "$(sha "$d")" ]; then cp "$s" "$d"; UPDATED=$((UPDATED+1)); record "$rel"   # untouched by the user → refresh
-      else
+      elif [ "$(sha "$s")" = "$mh" ]; then
         KEPT="$KEPT
-$rel"                                                                                          # edited by the user → keep, baseline stays
-        [ "$(sha "$s")" = "$mh" ] || { cp "$s" "$d.kit-new"; CONFLICTS="$CONFLICTS $rel"; }      # .kit-new only if the kit changed it too
+$rel"                                                                                          # edited by the user, kit unchanged → keep
+      else                                           # edited by the user AND changed by the kit → .kit-new to merge; the new kit version
+        cp "$s" "$d.kit-new"; CONFLICTS="$CONFLICTS $rel"   # becomes the baseline, so the next upgrade offers it again only if the kit changes again
+        BASELINES="$BASELINES
+$(sha "$s")  $rel"
       fi
-    else cp "$s" "$d.kit-new"; CONFLICTS="$CONFLICTS $rel"; fi
+    else   # the user's own file (init) or no manifest yet: .kit-new to merge, and remember which kit version was offered
+      cp "$s" "$d.kit-new"; CONFLICTS="$CONFLICTS $rel"
+      BASELINES="$BASELINES
+$(sha "$s")  $rel"
+    fi
   elif [ $UPGRADE -eq 1 ] && mh="$(manifest_hash "$rel")" && [ -n "$mh" ]; then
     BASELINES="$BASELINES
 $mh  $rel"   # installed before and deleted by the user (or skipped on purpose): respect it — and remember it for the next upgrade
@@ -178,7 +186,7 @@ $mh  $rel"   # installed before and deleted by the user (or skipped on purpose):
   else
     cp "$s" "$d"; CREATED=$((CREATED+1)); record "$rel"
   fi
-  case "$s" in */scripts/*|*/hooks/*|*/.githooks/*|*.sh) chmod +x "$d" 2>/dev/null || true ;; esac
+  case "$s" in */scripts/*|*/hooks/*|*/githooks/*|*.sh) chmod +x "$d" 2>/dev/null || true ;; esac
 }
 write_file() { # write_file <dest> <content-file>  (generated content, same no-clobber rule)
   copy_file "$2" "$1"
@@ -247,13 +255,40 @@ append_gitignore() { # append_gitignore <src> <dest> [rebuild] — add the patte
 }
 
 merge_settings() {
-  local ours="$CORE/.claude/settings.json" theirs="$TARGET/.claude/settings.json"
-  if [ $UPGRADE -eq 1 ] && [ -f "$theirs" ] && [ "$(manifest_hash .claude/settings.json)" = "$(sha "$theirs")" ]; then
-    copy_file "$ours" "$theirs"; return 0
+  local ours="$CORE/.claude/settings.json" theirs="$TARGET/.claude/settings.json" ours_tmp pfiles=() p
+  ours_tmp="$(mktemp)"; cp "$ours" "$ours_tmp"
+  if command -v jq >/dev/null 2>&1; then
+    for p in "$TARGET"/.agent/plugins/*/claude-permissions.json; do [ -f "$p" ] && pfiles+=("$p"); done
+    if [ ${#pfiles[@]} -gt 0 ]; then
+      jq -s '
+        def uniq_cat(a;b): ((a // []) + (b // [])) | unique;
+        .[0] as $base | (.[1:] | reduce .[] as $x ({allow:[],ask:[],deny:[]}; {
+          allow: uniq_cat(.allow; $x.allow), ask: uniq_cat(.ask; $x.ask), deny: uniq_cat(.deny; $x.deny)
+        })) as $ext |
+        $base * {
+          permissions: { allow: uniq_cat($base.permissions.allow; $ext.allow),
+                         ask:   uniq_cat($base.permissions.ask;   $ext.ask),
+                         deny:  uniq_cat($base.permissions.deny;  $ext.deny) }
+        }' "$ours" "${pfiles[@]}" > "$ours_tmp.m" && mv "$ours_tmp.m" "$ours_tmp"
+    fi
+  fi
+  if [ -f "$theirs" ] && [ "$(manifest_hash .claude/settings.json)" = "$(sha "$theirs")" ]; then
+    if cmp -s "$ours_tmp" "$theirs"; then
+      record .claude/settings.json
+    else
+      cp "$ours_tmp" "$theirs"
+      if [ $UPGRADE -eq 1 ]; then
+        UPDATED=$((UPDATED+1)); record .claude/settings.json
+      elif [ -f "$TARGET/.agent/kit.manifest" ]; then
+        local ssha; ssha="$(sha "$theirs")"
+        sed -i.bak "s#^[0-9a-f]*  \.claude/settings\.json\$#${ssha}  .claude/settings.json#" "$TARGET/.agent/kit.manifest" && rm -f "$TARGET/.agent/kit.manifest.bak"
+        record .claude/settings.json
+      fi
+    fi
+    rm -f "$ours_tmp"; return 0
   fi
   if [ -f "$theirs" ] && [ $FORCE -eq 0 ] && command -v jq >/dev/null 2>&1; then
-    cmp -s "$ours" "$theirs" && { record .claude/settings.json; return 0; }
-    [ -e "$theirs.bak-kit" ] || cp "$theirs" "$theirs.bak-kit"   # the first backup is the user's original — never overwrite it
+    cmp -s "$ours_tmp" "$theirs" && { record .claude/settings.json; rm -f "$ours_tmp"; return 0; }
     jq -s '
       def uniq_cat(a;b): ((a // []) + (b // [])) | unique;
       .[0] as $t | .[1] as $o |
@@ -263,11 +298,18 @@ merge_settings() {
                        deny:  uniq_cat($t.permissions.deny;  $o.permissions.deny) },
         hooks: ( ($t.hooks // {}) as $th | ($o.hooks // {}) as $oh
                  | reduce (($th + $oh) | keys[]) as $k ({}; .[$k] = (($th[$k] // []) + ($oh[$k] // []) | unique)) )
-      }' "$theirs" "$ours" > "$theirs.tmp" && mv "$theirs.tmp" "$theirs"
-    say "merged hooks/permissions into existing .claude/settings.json (backup: settings.json.bak-kit)"
+      }' "$theirs" "$ours_tmp" > "$theirs.tmp"
+    if jq -e --slurpfile a "$theirs" --slurpfile b "$theirs.tmp" -n '$a[0] == $b[0]' >/dev/null 2>&1; then
+      rm -f "$theirs.tmp"   # already contains every kit hook and permission: nothing to write, nothing to say
+    else
+      [ -e "$theirs.bak-kit" ] || cp "$theirs" "$theirs.bak-kit"   # the first backup is the user's original — never overwrite it
+      mv "$theirs.tmp" "$theirs"
+      say "merged hooks/permissions into existing .claude/settings.json (backup: settings.json.bak-kit)"
+    fi
   else
-    copy_file "$ours" "$theirs"
+    copy_file "$ours_tmp" "$theirs"
   fi
+  rm -f "$ours_tmp"
 }
 
 # ---------------------------------------------------------------- components
@@ -330,6 +372,8 @@ seg_tool() { # seg_tool "<command>" — the program a command really runs (wrapp
         while [ -n "${1:-}" ] && [ "${1#-}" != "$1" ]; do case "$1" in --project|--directory|--with|--group|--extra|--python) shift 2 ;; *) shift ;; esac; done; fi ;;
     npx) shift; while [ -n "${1:-}" ] && [ "${1#-}" != "$1" ]; do shift; done ;;
     pnpm) [ "${2:-}" = exec ] && shift 2 ;;
+    bunx) shift; while [ -n "${1:-}" ] && [ "${1#-}" != "$1" ]; do shift; done ;;
+    yarn) case "${2:-}" in exec|dlx) shift 2 ;; prettier|eslint|tsc|vitest|jest|c8|biome|depcruise|stylelint) shift ;; esac ;;   # yarn <bin>; yarn's own commands stay yarn
     python|python3) [ "${2:-}" = -m ] && shift 2 ;;
   esac
   t="${1:-}"; t="${t##*/}"; t="${t%%@*}"; printf '%s' "$t"
@@ -420,7 +464,7 @@ comp_raw() { # comp_raw <idx> <key>
       elif [ ! -f "$dir/package-lock.json" ]; then v="$(printf '%s' "$v" | sed 's#npm ci#npm install#')"; fi ;;
     python)
       if [ -f "$dir/uv.lock" ]; then
-        v="$(printf '%s' "$v" | sed -E -e 's#^pip install -r requirements.txt$#uv sync#' -e 's#^pip install #uv add --dev #' -e 's#^(ruff|mypy|pytest|pip-audit|lint-imports)#uv run \1#')"
+        v="$(printf '%s' "$v" | sed -E -e 's#^pip install -r requirements.txt$#uv sync#' -e 's#^pip install #uv add --dev #' -e 's#(^|&& )(ruff|mypy|pytest|pip-audit|lint-imports)( |$)#\1uv run \2\3#g')"
         # dev tools declared as [project.optional-dependencies] dev are only installed with --extra dev
         if [ "$v" = "uv sync" ] && awk '/^\[project\.optional-dependencies\]/{f=1;next} /^\[/{f=0} f && /^dev[[:space:]]*=/{x=1} END{exit !x}' "$dir/pyproject.toml" 2>/dev/null; then
           v="uv sync --extra dev"
@@ -448,6 +492,30 @@ comp_raw() { # comp_raw <idx> <key>
       fi ;;
   esac
   printf '%s' "$v"
+}
+check_file_value() { # check_file_value <idx> — the per-file check of one component; in an existing repo EVERY chained tool must be used
+  local v seg; v="$(comp_raw "$1" check_file)"
+  if [ $EXISTING -eq 1 ] && [ -n "$v" ]; then
+    while IFS= read -r seg; do [ -z "$(gate_missing "$seg")" ] || { v=""; break; }; done < <(printf '%s\n' "$v" | awk '{ gsub(/ && /, "\n"); print }')
+  fi
+  printf '%s' "$v"
+}
+check_file_lines() { # "check_file_<ext>: <cmd>" per extension; <cmd> runs in the file's component with {file} = the path relative to it
+  # (Claude Code PostToolUse hook, .agent/hooks/post-edit.sh). Components of one stack that need different commands (uv vs pip, pnpm vs
+  # npm, a tool one of them lacks): the key stays empty and a note asks the user for a command that works in each.
+  local i j e seen="" first same idx
+  for i in "${!C_PATH[@]}"; do
+    for e in $(yget "$(stack_yaml "${C_STACK[$i]}")" check_file_ext); do
+      case " $seen " in *" $e "*) continue ;; esac; seen="$seen $e"
+      idx=(); for j in "${!C_PATH[@]}"; do case " $(yget "$(stack_yaml "${C_STACK[$j]}")" check_file_ext) " in *" $e "*) idx+=("$j") ;; esac; done
+      first="$(check_file_value "${idx[0]}")"; same=1
+      for j in "${idx[@]}"; do [ "$(check_file_value "$j")" = "$first" ] || same=0; done
+      if [ $same -eq 1 ]; then kv_line "check_file_$e" "$first"; continue; fi
+      kv_line "check_file_$e" ""
+      NOTES="$NOTES
+   - check_file_$e left empty: components of one stack need different commands (uv/pip, pnpm/npm, a tool one lacks) — set one that works in each"
+    done
+  done
 }
 build_commands() { # sets CMD_<step> (joined across components)
   local step i v p cur name
@@ -498,7 +566,6 @@ install_core() {
     esac
     copy_file "$f" "$TARGET/$rel"
   done < <(find "$CORE" -type f -print0)
-  merge_settings
   append_gitignore "$CORE/gitignore.kit" "$TARGET/.gitignore" rebuild
   append_block "$CORE/gitattributes.kit" "$TARGET/.gitattributes"
   # an env template the repo keeps somewhere else (platform/.env.example, app.env.example…) is enough — no second one at the root
@@ -532,9 +599,16 @@ config_above() { # config_above <component path> <relative file>
 # Existing repo: no config for a tool whose gate is off (mypy.ini without mypy, .sqlfluff without sqlfluff). The kit's version goes into
 # the manifest as a baseline, so `kit upgrade` treats it like a file the user deleted and does not bring it back.
 unused_config() { # unused_config <src> <dest> "<unused tools>" — true = skip
-  local t b="${1##*/}" rel="${2#"$TARGET"/}" mh
+  local t b="${1##*/}" rel="${2#"$TARGET"/}" mh pat
   for t in $3; do
-    case "$b" in *"$t"*)
+    pat="$t"
+    case "$t" in
+      depcruise) pat="dependency-cruiser" ;;
+      cargo-deny) pat="deny.toml" ;;
+      lint-imports) pat="importlinter" ;;
+      golangci-lint) pat="golangci" ;;
+    esac
+    case "$b" in *"$t"*|*"$pat"*)
       if [ -e "$2" ]; then   # installed by an earlier kit: remove it only when it is still the kit's untouched copy
         mh="$(manifest_hash "$rel")"
         [ $UPGRADE -eq 1 ] && [ -n "$mh" ] && [ "$mh" = "$(sha "$2")" ] || return 1
@@ -634,12 +708,16 @@ $(sha "$sk")  ${sbd#"$TARGET"/}"; CONFLICTS="$CONFLICTS ${sbd#"$TARGET"/}"   # b
     set +f
     rel="stack-$s"; [ "$p" != "." ] && rel="$rel-$(slug "$p")"
     write_file "$TARGET/.claude/rules/$rel.md" "$tmp"
-    # Antigravity: same pointer as a glob-triggered workspace rule
-    local gl=""; set -f
-    for g in $globs; do if [ "$p" = "." ]; then gl="${gl:+$gl, }$g"; else gl="${gl:+$gl, }$p/$g"; fi; done; set +f
-    { echo "---"; echo "trigger: glob"; echo "description: ${s}${f:+ + $f} coding rules (agent-kit)"; echo "globs: $gl"; echo "---"
-      sed '1,/^---$/d' "$tmp"; } > "$tmp.ag"
-    write_file "$TARGET/.agents/rules/$rel.md" "$tmp.ag"; rm -f "$tmp" "$tmp.ag"
+    # Antigravity: same pointer as a glob-triggered workspace rule (only when antigravity harness is enabled)
+    local h="${HARNESSES:-claude}"
+    if [ "$h" = "all" ] || [[ ",$h," == *",antigravity,"* ]]; then
+      local gl=""; set -f
+      for g in $globs; do if [ "$p" = "." ]; then gl="${gl:+$gl, }$g"; else gl="${gl:+$gl, }$p/$g"; fi; done; set +f
+      { echo "---"; echo "trigger: glob"; echo "description: ${s}${f:+ + $f} coding rules (agent-kit)"; echo "globs: $gl"; echo "---"
+        sed '1,/^---$/d' "$tmp"; } > "$tmp.ag"
+      write_file "$TARGET/.agents/rules/$rel.md" "$tmp.ag"; rm -f "$tmp.ag"
+    fi
+    rm -f "$tmp"
   fi
   # 4. Dockerfile
   if has_module devops; then
@@ -801,42 +879,70 @@ generate_dependabot() { # .github/dependabot.yml from the components (weekly, mi
   copy_file "$tmp" "$out"; rm -f "$tmp"
 }
 
-wire_harnesses() { # one source of truth (.agents/skills + AGENTS.md) exposed to every harness
-  local d n
-  # Claude Code reads .claude/skills → symlink each canonical skill (Codex, Gemini CLI, Antigravity, dsh read .agents/skills)
+wire_harnesses() { # one source of truth (.agent/skills + AGENTS.md + .agent/plugins/) exposed to harnesses
+  local d n h="${HARNESSES:-claude}" mcp_target="canonical"
+  # Claude Code reads .claude/skills → symlink each canonical skill from .agent/skills
   mkdir -p "$TARGET/.claude/skills"
-  for d in "$TARGET"/.agents/skills/*/; do
+  for d in "$TARGET"/.agent/skills/*/; do
     [ -f "$d/SKILL.md" ] || continue; n="$(basename "$d")"
-    [ -e "$TARGET/.claude/skills/$n" ] || [ -L "$TARGET/.claude/skills/$n" ] || ln -s "../../.agents/skills/$n" "$TARGET/.claude/skills/$n"
+    [ -e "$TARGET/.claude/skills/$n" ] || [ -L "$TARGET/.claude/skills/$n" ] || ln -s "../../.agent/skills/$n" "$TARGET/.claude/skills/$n"
   done
-  # Gemini CLI: load AGENTS.md as context (GEMINI.md still honoured)
-  local gs="$TARGET/.gemini/settings.json"; mkdir -p "$TARGET/.gemini"
-  if [ -f "$gs" ] && command -v jq >/dev/null 2>&1; then
-    jq '.context.fileName = ((((.context.fileName // []) | if type == "string" then [.] else . end) + ["AGENTS.md","GEMINI.md"]) | unique)' "$gs" > "$gs.tmp"
-    if [ "$(jq -S . "$gs")" = "$(jq -S . "$gs.tmp")" ]; then rm -f "$gs.tmp"; else mv "$gs.tmp" "$gs"; fi   # only when it really changes: an upgrade must not reformat your file
-  elif [ ! -f "$gs" ]; then
-    printf '{\n  "context": { "fileName": ["AGENTS.md", "GEMINI.md"] }\n}\n' > "$gs"
+  merge_settings
+  # Gemini CLI: load AGENTS.md as context (only when gemini harness is enabled)
+  if [ "$h" = "all" ] || [[ ",$h," == *",gemini,"* ]]; then
+    mcp_target="gemini"
+    local gs="$TARGET/.gemini/settings.json"; mkdir -p "$TARGET/.gemini"
+    if [ -f "$gs" ] && command -v jq >/dev/null 2>&1; then
+      jq '.context.fileName = ((((.context.fileName // []) | if type == "string" then [.] else . end) + ["AGENTS.md","GEMINI.md"]) | unique)' "$gs" > "$gs.tmp"
+      if [ "$(jq -S . "$gs")" = "$(jq -S . "$gs.tmp")" ]; then rm -f "$gs.tmp"; else mv "$gs.tmp" "$gs"; fi   # only when it really changes: an upgrade must not reformat your file
+    elif [ ! -f "$gs" ]; then
+      printf '{\n  "context": { "fileName": ["AGENTS.md", "GEMINI.md"] }\n}\n' > "$gs"
+    fi
+  fi
+  # Unified MCP registry (.agent/mcp.json canonical; also syncs .gemini/settings.json if enabled)
+  if [ -f "$TARGET/.agent/scripts/kit-mcp" ]; then
+    chmod +x "$TARGET/.agent/scripts/kit-mcp" 2>/dev/null || true
+    (cd "$TARGET" && "$TARGET/.agent/scripts/kit-mcp" sync --target "$mcp_target" >/dev/null 2>&1) || true
+    [ -f "$TARGET/.agent/mcp.json" ] && record .agent/mcp.json
+  fi
+  # Codex / Antigravity: expect .agents/skills (only when enabled)
+  if [ "$h" = "all" ] || [[ ",$h," == *",codex,"* ]] || [[ ",$h," == *",antigravity,"* ]]; then
+    mkdir -p "$TARGET/.agents"
+    [ -e "$TARGET/.agents/skills" ] || [ -L "$TARGET/.agents/skills" ] || ln -s "../.agent/skills" "$TARGET/.agents/skills"
   fi
   return 0
 }
 
-render_playbooks() { # fill AGENTS.md §6 from installed skills
-  local list f n d af
-  list="$(mktemp)"
-  for f in "$TARGET"/.agents/skills/*/SKILL.md; do
+render_playbooks() { # fill AGENTS.md §1b (active plugins) & §6 (installed skills)
+  local list mods_f f n d af
+  list="$(mktemp)"; mods_f="$(mktemp)"
+  for f in "$TARGET"/.agent/skills/*/SKILL.md; do
     [ -f "$f" ] || continue
     n="$(sed -n 's/^name:[[:space:]]*//p' "$f" | head -n1)"
     d="$(sed -n 's/^description:[[:space:]]*//p' "$f" | head -n1 | sed -E 's/\. .*//' | cut -c1-120)"
     echo "- \`$n\` — $d" >> "$list"
   done
-  for af in "$TARGET/AGENTS.md" "$TARGET/AGENTS.md.kit-new"; do
-    [ -f "$af" ] && grep -q 'kit:playbooks:start' "$af" || continue
-    awk -v lf="$list" '
-      /kit:playbooks:start/ {print; while((getline l < lf)>0) print l; skip=1; next}
-      /kit:playbooks:end/ {skip=0}
-      !skip {print}' "$af" > "$af.tmp" && mv "$af.tmp" "$af"
+  for f in "$TARGET"/.agent/plugins/*/agent-summary.md; do
+    [ -f "$f" ] || continue
+    awk '{sub(/\r$/, ""); print}' "$f" >> "$mods_f"
   done
-  rm -f "$list"
+  [ -s "$mods_f" ] || echo "- Core-only install (tasks, gates, gitflow, security/quality hooks). Add plugins anytime via \`kit add <module>\`." > "$mods_f"
+  for af in "$TARGET/AGENTS.md" "$TARGET/AGENTS.md.kit-new"; do
+    [ -f "$af" ] || continue
+    if grep -q 'kit:playbooks:start' "$af"; then
+      awk -v lf="$list" '
+        /kit:playbooks:start/ {print; while((getline l < lf)>0) print l; skip=1; next}
+        /kit:playbooks:end/ {skip=0}
+        !skip {print}' "$af" > "$af.tmp" && mv "$af.tmp" "$af"
+    fi
+    if grep -q 'kit:modules:start' "$af"; then
+      awk -v mf="$mods_f" '
+        /kit:modules:start/ {print; while((getline l < mf)>0) print l; skip=1; next}
+        /kit:modules:end/ {skip=0}
+        !skip {print}' "$af" > "$af.tmp" && mv "$af.tmp" "$af"
+    fi
+  done
+  rm -f "$list" "$mods_f"
 }
 
 write_manifest() { # sha256 of every kit-managed file as it is now (after rendering) — basis for kit upgrade
@@ -853,14 +959,25 @@ write_manifest() { # sha256 of every kit-managed file as it is now (after render
 }
 
 sync_project_keys() { # add keys that newer kits introduced; never change values the project already has
-  local cfg="$TARGET/.agent/project.yaml" step name k line added=""
+  local cfg="$TARGET/.agent/project.yaml" step name k v line added=""
   for step in $STEPS; do
     grep -q "^cmd_$step:" "$cfg" && continue
     name="CMD_$step"; kv_line "cmd_$step" "${!name}" >> "$cfg"; added="$added cmd_$step"
   done
+  # per-file checks: added empty — an existing project's tools or versions may differ from the kit's defaults; the suggestion is printed
+  local sug="" cf; cf="$(mktemp)"; check_file_lines > "$cf"   # not < <(…): its NOTES must reach this shell
+  while IFS= read -r line; do
+    k="${line%%:*}"; grep -q "^$k:" "$cfg" && continue
+    echo "$k:" >> "$cfg"; added="$added $k"
+    v="${line#*:}"; v="${v# }"; [ -z "$v" ] || sug="$sug
+   $k: $v"
+  done < "$cf"; rm -f "$cf"
+  printf '%s\n' "$NOTES" | grep -q 'check_file_.* left empty' && note "$(printf '%s\n' "$NOTES" | grep 'check_file_.* left empty' | sed 's/^ *- //')"
+  [ -z "$sug" ] || note "project.yaml: set these to have each edited file checked at once (PostToolUse hook) — use your own tool versions:$sug"
   while IFS= read -r line; do
     k="$(printf '%s' "$line" | sed -n 's/^\([a-z_][a-z_0-9]*\):.*/\1/p')"; [ -n "$k" ] || continue
     case "$line" in *'{{'*) continue ;; esac
+    [ "$k" = gitflow_enforce ] && line="gitflow_enforce: warn        # upgraded project: CI only warns about branch names / merge directions — set block when ready"
     grep -q "^$k:" "$cfg" || { echo "$line" >> "$cfg"; added="$added $k"; }
   done < "$CORE/.agent/project.yaml.tpl"
   [ -z "$added" ] || say "project.yaml: added new keys:$added"
@@ -874,6 +991,8 @@ write_project_yaml() {
   fi
   tmp="$(mktemp)"
   for step in $STEPS; do name="CMD_$step"; kv_line "cmd_$step" "${!name}" >> "$tmp"; done
+  { echo "# Checked right after the agent edits a file of that extension (Claude Code PostToolUse; {file} = path in its component; empty = off)"
+    check_file_lines; } >> "$tmp"
   awk -v cf="$tmp" '/\{\{COMMANDS\}\}/{while((getline l < cf)>0) print l; next} {print}' "$CORE/.agent/project.yaml.tpl" \
     | sed -e "s|{{NAME}}|$PROJECT_NAME|" -e "s|{{DESCRIPTION}}|TODO|" -e "s|{{KIT_VERSION}}|$VERSION|" \
           -e "s|{{STACK}}|${C_STACK[0]}|" -e "s|{{COMPONENTS}}|$(components_str)|" -e "s|{{MODULES}}|$MODS|" \
@@ -883,7 +1002,7 @@ write_project_yaml() {
   [ "${cfg%.kit-new}" = "$cfg" ] || return 0
   # keep a lock with the selection (for kit add / upgrades)
   { echo "kit_version: $VERSION"; echo "installed: $(date +%Y-%m-%d)"; echo "components: $(components_str)"
-    echo "modules: $MODS"; echo "services: $SERVICES"; echo "mode: $( [ $EXISTING -eq 1 ] && echo existing || echo new )"; } > "$TARGET/.agent/kit.lock"
+    echo "modules: $MODS"; echo "services: $SERVICES"; echo "mode: $( [ $EXISTING -eq 1 ] && echo existing || echo new )"; echo "harnesses: ${HARNESSES:-claude}"; } > "$TARGET/.agent/kit.lock"
   save_generated_cmds
 }
 
@@ -1057,7 +1176,7 @@ hook_manager() { # husky | lefthook | pre-commit | other — a hook setup the pr
   fi
   for f in "$TARGET"/lefthook.* "$TARGET"/.lefthook.*; do [ ! -e "$f" ] || { echo lefthook; return 0; }; done
   if [ -f "$TARGET/.pre-commit-config.yaml" ]; then echo pre-commit; return 0; fi
-  if [ -n "$hp" ] && [ "$hp" != .githooks ]; then echo other; return 0; fi
+  if [ -n "$hp" ] && [ "$hp" != .agent/githooks ] && [ "$hp" != .githooks ]; then echo other; return 0; fi
   local hd; hd="$(git -C "$TARGET" rev-parse --git-path hooks 2>/dev/null || true)"   # hand-written hooks (not *.sample) in .git/hooks
   case "$hd" in "") return 0 ;; /*) ;; *) hd="$TARGET/$hd" ;; esac
   for f in "$hd"/*; do [ ! -f "$f" ] || case "$f" in *.sample) ;; *) echo other; return 0 ;; esac; done
@@ -1105,8 +1224,8 @@ setup_hooks() {
   local mode="$HOOKS" mgr; mgr="$(hook_manager)"
   [ "$mode" != auto ] || { [ -n "$mgr" ] && mode=keep || mode=kit; }
   if [ "$mode" = kit ]; then
-    [ -z "$mgr" ] || note "hooks: found $mgr — --hooks kit points core.hooksPath at .githooks, so its hooks stop running (use --hooks keep to chain instead)"
-    git config core.hooksPath .githooks
+    [ -z "$mgr" ] || note "hooks: found $mgr — --hooks kit points core.hooksPath at .agent/githooks, so its hooks stop running (use --hooks keep to chain instead)"
+    git config core.hooksPath .agent/githooks
   elif [ "$mgr" = husky ]; then wire_husky
   else
     say "hooks: keeping your ${mgr:-own} hook setup — the kit's checks are chained through .agent/scripts/kit-hook"
@@ -1179,7 +1298,7 @@ pick_interactive() {
 
 # ---------------------------------------------------------------- commands
 cmd_init() {
-  TARGET=""; PROJECT_NAME=""; LANG_DOCS=vi; YES=0; DEPS=ask; SETUP=ask; TOOLS=ask; GITSETUP=1; HOOKS=auto; PROVIDER=auto; FLOW=auto
+  TARGET=""; PROJECT_NAME=""; LANG_DOCS=vi; YES=0; DEPS=ask; SETUP=ask; TOOLS=ask; GITSETUP=1; HOOKS=auto; PROVIDER=auto; FLOW=auto; HARNESSES=claude
   local stack_flag="" fw_flag="" mode=auto; MODS_FLAG=""; SERVICES_FLAG=""; PRESET=app
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -1201,6 +1320,7 @@ cmd_init() {
       --provider) PROVIDER="${2:-}"; case "$PROVIDER" in github|gitlab|none|auto) ;; *) die "--provider takes github, gitlab, none or auto" ;; esac; shift 2 ;;
       --flow) FLOW="${2:-}"; case "$FLOW" in gitflow|trunk|auto) ;; *) die "--flow takes gitflow, trunk or auto" ;; esac; shift 2 ;;
       --hooks) HOOKS="${2:-}"; case "$HOOKS" in auto|kit|keep) ;; *) die "--hooks takes auto, kit or keep" ;; esac; shift 2 ;;
+      --harness) HARNESSES="$(printf '%s' "${2:-}" | tr -d ' \r')"; shift 2 ;;
       --mode) mode="${2:-}"; case "$mode" in auto|new|existing) ;; *) die "--mode takes auto, new or existing" ;; esac; shift 2 ;;
       -h|--help) usage ;;
       -*) die "unknown option $1" ;;
@@ -1258,7 +1378,7 @@ cmd_init() {
   wire_harnesses
   render_playbooks
   insert_ci_setup
-  chmod +x "$TARGET"/.agent/scripts/* "$TARGET"/.agent/hooks/*.sh "$TARGET"/.githooks/* 2>/dev/null || true
+  chmod +x "$TARGET"/.agent/scripts/* "$TARGET"/.agent/hooks/*.sh "$TARGET"/.agent/githooks/* "$TARGET"/.agent/plugins/*/*.sh "$TARGET"/.githooks/* 2>/dev/null || true
   write_manifest
   [ $GITSETUP -eq 1 ] && git_setup
   run_tools
@@ -1303,7 +1423,11 @@ report() {
     printf '  4. Commit: git add -A && git commit -m "chore: add agent-kit" → %s into %s\n' "$pr" "$db" >&2
   else
     printf '  1. cd %s — commit: git add -A && git commit -m "chore: add agent-kit"\n' "$TARGET" >&2
-    printf '  2. Open your agent and say: "run kit-ba, then kit-sa, then kit-plan"\n' >&2
+    if has_module ba && has_module sa; then
+      printf '  2. Open your agent and say: "run kit-ba, then kit-sa, then kit-plan"\n' >&2
+    else
+      printf '  2. Open your agent and say: "run kit-plan" (or fill .agent/context/PROJECT.md, then .agent/scripts/kit-task new)\n' >&2
+    fi
   fi
   [ "$PROVIDER" = none ] || printf '  %s. On %s: protect %s (require a %s + the CI checks).\n' "$( [ $EXISTING -eq 1 ] && echo 5 || echo 3)" \
     "$( [ "$PROVIDER" = gitlab ] && echo GitLab || echo GitHub)" "$protect" "$pr" >&2
@@ -1332,6 +1456,7 @@ cmd_add() {
   for m in $add; do [ -d "$MODULES/$m" ] || die "unknown module '$m'"; case " $old " in *" $m "*) note "module $m already installed — refreshing files";; esac; new="$new $m"; done
   MODS="$(echo $old $new | tr ' ' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ' ' | sed 's/ $//')"
   SERVICES="${SERVICES_ADD:-$(yget "$TARGET/.agent/kit.lock" services)}"
+  HARNESSES="${HARNESSES:-$(yget "$TARGET/.agent/kit.lock" harnesses)}"; HARNESSES="$(printf '%s' "${HARNESSES:-claude}" | tr -d ' \r')"
   case " $new " in *" devops "*) [ -z "$SERVICES" ] && [ $INTERACTIVE -eq 1 ] && {
       local opts=() o; for o in $(all_services); do opts+=("$(lbl "$o" "$(svc_meta "$o" title)")"); done
       SERVICES="$(ui_many "Docker services for local dev" "postgres" "${opts[@]}")"; } ;; esac
@@ -1344,8 +1469,21 @@ cmd_add() {
   grep -q '^modules:' "$cfg" || echo "modules: $MODS" >> "$cfg"
   apply_project_add
   LANG_DOCS="$(yget "$cfg" docs_language)"; render_module_placeholders
+  local agents_untouched=0
+  [ -f "$TARGET/AGENTS.md" ] && [ "$(manifest_hash AGENTS.md)" = "$(sha "$TARGET/AGENTS.md")" ] && agents_untouched=1
   wire_harnesses
   render_playbooks
+  [ $agents_untouched -eq 1 ] && record AGENTS.md
+  chmod +x "$TARGET"/.agent/scripts/* "$TARGET"/.agent/hooks/*.sh "$TARGET"/.agent/githooks/* "$TARGET"/.agent/plugins/*/*.sh "$TARGET"/.githooks/* 2>/dev/null || true
+  if [ -f "$TARGET/.agent/kit.manifest" ] && [ -n "$RECORDED" ]; then
+    local mf="$TARGET/.agent/kit.manifest" rel
+    { grep '^#' "$mf" || true
+      { grep -v '^#' "$mf" || true
+        printf '%s\n' "$RECORDED" | awk 'NF && !seen[$0]++' | while IFS= read -r rel; do
+          [ -f "$TARGET/$rel" ] && printf '%s  %s\n' "$(sha "$TARGET/$rel")" "$rel"
+        done; } | awk 'NF {a[$2]=$0} END {for (k in a) print a[k]}' | sort -k2 -u
+    } > "$mf.tmp" && mv "$mf.tmp" "$mf"
+  fi
   [ -f "$TARGET/.agent/kit.lock" ] && { sed -i.bak "s#^modules:.*#modules: $MODS#; s#^services:.*#services: $SERVICES#" "$TARGET/.agent/kit.lock"; rm -f "$TARGET/.agent/kit.lock.bak"; }
   local keep="$MODS"; MODS="$new"; [ "$SETUP" != no ] && run_module_setup; MODS="$keep"
   say "added:$new — $CREATED file(s) created"
@@ -1369,6 +1507,164 @@ cmd_list() {
   for sv in $(all_services); do printf '  %-14s %s\n' "$sv" "$(svc_meta "$sv" title)"; done
 }
 
+migrate_file() { # migrate_file <old_abs> <new_abs> <label>
+  local src="$1" dst="$2" lbl="$3"
+  [ -f "$src" ] || return 0
+  mkdir -p "$(dirname "$dst")"
+  if [ ! -f "$dst" ]; then
+    mv "$src" "$dst"
+    say "migrated: $lbl"
+  elif cmp -s "$src" "$dst"; then
+    rm -f "$src"
+  else
+    mv "$src" "$dst.bak-kit"
+    note "migrated: $lbl differed from existing file — kept old copy at ${dst#"$TARGET"/}.bak-kit"
+  fi
+}
+
+migrate_root_layout() { # migrate pre-0.17 root layout (clean root: everything under .agent/, .claude/)
+  local f d n mh claude_untouched=0 har="${HARNESSES:-claude}"
+
+  # 0. Check whether root CLAUDE.md is untouched BEFORE rewriting manifest
+  if [ -f "$TARGET/CLAUDE.md" ] && [ ! -f "$TARGET/.claude/CLAUDE.md" ]; then
+    mh="$(manifest_hash "CLAUDE.md")"
+    [ -n "$mh" ] && [ "$mh" = "$(sha "$TARGET/CLAUDE.md")" ] && claude_untouched=1
+  fi
+
+  # 1. Update manifest paths if migrating from pre-0.17
+  if [ -f "$TARGET/.agent/kit.manifest" ]; then
+    sed -i.bak \
+      -e 's# \.githooks/# \.agent/githooks/#g' \
+      -e 's# \.agents/skills/# \.agent/skills/#g' \
+      -e 's# CLAUDE\.md$# \.claude/CLAUDE\.md#g' \
+      -e 's# GLOSSARY\.md$# docs/GLOSSARY\.md#g' \
+      -e 's# \.jscpd\.json$# \.agent/config/jscpd.json#g' \
+      -e 's# \.hadolint\.yaml$# \.agent/config/hadolint.yaml#g' \
+      -e 's# \.spectral\.yaml$# \.agent/config/spectral.yaml#g' \
+      -e 's# docs/agents/# \.agent/context/agents/#g' \
+      "$TARGET/.agent/kit.manifest" && rm -f "$TARGET/.agent/kit.manifest.bak"
+  fi
+
+  # 2. Move .githooks to .agent/githooks
+  if [ -d "$TARGET/.githooks" ] && [ ! -d "$TARGET/.agent/githooks" ]; then
+    mkdir -p "$TARGET/.agent"
+    mv "$TARGET/.githooks" "$TARGET/.agent/githooks"
+    say "migrated: .githooks/ → .agent/githooks/"
+  elif [ -d "$TARGET/.githooks" ] && [ -d "$TARGET/.agent/githooks" ]; then
+    for f in "$TARGET/.githooks"/*; do
+      [ -f "$f" ] || continue
+      migrate_file "$f" "$TARGET/.agent/githooks/$(basename "$f")" ".githooks/$(basename "$f") → .agent/githooks/"
+    done
+    rmdir "$TARGET/.githooks" 2>/dev/null || true
+  fi
+  local hp; hp="$(git -C "$TARGET" config core.hooksPath 2>/dev/null || true)"
+  if [ "$hp" = ".githooks" ]; then
+    git -C "$TARGET" config core.hooksPath .agent/githooks
+    say "updated: git config core.hooksPath .agent/githooks"
+  fi
+
+  # 3. Move or merge .agents/skills into .agent/skills
+  if [ -d "$TARGET/.agents/skills" ] && [ ! -L "$TARGET/.agents/skills" ]; then
+    if [ ! -d "$TARGET/.agent/skills" ]; then
+      mkdir -p "$TARGET/.agent"
+      mv "$TARGET/.agents/skills" "$TARGET/.agent/skills"
+      say "migrated: .agents/skills/ → .agent/skills/"
+    else
+      for d in "$TARGET"/.agents/skills/*; do
+        [ -e "$d" ] || continue
+        n="$(basename "$d")"
+        if [ ! -e "$TARGET/.agent/skills/$n" ]; then
+          mv "$d" "$TARGET/.agent/skills/$n"
+        elif [ -d "$d" ] && [ -d "$TARGET/.agent/skills/$n" ] && diff -rq "$d" "$TARGET/.agent/skills/$n" >/dev/null 2>&1; then
+          rm -rf "$d"
+        else
+          mv "$d" "$TARGET/.agent/skills/$n.bak-kit"
+          note "migrated: .agents/skills/$n differed — kept old copy at .agent/skills/$n.bak-kit"
+        fi
+      done
+      rmdir "$TARGET/.agents/skills" 2>/dev/null || true
+    fi
+    rmdir "$TARGET/.agents" 2>/dev/null || true
+  fi
+
+  # 3b. Remove untouched kit-generated .agents/rules/stack-*.md (and stale .agents/skills link) when antigravity/codex is not enabled
+  if [ "$har" != "all" ] && [[ ",$har," != *",antigravity,"* ]] && [ -d "$TARGET/.agents/rules" ]; then
+    for f in "$TARGET"/.agents/rules/stack-*.md; do
+      [ -f "$f" ] || continue
+      local rel_r="${f#"$TARGET"/}"
+      mh="$(manifest_hash "$rel_r")"
+      if [ -n "$mh" ] && [ "$mh" = "$(sha "$f")" ]; then
+        rm -f "$f"
+        if [ -f "$TARGET/.agent/kit.manifest" ]; then
+          grep -v " $rel_r\$" "$TARGET/.agent/kit.manifest" > "$TARGET/.agent/kit.manifest.tmp" && mv "$TARGET/.agent/kit.manifest.tmp" "$TARGET/.agent/kit.manifest"
+        fi
+      fi
+    done
+    rmdir "$TARGET/.agents/rules" 2>/dev/null || true
+  fi
+  if [ "$har" != "all" ] && [[ ",$har," != *",codex,"* ]] && [[ ",$har," != *",antigravity,"* ]] && [ -L "$TARGET/.agents/skills" ]; then
+    case "$(readlink "$TARGET/.agents/skills" 2>/dev/null || true)" in
+      *".agent/skills"*) rm -f "$TARGET/.agents/skills" ;;
+    esac
+  fi
+  rmdir "$TARGET/.agents" 2>/dev/null || true
+
+  # 4. Move CLAUDE.md to .claude/CLAUDE.md (avoid false .kit-new conflict when unmodified)
+  if [ -f "$TARGET/CLAUDE.md" ]; then
+    mkdir -p "$TARGET/.claude"
+    if [ ! -f "$TARGET/.claude/CLAUDE.md" ]; then
+      if [ $claude_untouched -eq 1 ]; then
+        rm -f "$TARGET/CLAUDE.md"
+        cp "$CORE/.claude/CLAUDE.md" "$TARGET/.claude/CLAUDE.md"
+        if [ -f "$TARGET/.agent/kit.manifest" ]; then
+          local csha; csha="$(sha "$CORE/.claude/CLAUDE.md")"
+          sed -i.bak "s#^[0-9a-f]*  \.claude/CLAUDE\.md\$#${csha}  .claude/CLAUDE.md#" "$TARGET/.agent/kit.manifest" && rm -f "$TARGET/.agent/kit.manifest.bak"
+        fi
+        say "migrated: CLAUDE.md → .claude/CLAUDE.md"
+      else
+        mv "$TARGET/CLAUDE.md" "$TARGET/.claude/CLAUDE.md"
+        sed -i.bak 's#^@AGENTS\.md#@../AGENTS.md#' "$TARGET/.claude/CLAUDE.md" && rm -f "$TARGET/.claude/CLAUDE.md.bak"
+        say "migrated: CLAUDE.md → .claude/CLAUDE.md"
+      fi
+    elif cmp -s <(sed 's#^@AGENTS\.md#@../AGENTS.md#' "$TARGET/CLAUDE.md") <(sed 's#^@AGENTS\.md#@../AGENTS.md#' "$TARGET/.claude/CLAUDE.md"); then
+      rm -f "$TARGET/CLAUDE.md"
+    else
+      mv "$TARGET/CLAUDE.md" "$TARGET/.claude/CLAUDE.md.bak-kit"
+      note "migrated: CLAUDE.md differed from .claude/CLAUDE.md — kept old copy at .claude/CLAUDE.md.bak-kit"
+    fi
+  fi
+
+  # 5. Move GLOSSARY.md to docs/GLOSSARY.md
+  migrate_file "$TARGET/GLOSSARY.md" "$TARGET/docs/GLOSSARY.md" "GLOSSARY.md → docs/GLOSSARY.md"
+
+  # 6. Move config files to .agent/config/
+  mkdir -p "$TARGET/.agent/config"
+  migrate_file "$TARGET/.jscpd.json" "$TARGET/.agent/config/jscpd.json" ".jscpd.json → .agent/config/jscpd.json"
+  migrate_file "$TARGET/.hadolint.yaml" "$TARGET/.agent/config/hadolint.yaml" ".hadolint.yaml → .agent/config/hadolint.yaml"
+  migrate_file "$TARGET/.spectral.yaml" "$TARGET/.agent/config/spectral.yaml" ".spectral.yaml → .agent/config/spectral.yaml"
+
+  # 7. Move internal docs/agents/ to .agent/context/agents/
+  if [ -d "$TARGET/docs/agents" ]; then
+    mkdir -p "$TARGET/.agent/context/agents"
+    for f in domain.md issue-tracker.md; do
+      migrate_file "$TARGET/docs/agents/$f" "$TARGET/.agent/context/agents/$f" "docs/agents/$f → .agent/context/agents/$f"
+    done
+    rmdir "$TARGET/docs/agents" 2>/dev/null || true
+  fi
+
+  # 8. Update broken symlinks in .claude/skills
+  if [ -d "$TARGET/.claude/skills" ]; then
+    for f in "$TARGET/.claude/skills"/*; do
+      [ -L "$f" ] || continue
+      local target; target="$(readlink "$f" 2>/dev/null || true)"
+      if [[ "$target" == *"../../.agents/skills/"* ]]; then
+        rm -f "$f"
+        ln -s "../../.agent/skills/$(basename "$f")" "$f"
+      fi
+    done
+  fi
+}
+
 cmd_upgrade() {
   TARGET="."; local dirty_ok=0 mode="" mode_flag=0
   while [ $# -gt 0 ]; do case "$1" in
@@ -1389,20 +1685,38 @@ cmd_upgrade() {
   fi
   EXISTING=0; [ "$mode" = existing ] && { EXISTING=1; repo_snapshot; }
   say "upgrading $TARGET: kit $from → $VERSION · mode: $mode · modules: $MODS"
+  local HARNESSES; HARNESSES="$(yget "$lock" harnesses | tr -d ' \r')"; HARNESSES="${HARNESSES:-claude}"
+  migrate_root_layout
   local gi_before=""; [ -f "$TARGET/.gitignore" ] && { gi_before="$(mktemp)"; cp "$TARGET/.gitignore" "$gi_before"; }
   resolve_provider
   install_core
   local i; for i in "${!C_PATH[@]}"; do install_component "$i"; done
+  if [ -d "$TARGET/.agent/plugins" ]; then
+    local pd pm
+    for pd in "$TARGET"/.agent/plugins/*/; do
+      [ -d "$pd" ] || continue; pm="$(basename "$pd")"
+      [ -d "$MODULES/$pm" ] || continue
+      in_list "$pm" "$MODS" || rm -rf "$pd"
+    done
+  fi
   for m in $MODS; do install_module_files "$m"; done
   build_commands; reconcile_cmds "$mode_flag"; sync_project_keys; apply_project_add; render_module_placeholders
+  # Update untouched pre-0.17 cmd_dup / cmd_api paths when configs moved to .agent/config/
+  if [ "$(cmd_of "$cfg" cmd_dup | tr -d '\r')" = 'npx -y jscpd@4.0.5 --config .jscpd.json .' ]; then
+    set_cmd "$cfg" cmd_dup "npx -y jscpd@4.0.5 --config .agent/config/jscpd.json ."
+  fi
+  if [ "$(cmd_of "$cfg" cmd_api | tr -d '\r')" = 'npx -y @stoplight/spectral-cli@6.14.2 lint docs/api/openapi.yaml --fail-severity warn' ]; then
+    set_cmd "$cfg" cmd_api "npx -y @stoplight/spectral-cli@6.14.2 lint docs/api/openapi.yaml --ruleset .agent/config/spectral.yaml --fail-severity warn"
+  fi
   NOTES="$(printf '%s\n' "$NOTES" | grep -F -- '- CI' || true)"   # on upgrade: the CI include hint and the gaps, not every install note
   [ $EXISTING -eq 0 ] || note_existing_gaps
   wire_harnesses; render_playbooks; insert_ci_setup
-  chmod +x "$TARGET"/.agent/scripts/* "$TARGET"/.agent/hooks/*.sh "$TARGET"/.githooks/* 2>/dev/null || true
+  chmod +x "$TARGET"/.agent/scripts/* "$TARGET"/.agent/hooks/*.sh "$TARGET"/.agent/githooks/* "$TARGET"/.agent/plugins/*/*.sh "$TARGET"/.githooks/* 2>/dev/null || true
   write_manifest
   if [ -n "$gi_before" ]; then cmp -s "$gi_before" "$TARGET/.gitignore" || note ".gitignore: the kit block was updated (only lines your own rules do not already cover)"; rm -f "$gi_before"; fi
   sed -i.bak "s/^kit_version:.*/kit_version: $VERSION/" "$lock" && rm -f "$lock.bak"
   if grep -q '^mode:' "$lock"; then sed -i.bak "s/^mode:.*/mode: $mode/" "$lock" && rm -f "$lock.bak"; else echo "mode: $mode" >> "$lock"; fi
+  if grep -q '^harnesses:' "$lock"; then sed -i.bak "s/^harnesses:.*/harnesses: $HARNESSES/" "$lock" && rm -f "$lock.bak"; else echo "harnesses: $HARNESSES" >> "$lock"; fi
   sed -i.bak "s/^kit_version:.*/kit_version: $VERSION/" "$cfg" && rm -f "$cfg.bak"
   local changed; changed="$(git -C "$TARGET" status --porcelain 2>/dev/null | grep -v '\.kit-new$' | grep -c . || true)"
   say "upgrade done: ${changed:-?} file(s) changed (git status) · $(echo $CONFLICTS | wc -w | tr -d ' ') kept with your edits (kit version in *.kit-new)"

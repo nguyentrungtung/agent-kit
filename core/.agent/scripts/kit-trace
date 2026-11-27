@@ -2,7 +2,7 @@
 # kit-trace — traceability & consistency check of the planning artefacts (the "analyze" step). Offline, bash + perl.
 #   kit-trace [--strict]               check everything; exit 1 on errors (--strict: on warnings too)
 #   kit-trace assumptions [path…]      list unconfirmed `ASSUMPTION:` lines; exit 1 if any
-#                                      (default paths: docs/, openspec/specs, openspec/changes, active tasks)
+#                                      (default paths: docs/, active tasks, and plugin trace-paths)
 # Errors   (E)  an id is referenced but defined nowhere: UC-NN, US-NN, BR-NN, FR-NN, NFR-NN, ADR-NNNN  (= invented facts)
 # Warnings (W)  story without use case / acceptance criteria / negative AC · use case without story · FR without story
 #               · module drift between .agent/rules/project/modules.md and folders on disk · unconfirmed ASSUMPTION: lines
@@ -60,8 +60,16 @@ sub emit { my ($lvl, $where, $msg) = @_; push @out, "$lvl\t$where\t$msg" }
 my @scan;
 if (@ARGV) { for my $p (@ARGV) { if (-d $p) { push @scan, md_under($p) } elsif (-f $p) { push @scan, rel($p) } } }
 else {
-  @scan = (md_under('docs', qr{^docs/(ba/_templates|daily)/}), md_under('openspec/specs'),
-           md_under('openspec/changes', qr{/archive/}), sort map { rel($_) } glob('.agent/tasks/TASK-*.md'));
+  @scan = (md_under('docs', qr{^docs/(ba/_templates|daily)/}),
+           sort map { rel($_) } glob('.agent/tasks/TASK-*.md'));
+  for my $tp (sort glob('.agent/plugins/*/trace-paths')) {
+    for my $line (split /\n/, rd($tp)) {
+      next if $line =~ /^\s*(#|$)/;
+      my ($dir, $skip) = split /\t/, $line, 2;
+      next unless defined $dir && $dir ne '';
+      push @scan, (defined $skip && $skip ne '' ? md_under($dir, qr{$skip}) : md_under($dir));
+    }
+  }
 }
 
 # ---- unconfirmed assumptions ----

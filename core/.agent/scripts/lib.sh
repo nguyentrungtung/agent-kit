@@ -26,14 +26,62 @@ cfg() {
 
 main_branch()    { cfg main_branch main; }
 develop_branch() { cfg develop_branch develop; }
-protected_branches() { printf '%s %s %s\n' "$(main_branch)" "$(develop_branch)" "$(cfg protected_extra 'master release/* hotfix/*')"; }
+staging_branch() { cfg staging_branch ""; }   # optional long-lived pre-production branch; empty = release/* is what staging runs
+protected_branches() { printf '%s %s %s %s\n' "$(main_branch)" "$(develop_branch)" "$(staging_branch)" "$(cfg protected_extra 'master release/* hotfix/*')"; }
+
+# ---- gitflow (community git-flow + Conventional Branch): one definition for hooks, CI and kit-task
+#   main/master  production only — receives release/* and hotfix/* (tagged vX.Y.Z)      → PRODUCTION
+#   develop      integration — every feature/bugfix/… merges here, deployed for UAT      → DEV / UAT
+#   staging      optional; else release/* is the release candidate                      → STAGING
+#   feature/ feat/ bugfix/ fix/ refactor/ chore/ docs/ test/ ci/ perf/ build/ style/ revert/  from develop → develop
+#   release/vX.Y.Z  from develop → main (+ back-merge to develop) · hotfix/…  from main → main (+ back-merge to develop) · support/…  old majors
+branch_types() { cfg branch_types 'feature feat bugfix fix hotfix release support refactor chore docs test ci perf build style revert'; }
+# branches created by tools (dependency bots, GitHub's revert button, merge queues) follow their own naming: never checked
+branch_exempt() { printf '%s' "$1" | grep -Eq "$(cfg branch_exempt_regex '^(dependabot/|renovate/|snyk-|revert-[0-9]+-|gh-readonly-queue/)')"; }
+gitflow_mode() { cfg gitflow_enforce block; }   # block = CI fails · warn = CI only warns (kit upgrade writes warn for projects from < 0.14)
+branch_name_problem() { # branch_name_problem <branch> — prints why the name breaks the convention (nothing = fine)
+  local b="$1" t rest max ver='v?[0-9]+([.][0-9]+){1,2}'
+  case " $(main_branch) $(develop_branch) $(staging_branch) main master develop " in *" $b "*) return 0 ;; esac
+  if branch_exempt "$b"; then return 0; fi
+  t="${b%%/*}"; rest="${b#*/}"
+  if [ "$t" = "$b" ] || [ -z "$rest" ]; then echo "no '<type>/' prefix — use <type>/TASK-NNN-<short-description>, type one of: $(branch_types)"; return 0; fi
+  case " $(branch_types) " in *" $t "*) ;; *) echo "type '$t' is not one of: $(branch_types)"; return 0 ;; esac
+  max="$(cfg branch_max_len 60)"
+  if [ "${#b}" -gt "$max" ]; then echo "longer than $max characters"; return 0; fi
+  # description: lowercase kebab-case, led by the kit task id (TASK-NNN) on code branches, may end in a version (back-merge-v1.2.0);
+  # release/hotfix/support may be just a version (release/v1.5.0)
+  case "$t" in release|hotfix|support) if printf '%s' "$rest" | grep -Eq "^${ver}(-[a-z0-9.]+)?\$"; then return 0; fi ;; esac
+  printf '%s' "$rest" | grep -Eq "^([A-Z][A-Z0-9]*-[0-9]+(-[a-z0-9]+)*|[a-z0-9]+(-[a-z0-9]+)*)(-${ver})?\$" \
+    || echo "after '$t/' use TASK-NNN-<lowercase-kebab-case> (a-z 0-9 -); release/hotfix may be a version (v1.4.0)"
+  return 0
+}
+merge_target_problem() { # merge_target_problem <source branch> <target branch> — prints why gitflow forbids that merge (nothing = fine)
+  local h="$1" b="$2" mb db sb
+  mb="$(main_branch)"; db="$(develop_branch)"; sb="$(staging_branch)"
+  [ "$mb" != "$db" ] || return 0   # trunk-based: everything goes to main
+  if branch_exempt "$h"; then return 0; fi
+  if [ "$b" = "$mb" ] || [ "$b" = master ]; then
+    case "$h" in release/*|hotfix/*) return 0 ;; esac
+    if [ -n "$sb" ] && [ "$h" = "$sb" ]; then return 0; fi
+    if [ "$h" = "$db" ]; then echo "$db does not go straight to $b — cut a release from it (kit-release prepare → release/vX.Y.Z), test it on staging, then PR the release into $b"; return 0; fi
+    echo "only release/* or hotfix/*$( [ -n "$sb" ] && echo " (or $sb)") merge into $b (go-live) — open '$h' into $db"; return 0
+  fi
+  if [ -n "$sb" ] && [ "$b" = "$sb" ]; then
+    case "$h" in "$db"|release/*|hotfix/*) return 0 ;; esac
+    echo "only $db, release/* or hotfix/* go to $sb — open '$h' into $db"
+  fi
+  return 0
+}
 
 is_protected() { # is_protected <branch>
-  local b="$1" p
-  for p in $(protected_branches); do
+  local b="$1" p list
+  list="$(protected_branches)"
+  set -f   # release/* must stay a pattern, not be expanded against folders of the repo
+  for p in $list; do
     # shellcheck disable=SC2053
-    [[ "$b" == $p ]] && return 0
+    if [[ "$b" == $p ]]; then set +f; return 0; fi
   done
+  set +f
   return 1
 }
 
@@ -123,16 +171,14 @@ issue_set() { # issue_set <TASK-ID> <n>
   echo "$1=$2" >> "$ISSUE_MAP.tmp"; sort -o "$ISSUE_MAP" "$ISSUE_MAP.tmp"; rm -f "$ISSUE_MAP.tmp"
 }
 
-# ---- OpenSpec links ----
-has_openspec() { [ -d "$KIT_ROOT/openspec" ] && [ -x "$KIT_DIR/scripts/kit-openspec" ]; }
-change_dir() { printf '%s/openspec/changes/%s' "$KIT_ROOT" "$1"; }
-tasks_of_change() { # tasks_of_change <change> → repo-relative task paths linked to it
-  local p; for p in $(task_names_all); do [ "$(fmv "$(task_view "$p")" change)" = "$1" ] && echo "$p"; done; return 0
-}
-
 # ascii_slug "<text>" [maxlen] → lowercase kebab-case ASCII; strips Vietnamese/Latin diacritics (đ → d)
 ascii_slug() {
   perl -CSA -MUnicode::Normalize -e '
     my $s = NFD($ARGV[0]); $s =~ s/\pM//g; $s =~ tr/\x{111}\x{110}/dD/; $s = lc $s;
-    $s =~ s/[^a-z0-9]+/-/g; $s =~ s/^-+|-+$//g; print $s' "$1" | cut -c1-"${2:-50}" | sed -E 's/-+$//'
+    $s =~ s/[^a-z0-9]+/-/g; $s =~ s/^-+|-+$//g; print $s' -- "$1" | cut -c1-"${2:-50}" | sed -E 's/-+$//'
+}
+
+# norm_tags_re "<raw tags>" → POSIX ERE alternation (e.g. 'auth|api') safe for grep -iE; empty if none
+norm_tags_re() {
+  printf '%s' "${1:-}" | tr -d '\r\t[]"'\'' ' | tr ',' '|' | sed -E 's/\|+/|/g; s/^\|//; s/\|$//; s/[.^$*+?()\\{}]/\\&/g'
 }

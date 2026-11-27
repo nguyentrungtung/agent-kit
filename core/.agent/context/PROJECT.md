@@ -1,5 +1,5 @@
 # Project charter
-<!-- Filled by kit-onboard (existing code) or kit-ba (new idea). Remove every TODO before coding starts.
+<!-- Filled by kit-onboard (existing code) or active planning/BA plugins (new idea). Remove every TODO before coding starts.
      This file stops the agent from "going the wrong way": every task must trace back to a goal here. -->
 
 ## 1. One-line description
@@ -31,4 +31,4 @@ TODO
 - Stage: idea | MVP | production | legacy-maintenance
 - Main risks: TODO
 
-## 8. Glossary → `GLOSSARY.md` · Architecture → `ARCHITECTURE.md` · Requirements → `docs/ba/`
+## 8. Glossary → `docs/GLOSSARY.md` · Architecture → `ARCHITECTURE.md` · Requirements → `docs/ba/`

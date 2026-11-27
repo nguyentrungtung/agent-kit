@@ -6,6 +6,8 @@
 - [ ] **Security**: `kit-sec-scan dast <staging-url>` reviewed; pentest done for major releases / new attack surface (auth, payments, uploads, public APIs)
 - [ ] DB migrations tested forward + backward on an anonymised copy; expand/contract steps ordered
 - [ ] Rollback plan written (previous image tag, migration down/forward-fix, feature flags off)
+- [ ] Rollback triggers agreed **before** the deploy: signal, how to read it, threshold, who decides
+- [ ] Data pipelines, stored tables, serving or metric logic changed (module data): also walk `.agent/checklists/data-deploy.md`
 - [ ] Merge to main → `kit-release tag` (annotated vX.Y.Z) → production deploy approved in the GitHub environment
 - [ ] Merge main back into develop; announce deprecations/breaking changes to API/data consumers
 - [ ] Post-release: watch SLO dashboards 30–60 min; daily report entry

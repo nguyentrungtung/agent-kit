@@ -14,6 +14,21 @@ updated: {{DATE}}
 | Dashboards / logs | |
 | Escalation | |
 
+## Prerequisites and access
+<!-- Check these before step 1. Names of roles, tools and secrets only — never secret values. -->
+| Need | Detail |
+|---|---|
+| Access / role (and who grants it) | |
+| Where to run (host, directory, branch or tag) | |
+| Tools and config names | |
+| Restore point or backup (needed when a step changes state) | |
+
+## Stop and roll back when
+<!-- Fill in BEFORE starting, not during the problem. A runbook that changes nothing: write `n/a — read-only`. -->
+| Signal | How to check (command, query, dashboard) | Threshold | Who decides |
+|---|---|---|---|
+| | | | |
+
 ## Diagnose
 1.
 
@@ -24,6 +39,9 @@ updated: {{DATE}}
 1.
 
 ## Rollback
+<!-- Point of no return: the first step after which only restore or forward-fix works. Write `none` if there is none. -->
+**Point of no return** (step · who approves passing it):
+
 1.
 
 ## After the incident

@@ -1,0 +1,8 @@
+{
+  "allow": [
+    "Bash(.agent/scripts/kit-sec-scan sbom)"
+  ],
+  "ask": [
+    "Bash(.agent/scripts/kit-sec-scan dast:*)"
+  ]
+}

@@ -15,6 +15,8 @@ cmd_test: pytest -q
 cmd_coverage: pytest -q --cov --cov-fail-under=${KIT_COVERAGE_MIN}
 cmd_build:
 cmd_audit: pip-audit
+check_file_ext: py
+check_file: ruff format --check --force-exclude -q {file} && ruff check --force-exclude -q {file}
 post_note: for layer rules copy .agent/stack/python/snippets/importlinter.ini to .importlinter, set root_package, then set cmd_arch: lint-imports.
 
 ci_image: python:3.12

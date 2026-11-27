@@ -16,6 +16,8 @@ cmd_test: ./gradlew --no-daemon test
 cmd_coverage: ./gradlew --no-daemon test jacocoTestCoverageVerification -Pcoverage.min=$(awk "BEGIN{print ${KIT_COVERAGE_MIN}/100}")
 cmd_build: ./gradlew --no-daemon build -x test
 cmd_audit: ./gradlew --no-daemon dependencyCheckAnalyze
+check_file_ext:
+check_file:
 post_note: merge .agent/stack/java-gradle/snippets/build.gradle.kts into your build script and copy ArchitectureTest.java into src/test/java/<base package>/.
 
 ci_image: gradle:8-jdk21

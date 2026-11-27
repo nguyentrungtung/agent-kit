@@ -118,7 +118,7 @@ Sau khi có đầu vào từ BA, Solution Architect (role `sa`) sẽ giải quy�
   → chấm điểm các phương án (modular monolith / layered / microservices…) rồi ghi ADR. Microservices chỉ khi đủ: nhiều team + ranh giới đã ổn định + cần deploy/scale độc lập + có DevOps.
 * **Tách module** theo bounded context (mỗi module sở hữu dữ liệu riêng, phụ thuộc không vòng) → `.agent/rules/project/modules.md`, được arch test (`kit-run arch`) cưỡng chế.
 * **Cấu trúc thư mục BE + FE** → `docs/architecture/project-structure.md` (module backend ↔ feature frontend 1:1, type API sinh từ `openapi.yaml` bằng `kit-run apigen`).
-* **Pattern & thuật toán cho 3–5 quy tắc khó nhất** (tính giá, xếp lịch, phân bổ, tồn kho đồng thời…) → `SOLUTION.md` §7b, tra cứu ở `.agents/skills/kit-sa/PATTERNS.md`; mỗi pattern phải gắn với một yêu cầu cụ thể.
+* **Pattern & thuật toán cho 3–5 quy tắc khó nhất** (tính giá, xếp lịch, phân bổ, tồn kho đồng thời…) → `SOLUTION.md` §7b, tra cứu ở `.agent/skills/kit-sa/PATTERNS.md`; mỗi pattern phải gắn với một yêu cầu cụ thể.
 * Nếu ứng dụng chỉ chạy trên Web: Chọn **Session Cookie (HttpOnly)** để chống tấn công XSS.
 * Nếu có Mobile App hoặc SPA: Chọn **OAuth2 PKCE + JWT Token** (Access token ngắn hạn + Refresh token xoay vòng).
 * Vẽ **Sơ đồ Sequence (Mermaid)** mô tả cách Client $\leftrightarrow$ API Gateway $\leftrightarrow$ Auth Service $\leftrightarrow$ DB/Redis tương tác với nhau.

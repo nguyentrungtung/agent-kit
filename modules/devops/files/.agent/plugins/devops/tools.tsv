@@ -1,0 +1,4 @@
+docker|docker --version||||module devops (compose, dockerised linters)|0
+hadolint|hadolint --version|hadolint|||module devops (or Docker)|0
+actionlint|actionlint --version|actionlint||go install github.com/rhysd/actionlint/cmd/actionlint@latest|module devops (or Docker)|0
+shellcheck|shellcheck --version|shellcheck|||module devops (or Docker)|0

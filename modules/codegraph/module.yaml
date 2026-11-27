@@ -1,5 +1,5 @@
 title: CodeGraph — code knowledge graph (symbols + call paths) via MCP/CLI; fewer file reads, cheaper sessions
 default: true
 tools_optional: codegraph
-setup_desc: codegraph init (builds .codegraph/ index; MCP is auto-configured by codegraph)
+setup_desc: codegraph init (builds .codegraph/ index and syncs MCP via kit-mcp)
 install_hint: npm install -g @colbymchenry/codegraph

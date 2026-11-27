@@ -37,6 +37,7 @@ ask() {
 }
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-cfg_hook() { sed -n "s/^$1:[[:space:]]*//p" "$PROJECT_DIR/.agent/project.yaml" 2>/dev/null | head -n1 | sed -E 's/(^|[[:space:]]+)#.*$//; s/[[:space:]]+$//'; }
+cfg_hook() { sed -n "s/^$1:[[:space:]]*//p" "$PROJECT_DIR/.agent/project.yaml" 2>/dev/null | head -n1 | sed -E 's/(^|[[:space:]]+)#([[:space:]].*)?$//; s/[[:space:]]+$//'; }   # "# comment" only: a # inside a command stays
 PROTECTED_RE="$(cfg_hook protected_regex)"
 PROTECTED_RE="${PROTECTED_RE:-^(main|master|develop|release/.*|hotfix/.*)$}"
+_stg="$(cfg_hook staging_branch)"; [ -z "$_stg" ] || PROTECTED_RE="(${PROTECTED_RE})|^${_stg}\$"   # same list as the git hooks (lib.sh)
